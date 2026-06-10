@@ -24,9 +24,11 @@ func buildPluginInfo() sdk.PluginInfo {
 			sdk.CapabilityForHostMethod(hostMethodTasksCreate),
 			sdk.CapabilityForHostMethod(hostMethodTasksGet),
 			sdk.CapabilityForHostMethod(hostMethodTasksList),
+			sdk.CapabilityForHostMethod(hostMethodTasksDelete),
 			sdk.CapabilityForHostMethod(hostMethodPlatformsList),
 			sdk.CapabilityForHostMethod(hostMethodModelsList),
 			sdk.CapabilityForHostMethod(hostMethodUsersGet),
+			// 暂停发布：增强 / 反推会触发额外同步 LLM 调用，先不声明 gateway.forward / assets.get_bytes。
 		},
 		FrontendPages: []sdk.FrontendPage{
 			{

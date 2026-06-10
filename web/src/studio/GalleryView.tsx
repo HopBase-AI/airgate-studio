@@ -236,10 +236,37 @@ const taskCardStyles: Record<string, CSSProperties> = {
   },
 };
 
+// 批量聚合卡专用：子任务状态点行
+const batchCardStyles: Record<string, CSSProperties> = {
+  dotRow: {
+    display: 'flex',
+    gap: 5,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    maxWidth: 140,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    border: '1.5px solid transparent',
+    boxSizing: 'border-box',
+    transition: 'background 0.2s',
+  },
+};
+
 function TaskCard({ task }: { task: StudioGenerationTask }) {
   const { t } = useTranslation();
-  const { deleteTask, generate, setSelectedModelId, setImageSize, setImageMode } = useStudio();
+  const { deleteTask, generate, setSelectedModelId, setImageSize, setImageMode, retryBatchFailures } = useStudio();
   const { copied, copy } = useCopyOnClick(task.prompt);
+
+  // 批量任务：渲染聚合卡（子任务进度 + 全部重试）。
+  const isBatch = !!task.subtasks && task.subtasks.length > 0;
+  const subtasks = task.subtasks ?? [];
+  const doneCount = subtasks.filter(s => s.status === 'completed').length;
+  const failedCount = subtasks.filter(s => s.status === 'failed').length;
+  const processingCount = subtasks.filter(s => s.status === 'processing').length;
+  const total = subtasks.length;
 
   const statusLabel = task.status === 'queued'
     ? t('playground.studio_task_queued', { defaultValue: '队列中...' })
@@ -260,6 +287,81 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
     if (!await confirm(t('playground.studio_confirm_delete_task', { defaultValue: '确定要删除这个任务吗？' }))) return;
     deleteTask(task.id);
   };
+
+  // ── 批量聚合卡 ──────────────────────────────────────────────────────────
+  if (isBatch) {
+    const batchProcessing = processingCount > 0;
+    return (
+      <div style={taskCardStyles.card}>
+        {batchProcessing ? (
+          <div style={taskCardStyles.spinner} />
+        ) : failedCount > 0 ? (
+          <div style={taskCardStyles.failedIcon}>!</div>
+        ) : (
+          <div style={{ ...taskCardStyles.failedIcon, border: `2px solid ${cssVar('borderSubtle')}`, color: cssVar('textSecondary') }}>✓</div>
+        )}
+        <div style={taskCardStyles.statusLabel}>
+          {batchProcessing
+            ? t('playground.studio_batch_progress', { defaultValue: '批量生成 {{done}}/{{total}}', done: doneCount, total })
+            : failedCount > 0
+              ? t('playground.studio_batch_partial', { defaultValue: '成功 {{done}} · 失败 {{failed}}', done: doneCount, failed: failedCount })
+              : t('playground.studio_batch_done', { defaultValue: '批量完成 {{total}} 张', total })}
+        </div>
+        {/* 子任务状态点：直观看每张的成功/失败/进行中 */}
+        <div style={batchCardStyles.dotRow}>
+          {subtasks.map(s => (
+            <span
+              key={s.id}
+              style={{
+                ...batchCardStyles.dot,
+                background: s.status === 'completed'
+                  ? cssVar('primary')
+                  : s.status === 'failed'
+                    ? cssVar('danger')
+                    : 'transparent',
+                borderColor: s.status === 'processing' ? cssVar('textTertiary') : 'transparent',
+              }}
+              title={s.status === 'failed' ? (s.error || '失败') : s.status === 'completed' ? '成功' : '生成中'}
+            />
+          ))}
+        </div>
+        {task.prompt && (
+          <div
+            style={{
+              ...taskCardStyles.prompt,
+              cursor: 'pointer',
+              color: copied ? cssVar('primary') : taskCardStyles.prompt.color,
+              transition: 'color 0.2s',
+            }}
+            onClick={copy}
+            title={copied ? '已复制到剪贴板' : '点击复制提示词'}
+          >
+            {copied ? '✓ 已复制' : task.prompt}
+          </div>
+        )}
+        {!batchProcessing && failedCount > 0 && (
+          <div style={taskCardStyles.failedActions}>
+            <button
+              type="button"
+              style={taskCardStyles.retryBtn}
+              className="studio-gallery-action"
+              onClick={() => retryBatchFailures(task.id)}
+            >
+              {t('playground.studio_retry_failed', { defaultValue: '重试失败的 {{count}} 张', count: failedCount })}
+            </button>
+            <button
+              type="button"
+              style={taskCardStyles.deleteBtn}
+              className="studio-gallery-action"
+              onClick={handleDelete}
+            >
+              {t('playground.studio_delete', { defaultValue: '删除' })}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={taskCardStyles.card}>

@@ -2,7 +2,10 @@ module github.com/DouDOU-start/airgate-studio/backend
 
 go 1.25.7
 
-require github.com/DouDOU-start/airgate-sdk v0.2.1
+require (
+	github.com/DouDOU-start/airgate-sdk v0.2.1
+	github.com/lib/pq v1.10.9
+)
 
 require (
 	github.com/fatih/color v1.13.0 // indirect

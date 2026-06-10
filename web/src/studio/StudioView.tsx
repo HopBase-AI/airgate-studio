@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type DragEvent, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cssVar, setTheme, getStoredTheme, type ThemeName } from '@doudou-start/airgate-theme';
-import { PluginBreadcrumbs } from '@doudou-start/airgate-core/plugin-ui';
 import { StudioProvider, useStudio } from './StudioContext';
 import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
+import { SkillBar } from './SkillBar';
+import { ProjectSidebar } from './ProjectSidebar';
+import { api } from '../api';
+import type { SkillConfig } from './skillConfig';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -270,23 +273,6 @@ const INSPIRATIONS: Inspiration[] = [
 // ── InspirationSidebar ─────────────────────────────────────────────────────────
 
 const tpl: Record<string, CSSProperties> = {
-  sidebar: {
-    height: '100%',
-    overflowY: 'auto',
-    overflowX: 'hidden',
-    padding: '12px 14px 24px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8,
-    background: cssVar('bgDeep'),
-  },
-  headerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '4px 4px 2px',
-    gap: 8,
-  },
   collapseBtn: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -303,42 +289,6 @@ const tpl: Record<string, CSSProperties> = {
     transition: cssVar('transition'),
     flexShrink: 0,
   },
-  collapsedStrip: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 12,
-    width: '100%',
-    height: '100%',
-    padding: '4px 0 14px',
-    border: 'none',
-    borderRight: `1px solid ${cssVar('borderSubtle')}`,
-    background: cssVar('bgDeep'),
-    color: cssVar('textSecondary'),
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    transition: cssVar('transition'),
-  },
-  collapsedStripIcon: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 40,
-    minWidth: 40,
-    height: 40,
-    borderRadius: cssVar('radiusSm'),
-    color: cssVar('textSecondary'),
-    transition: cssVar('transition'),
-  },
-  collapsedLabel: {
-    fontSize: 10,
-    fontWeight: 700,
-    letterSpacing: '0.12em',
-    writingMode: 'vertical-rl',
-    textOrientation: 'mixed',
-    fontFamily: cssVar('fontMono'),
-    textTransform: 'uppercase',
-  } as CSSProperties,
   catLabel: {
     fontSize: 10,
     fontWeight: 700,
@@ -365,8 +315,10 @@ const tpl: Record<string, CSSProperties> = {
   } as CSSProperties,
   thumb: {
     width: '100%',
+    height: 110,
     display: 'block',
     objectFit: 'cover',
+    background: cssVar('bgDeep'),
   },
   cardBottom: {
     padding: '5px 8px',
@@ -389,6 +341,29 @@ const tpl: Record<string, CSSProperties> = {
     fontWeight: 600,
     flexShrink: 0,
     cursor: 'pointer',
+  },
+  drawerHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '14px 16px 10px',
+    borderBottom: `1px solid ${cssVar('borderSubtle')}`,
+    flexShrink: 0,
+  },
+  drawerTitle: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: cssVar('text'),
+    letterSpacing: '-0.01em',
+  },
+  drawerBody: {
+    flex: 1,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    padding: '12px 14px 24px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
   },
 };
 
@@ -469,39 +444,14 @@ function FloatingNav() {
   );
 }
 
-function InspirationSidebar({ onSelect, onCollapse }: { onSelect: (prompt: string) => void; onCollapse?: () => void }) {
-  const { t } = useTranslation();
+function InspirationGrid({ onSelect, gridStyle }: { onSelect: (prompt: string) => void; gridStyle?: CSSProperties }) {
   const categories = [...new Set(INSPIRATIONS.map(i => i.category))];
-  const title = t('playground.studio_inspiration_gallery', { defaultValue: '灵感画廊' });
-
   return (
-    <div style={tpl.sidebar} className="studio-gallery">
-      <div style={tpl.headerRow}>
-        <PluginBreadcrumbs
-          pluginName="airgate-studio"
-          items={[
-            { href: '/', labelKey: 'playground.studio_console', labelFallback: '控制台' },
-            { labelKey: 'playground.studio_inspiration_gallery', labelFallback: title },
-          ]}
-        />
-        {onCollapse && (
-          <button
-            type="button"
-            style={tpl.collapseBtn}
-            className="studio-console-link studio-collapse-btn"
-            onClick={onCollapse}
-            title="收起灵感画廊"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-        )}
-      </div>
+    <>
       {categories.map(cat => (
         <div key={cat}>
           <div style={tpl.catLabel}>{cat}</div>
-          <div style={tpl.grid}>
+          <div style={gridStyle ?? tpl.grid}>
             {INSPIRATIONS.filter(i => i.category === cat).map(item => (
               <div
                 key={item.title}
@@ -520,26 +470,30 @@ function InspirationSidebar({ onSelect, onCollapse }: { onSelect: (prompt: strin
           </div>
         </div>
       ))}
-    </div>
+    </>
   );
 }
 
-function CollapsedInspirationStrip({ onExpand }: { onExpand: () => void }) {
+// InspirationDrawer —— 从右侧滑入的灵感抽屉。点击卡片填词后自动关闭。
+function InspirationDrawer({ onSelect, onClose }: { onSelect: (prompt: string) => void; onClose: () => void }) {
+  const { t } = useTranslation();
   return (
-    <button
-      type="button"
-      onClick={onExpand}
-      style={tpl.collapsedStrip}
-      className="studio-collapsed-strip"
-      title="展开灵感画廊"
-    >
-      <span style={tpl.collapsedStripIcon} className="studio-collapse-icon">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M9 18l6-6-6-6" />
-        </svg>
-      </span>
-      <span style={tpl.collapsedLabel}>灵感画廊</span>
-    </button>
+    <>
+      <div className="studio-inspiration-drawer-backdrop" onClick={onClose} />
+      <div className="studio-inspiration-drawer">
+        <div style={tpl.drawerHeader}>
+          <span style={tpl.drawerTitle}>{t('playground.studio_inspiration_gallery', { defaultValue: '灵感画廊' })}</span>
+          <button type="button" style={tpl.collapseBtn} className="studio-console-link" onClick={onClose} title={t('playground.studio_close', { defaultValue: '关闭' })}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18" /><path d="M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div style={tpl.drawerBody} className="studio-gallery">
+          <InspirationGrid onSelect={(p) => { onSelect(p); onClose(); }} />
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -548,7 +502,7 @@ function CollapsedInspirationStrip({ onExpand }: { onExpand: () => void }) {
 const COUNT_OPTIONS = [1, 2, 3, 4];
 const COMPOSER_TEXTAREA_HEIGHT = 112;
 
-function ComposerBar({ promptRef }: { promptRef?: React.MutableRefObject<{ set: (v: string) => void } | null> }) {
+function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.MutableRefObject<{ set: (v: string) => void } | null>; onOpenInspiration?: () => void }) {
   const { t } = useTranslation();
   const {
     setImageMode,
@@ -570,6 +524,8 @@ function ComposerBar({ promptRef }: { promptRef?: React.MutableRefObject<{ set: 
   };
   const [sourceImages, setSourceImages] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [busySkillId, setBusySkillId] = useState<string | null>(null);
+  const [skillError, setSkillError] = useState<string | null>(null);
 
   // mask state (only for single image → inpaint)
   const [selection, setSelection] = useState<NormalizedRect | null>(null);
@@ -601,18 +557,23 @@ function ComposerBar({ promptRef }: { promptRef?: React.MutableRefObject<{ set: 
     if (!trimmed) return;
 
     if (isSingleSource && selection) {
+      // 局部重绘：单图单次，count 不适用
       setImageMode('inpaint');
       void generate(trimmed, { mode: 'inpaint', sourceImage: allSources[0], maskRegion: selection });
+    } else if (count > 1) {
+      // 批量：N 张聚成一个任务组（batch 模式）。带参考图则每张走 img2img，否则 text2img。
+      setImageMode(hasSource ? 'img2img' : 'text2img');
+      void generate(trimmed, {
+        mode: 'batch',
+        count,
+        sourceImages: hasSource ? allSources : undefined,
+      });
     } else if (hasSource) {
       setImageMode('img2img');
-      for (let i = 0; i < count; i++) {
-        void generate(trimmed, { mode: 'img2img', sourceImages: allSources, count: 1 });
-      }
+      void generate(trimmed, { mode: 'img2img', sourceImages: allSources, count: 1 });
     } else {
       setImageMode('text2img');
-      for (let i = 0; i < count; i++) {
-        void generate(trimmed, { mode: 'text2img', count: 1 });
-      }
+      void generate(trimmed, { mode: 'text2img', count: 1 });
     }
     setPrompt('');
   };
@@ -621,6 +582,36 @@ function ComposerBar({ promptRef }: { promptRef?: React.MutableRefObject<{ set: 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  // handleSkillTrigger —— 技能调度核心。当前只开放 generate 类技能。
+  const handleSkillTrigger = async (skill: SkillConfig, preset?: { id: string; label: string; prompt: string }) => {
+    if (busySkillId) return;
+    setSkillError(null);
+
+    // 需要参考图但当前没有：引导上传，而不是禁用按钮（降低操作门槛）。
+    if (skill.needsImage && !hasSource) {
+      fileInputRef.current?.click();
+      setSkillError(t('playground.studio_skill_need_image', { defaultValue: '请先选择一张参考图，再使用该技能' }));
+      return;
+    }
+
+    try {
+      setBusySkillId(skill.id);
+
+      if (skill.kind === 'generate') {
+        // 风格迁移 / 换背景：套预设 prompt，直接 img2img 生成（结果进画廊）
+        const basePrompt = preset?.prompt ?? skill.wrap?.(prompt.trim()) ?? prompt.trim();
+        if (!basePrompt) return;
+        setImageMode('img2img');
+        void generate(basePrompt, { mode: 'img2img', sourceImages: allSources, count: 1 });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '技能执行失败';
+      setSkillError(msg);
+    } finally {
+      setBusySkillId(null);
     }
   };
 
@@ -761,6 +752,10 @@ function ComposerBar({ promptRef }: { promptRef?: React.MutableRefObject<{ set: 
       )}
       <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFileInput} />
 
+      {/* Skills 胶囊行 —— 所有技能结果都汇聚回输入框/生成管线 */}
+      <SkillBar hasImage={hasSource} busySkillId={busySkillId} onTrigger={handleSkillTrigger} />
+      {skillError && <div style={c.skillError}>{skillError}</div>}
+
       {/* Prompt textarea */}
       <textarea
         ref={textareaRef}
@@ -785,7 +780,7 @@ function ComposerBar({ promptRef }: { promptRef?: React.MutableRefObject<{ set: 
             <span style={c.modelDot} />
             {currentModel.name}
           </span>
-          <div style={c.sizePicker}>
+          <div style={c.sizePicker} className="studio-size-picker">
             <SizeSelector value={imageSize} sizes={currentModel.sizes} onChange={setImageSize} upward compact />
           </div>
           <button
@@ -799,6 +794,19 @@ function ComposerBar({ promptRef }: { promptRef?: React.MutableRefObject<{ set: 
               <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
             </svg>
           </button>
+          {onOpenInspiration && (
+            <button
+              type="button"
+              style={c.imgUploadBtn}
+              className="studio-gallery-action"
+              onClick={onOpenInspiration}
+              title={t('playground.studio_inspiration_gallery', { defaultValue: '灵感画廊' })}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z" />
+              </svg>
+            </button>
+          )}
           <div style={c.countGroup}>
             {COUNT_OPTIONS.map(n => (
               <button
@@ -862,6 +870,12 @@ const c: Record<string, CSSProperties> = {
   cardDragging: {
     borderColor: cssVar('primary'),
     boxShadow: `0 0 0 2px ${cssVar('primaryGlow')}, 0 8px 48px rgba(0, 0, 0, 0.4)`,
+  },
+  skillError: {
+    fontSize: 12,
+    color: cssVar('danger'),
+    padding: '0 4px 6px',
+    lineHeight: 1.4,
   },
   sourceStrip: {
     display: 'flex',
@@ -1078,20 +1092,25 @@ const landing: Record<string, CSSProperties> = {
     background: cssVar('bgDeep'),
     overflow: 'hidden',
   },
-  center: {
+  emptyScroll: {
     flex: 1,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  hero: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-    padding: '40px 32px 0',
+    gap: 12,
+    padding: '48px 32px 8px',
     userSelect: 'none',
   },
   iconWrap: {
-    width: 88,
-    height: 88,
-    borderRadius: 24,
+    width: 72,
+    height: 72,
+    borderRadius: 22,
     background: 'radial-gradient(circle at 40% 35%, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 70%, transparent 100%)',
     border: '1px solid rgba(255,255,255,0.06)',
     display: 'flex',
@@ -1109,13 +1128,29 @@ const landing: Record<string, CSSProperties> = {
   subtitle: {
     fontSize: 13,
     color: cssVar('textTertiary'),
-    opacity: 0.5,
+    opacity: 0.6,
   },
-  bottom: {
-    flexShrink: 0,
-    display: 'flex',
-    justifyContent: 'center',
-    padding: '24px 24px 32px',
+  inspireSection: {
+    width: '100%',
+    maxWidth: 720,
+    margin: '0 auto',
+    padding: '28px 24px 40px',
+  },
+  inspireHeading: {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    color: cssVar('textTertiary'),
+    fontFamily: cssVar('fontMono'),
+    textTransform: 'uppercase',
+    opacity: 0.7,
+    padding: '0 4px 12px',
+  },
+  inspireGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+    gap: 12,
+    marginBottom: 8,
   },
 };
 
@@ -1176,23 +1211,11 @@ const mobileTabStyle: Record<string, CSSProperties> = {
   },
 };
 
-const GALLERY_COLLAPSE_KEY = 'airgate-studio-gallery-collapsed';
-
 function StudioLayout() {
-  const { gallery, tasks } = useStudio();
+  const { gallery, tasks, projectsEnabled } = useStudio();
   const promptRef = useRef<{ set: (v: string) => void } | null>(null);
-  const [mobileTab, setMobileTab] = useState<'inspiration' | 'create'>('create');
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem(GALLERY_COLLAPSE_KEY) === '1'; } catch { return false; }
-  });
-
-  const toggleCollapsed = () => {
-    setCollapsed(prev => {
-      const next = !prev;
-      try { localStorage.setItem(GALLERY_COLLAPSE_KEY, next ? '1' : '0'); } catch { /* ignore */ }
-      return next;
-    });
-  };
+  const [mobileTab, setMobileTab] = useState<'projects' | 'create'>('create');
+  const [inspirationOpen, setInspirationOpen] = useState(false);
 
   const visibleTasks = tasks.filter(tk => tk.status !== 'completed');
   const isEmpty = gallery.length === 0 && visibleTasks.length === 0;
@@ -1202,51 +1225,53 @@ function StudioLayout() {
     setMobileTab('create');
   };
 
-  const mobileTabs = (
-    <div style={mobileTabStyle.bar} className="studio-mobile-tabs">
-      <button type="button" style={mobileTab === 'inspiration' ? mobileTabStyle.tabActive : mobileTabStyle.tab} onClick={() => setMobileTab('inspiration')}>灵感</button>
-      <button type="button" style={mobileTab === 'create' ? mobileTabStyle.tabActive : mobileTabStyle.tab} onClick={() => setMobileTab('create')}>创作</button>
+  // 项目左栏（仅在后端启用项目功能时显示）。移动端作为一个 tab。
+  const projectPanel = projectsEnabled ? (
+    <div className="studio-panel-projects" style={{ minWidth: 0, overflow: 'hidden' }}>
+      <ProjectSidebar />
     </div>
-  );
+  ) : null;
 
-  const inspirationPanel = (
-    <div
-      className="studio-panel-inspiration"
-      data-collapsed={collapsed ? 'true' : 'false'}
-      style={{ minWidth: 0, overflow: 'hidden' }}
-    >
-      <div className="studio-inspiration-content" style={{ width: '100%', height: '100%' }}>
-        <InspirationSidebar onSelect={handleTemplate} onCollapse={toggleCollapsed} />
-      </div>
-      <div className="studio-inspiration-strip" style={{ width: '100%', height: '100%' }}>
-        <CollapsedInspirationStrip onExpand={toggleCollapsed} />
-      </div>
+  const mobileTabs = projectsEnabled ? (
+    <div style={mobileTabStyle.bar} className="studio-mobile-tabs">
+      <button type="button" style={mobileTab === 'projects' ? mobileTabStyle.tabActive : mobileTabStyle.tab} onClick={() => setMobileTab('projects')}>{'项目'}</button>
+      <button type="button" style={mobileTab === 'create' ? mobileTabStyle.tabActive : mobileTabStyle.tab} onClick={() => setMobileTab('create')}>{'创作'}</button>
     </div>
-  );
+  ) : null;
+
+  const drawer = inspirationOpen ? (
+    <InspirationDrawer onSelect={handleTemplate} onClose={() => setInspirationOpen(false)} />
+  ) : null;
 
   if (isEmpty) {
     return (
       <div style={ss.layout} data-mobile-tab={mobileTab}>
         <style>{studioCSS}</style>
         {mobileTabs}
-        {inspirationPanel}
-        <div className="studio-panel-create" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: cssVar('bgElevated'), overflow: 'hidden' } as CSSProperties}>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '0 32px', userSelect: 'none' } as CSSProperties}>
+        {projectPanel}
+        <div className="studio-panel-create" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: cssVar('bgElevated'), overflow: 'hidden', position: 'relative' } as CSSProperties}>
+          <div style={landing.emptyScroll}>
+            <div style={landing.hero}>
               <div style={landing.iconWrap}>
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.2 }}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25 }}>
                   <rect x="3" y="3" width="18" height="18" rx="2" />
                   <circle cx="8.5" cy="8.5" r="1.5" />
                   <path d="M21 15l-5-5L5 21" />
                 </svg>
               </div>
-              <div style={landing.title}>创作中心</div>
-              <div style={landing.subtitle}>输入提示词，AI 为你生成图片</div>
-              <div style={{ width: '100%', maxWidth: 720, marginTop: 16 }}>
-                <ComposerBar promptRef={promptRef} />
+              <div style={landing.title}>{'创作工作坊'}</div>
+              <div style={landing.subtitle}>{'输入提示词，或从下方灵感开始'}</div>
+              <div style={{ width: '100%', maxWidth: 720, marginTop: 18 }}>
+                <ComposerBar promptRef={promptRef} onOpenInspiration={() => setInspirationOpen(true)} />
               </div>
             </div>
+            {/* 空状态把灵感网格铺在主区，回收原本浪费的空白 */}
+            <div style={landing.inspireSection}>
+              <div style={landing.inspireHeading}>{'灵感画廊'}</div>
+              <InspirationGrid onSelect={handleTemplate} gridStyle={landing.inspireGrid} />
+            </div>
           </div>
+          {drawer}
         </div>
       </div>
     );
@@ -1256,12 +1281,13 @@ function StudioLayout() {
     <div style={ss.layout} data-mobile-tab={mobileTab}>
       <style>{studioCSS}</style>
       {mobileTabs}
-      {inspirationPanel}
-      <div className="studio-panel-create" style={{ ...galleryLayout.wrapper, flex: 1, minWidth: 0 }}>
+      {projectPanel}
+      <div className="studio-panel-create" style={{ ...galleryLayout.wrapper, flex: 1, minWidth: 0, position: 'relative' }}>
         <GalleryView />
         <div style={galleryLayout.composerWrap}>
-          <ComposerBar promptRef={promptRef} />
+          <ComposerBar promptRef={promptRef} onOpenInspiration={() => setInspirationOpen(true)} />
         </div>
+        {drawer}
       </div>
     </div>
   );
