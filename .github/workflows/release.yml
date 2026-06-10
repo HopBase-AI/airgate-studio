@@ -1,31 +1,26 @@
-name: 发布
+name: 构建发布产物
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 env:
   GOPRIVATE: github.com/DouDOU-start/airgate-sdk
+  GOTOOLCHAIN: local
 
 jobs:
-  build:
-    name: 构建 ${{ matrix.goos }}/${{ matrix.goarch }}
+  release:
+    name: 检查并生成发布产物
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -39,63 +34,42 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: 构建前端
-        run: cd web && pnpm install --frozen-lockfile && pnpm run build
-
-      - name: 嵌入前端产物
-        run: |
-          rm -rf backend/internal/studio/webdist
-          cp -r web/dist backend/internal/studio/webdist
-          touch backend/internal/studio/webdist/.gitkeep
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: 构建后端二进制
-        env:
-          GOTOOLCHAIN: local
-          CGO_ENABLED: 0
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+      - name: 校验发布标签
+        shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "注入 PluginVersion=${VERSION}"
-          mkdir -p bin
-          cd backend && go build -buildvcs=false -trimpath \
-            -ldflags "-X 'github.com/DouDOU-start/airgate-studio/backend/internal/studio.PluginVersion=${VERSION}'" \
-            -o ../bin/airgate-studio-${{ matrix.goos }}-${{ matrix.goarch }} .
+          if [[ "${GITHUB_REF_NAME}" != v* ]]; then
+            echo "发布 workflow 必须从 v* tag 触发，当前 ref: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: 安装前端依赖
+        run: cd web && pnpm install --frozen-lockfile
+
+      - name: 运行完整检查
+        run: make ci
+
+      - name: 构建 Linux amd64 发布产物
+        run: VERSION="${VERSION}" make release
 
       - name: 生成 SHA256
         run: |
-          cd bin && sha256sum airgate-studio-${{ matrix.goos }}-${{ matrix.goarch }} \
-            > airgate-studio-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
+          cd bin
+          sha256sum airgate-studio-linux-amd64 > airgate-studio-linux-amd64.sha256
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: airgate-studio-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: airgate-studio-linux-amd64
           path: |
-            bin/airgate-studio-${{ matrix.goos }}-${{ matrix.goarch }}
-            bin/airgate-studio-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
-          retention-days: 1
-
-  release:
-    name: 发布 Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 下载所有产物
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: 列出产物
-        run: ls -la dist/
+            bin/airgate-studio-linux-amd64
+            bin/airgate-studio-linux-amd64.sha256
+          retention-days: 14
 
       - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
@@ -104,4 +78,5 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            dist/airgate-studio-*
+            bin/airgate-studio-linux-amd64
+            bin/airgate-studio-linux-amd64.sha256
