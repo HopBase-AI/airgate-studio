@@ -2,21 +2,25 @@ package studio
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 const (
-	hostMethodTasksCreate   = "tasks.create"
-	hostMethodTasksGet      = "tasks.get"
-	hostMethodTasksList     = "tasks.list"
-	hostMethodTasksDelete   = "tasks.delete"
-	hostMethodPlatformsList = "platforms.list"
-	hostMethodModelsList    = "models.list"
-	hostMethodUsersGet      = "users.get"
+	hostMethodTasksCreate    = "tasks.create"
+	hostMethodTasksGet       = "tasks.get"
+	hostMethodTasksList      = "tasks.list"
+	hostMethodTasksDelete    = "tasks.delete"
+	hostMethodPlatformsList  = "platforms.list"
+	hostMethodModelsList     = "models.list"
+	hostMethodUsersGet       = "users.get"
+	hostMethodGatewayForward = "gateway.forward"
+	hostMethodAssetsGetBytes = "assets.get_bytes"
 )
 
 func hostInvoke(ctx context.Context, host sdk.Host, method string, payload map[string]interface{}) (map[string]interface{}, error) {
@@ -210,5 +214,102 @@ func intFromAny(value interface{}) int {
 		return int(n)
 	default:
 		return 0
+	}
+}
+
+// ── Gateway forward（skills 同步 LLM 调用）────────────────────────────────────
+
+type hostForwardRequest struct {
+	UserID  int64
+	GroupID int64
+	Model   string
+	Method  string
+	Path    string
+	Headers http.Header
+	Body    []byte
+}
+
+type hostForwardResponse struct {
+	StatusCode int
+	Body       []byte
+}
+
+// hostForward 通过 host gateway.forward 同步调用上游 LLM（非流式）。
+func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*hostForwardResponse, error) {
+	payload := map[string]interface{}{
+		"user_id":  req.UserID,
+		"group_id": req.GroupID,
+		"model":    req.Model,
+		"method":   req.Method,
+		"path":     req.Path,
+		"headers":  headerPayload(req.Headers),
+		"body":     string(req.Body),
+		"stream":   false,
+	}
+	resp, err := hostInvoke(ctx, host, hostMethodGatewayForward, payload)
+	if err != nil {
+		return nil, err
+	}
+	return &hostForwardResponse{
+		StatusCode: intFromAny(firstValue(resp, "status_code", "status")),
+		Body:       bytesFromPayload(firstValue(resp, "body")),
+	}, nil
+}
+
+func headerPayload(headers http.Header) map[string]interface{} {
+	out := make(map[string]interface{}, len(headers))
+	for key, values := range headers {
+		out[key] = append([]string(nil), values...)
+	}
+	return out
+}
+
+// hostGetAssetDataURL 通过 assets.get_bytes 取回对象字节，拼成 data URL（供 vision 模型消费）。
+func hostGetAssetDataURL(ctx context.Context, host sdk.Host, objectKey string) (string, error) {
+	resp, err := hostInvoke(ctx, host, hostMethodAssetsGetBytes, map[string]interface{}{"object_key": objectKey})
+	if err != nil {
+		return "", err
+	}
+	data := bytesFromPayload(firstValue(resp, "data"))
+	if len(data) == 0 {
+		return "", fmt.Errorf("asset 字节为空")
+	}
+	contentType := stringFromAny(firstValue(resp, "content_type"))
+	if contentType == "" {
+		contentType = "image/png"
+	}
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+}
+
+func bytesFromPayload(value interface{}) []byte {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case []byte:
+		return v
+	case string:
+		if decoded, err := base64.StdEncoding.DecodeString(v); err == nil && looksLikeJSON(decoded) {
+			return decoded
+		}
+		return []byte(v)
+	default:
+		body, _ := json.Marshal(v)
+		return body
+	}
+}
+
+func looksLikeJSON(body []byte) bool {
+	trimmed := strings.TrimSpace(string(body))
+	return strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
+}
+
+func stringFromAny(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(v)
 	}
 }

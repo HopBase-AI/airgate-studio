@@ -8,14 +8,18 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '../api';
-import type { GenerationTask } from '../api';
-import type { GalleryItem, StudioGenerationTask, ImageMode, MediaType } from './types';
-import { getModelConfig, getDefaultModel, type ModelConfig } from './modelConfig';
+import type { GenerationTask, Project, ProjectAsset } from '../api';
+import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType } from './types';
+import { getModelConfig, getDefaultModel, MODEL_REGISTRY, type ModelConfig } from './modelConfig';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_ATTEMPTS = 300;
+
+// activeProjectId 哨兵：0 = 「全部」视图（读 host tasks 的历史聚合，含老用户旧图），
+// >=1 = 具体项目（读 studio_assets）。详见 StudioContext 的画廊加载逻辑。
+const ALL_VIEW_ID = 0;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -63,6 +67,22 @@ interface GenerateOptions {
   maskRegion?: { x: number; y: number; width: number; height: number };
   count?: number;
   prompts?: string[];
+}
+
+// projectAssetToGallery 把后端持久化的项目资产记录映射成画廊条目。
+function projectAssetToGallery(a: ProjectAsset): GalleryItem {
+  return {
+    id: `a-${a.id}`,
+    taskId: a.task_id || undefined,
+    url: a.url,
+    alt: a.prompt || '',
+    prompt: a.prompt || '',
+    model: a.model || '',
+    mode: (a.mode as ImageMode) || 'text2img',
+    size: a.size || undefined,
+    createdAt: a.created_at,
+    assetId: a.id,
+  };
 }
 
 function taskRemoteIds(task: StudioGenerationTask | undefined): number[] {
@@ -212,9 +232,18 @@ export interface StudioContextValue {
   setPreviewItem: (item: GalleryItem | null) => void;
   deleteGalleryItem: (id: string) => void;
   deleteTask: (uiId: string) => void;
+  retryBatchFailures: (uiId: string) => void;
   useAsReference: (item: GalleryItem) => void;
   regenerate: (item: GalleryItem) => void;
 
+  // Projects (轻量项目维度). projectsEnabled=false 时（后端未配置 DB）退回「全部」视图。
+  projectsEnabled: boolean;
+  projects: Project[];
+  activeProjectId: number; // 0 = 全部视图
+  selectProject: (id: number) => void;
+  createProject: (name?: string) => Promise<Project | null>;
+  renameProject: (id: number, name: string) => Promise<void>;
+  deleteProject: (id: number) => Promise<void>;
 }
 
 // ── Context + hook ────────────────────────────────────────────────────────────
@@ -255,6 +284,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const galleryOffsetRef = useRef(0);
 
   const recoveryPromiseRef = useRef<Promise<void> | null>(null);
+
+  // Projects
+  const [projectsEnabled, setProjectsEnabled] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<number>(ALL_VIEW_ID);
+  // activeProjectId 的 ref 副本，供 generate 的异步回调读取最新值（避免闭包捕获旧值）。
+  const activeProjectIdRef = useRef<number>(ALL_VIEW_ID);
+  useEffect(() => { activeProjectIdRef.current = activeProjectId; }, [activeProjectId]);
 
   // Derived from hardcoded registry
   const currentModel = getModelConfig(selectedModelId) ?? getDefaultModel();
@@ -414,18 +451,75 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      const { tasks: moreTasks, total } = await api.listGenerationTasks({
-        limit: PAGE_SIZE,
-        offset: galleryOffsetRef.current,
-        status: 'completed',
-      });
-      const newItems = tasksToGallery(moreTasks);
-      setGallery(prev => [...prev, ...newItems]);
-      galleryOffsetRef.current += moreTasks.length;
-      setHasMore(galleryOffsetRef.current < total);
+      if (activeProjectIdRef.current >= 1) {
+        // 项目视图：分页读 studio_assets
+        const projectId = activeProjectIdRef.current;
+        const { assets, total } = await api.listProjectAssets(projectId, {
+          limit: PAGE_SIZE,
+          offset: galleryOffsetRef.current,
+        });
+        setGallery(prev => [...prev, ...assets.map(projectAssetToGallery)]);
+        galleryOffsetRef.current += assets.length;
+        setHasMore(galleryOffsetRef.current < total);
+      } else {
+        // 全部视图：分页读 host tasks（含老用户历史图）
+        const { tasks: moreTasks, total } = await api.listGenerationTasks({
+          limit: PAGE_SIZE,
+          offset: galleryOffsetRef.current,
+          status: 'completed',
+        });
+        const newItems = tasksToGallery(moreTasks);
+        setGallery(prev => [...prev, ...newItems]);
+        galleryOffsetRef.current += moreTasks.length;
+        setHasMore(galleryOffsetRef.current < total);
+      }
     } catch { /* non-fatal */ }
     setLoadingMore(false);
   }, [loadingMore, hasMore]);
+
+  // selectProject 切换当前项目并重载画廊。id=0 → 全部视图（host tasks）；id>=1 → 项目资产。
+  const selectProject = useCallback((id: number) => {
+    setActiveProjectId(id);
+    activeProjectIdRef.current = id;
+    galleryOffsetRef.current = 0;
+    setGallery([]);
+    setHasMore(true);
+    if (id >= 1) {
+      void (async () => {
+        try {
+          const { assets, total } = await api.listProjectAssets(id, { limit: PAGE_SIZE, offset: 0 });
+          setGallery(assets.map(projectAssetToGallery));
+          galleryOffsetRef.current = assets.length;
+          setHasMore(assets.length < total);
+        } catch { /* non-fatal */ }
+      })();
+    } else {
+      // 全部视图：重新拉 host tasks 历史
+      const controller = new AbortController();
+      void recoverTasks(controller.signal);
+    }
+  }, [recoverTasks]);
+
+  // persistActiveProjectAssets 把新生成的图写入当前项目（仅项目视图）。返回带 assetId 的副本，
+  // 失败时静默降级（图仍在画廊里，只是没持久化到项目）。
+  const persistActiveProjectAssets = useCallback(async (items: GalleryItem[]): Promise<void> => {
+    const projectId = activeProjectIdRef.current;
+    if (projectId < 1 || items.length === 0) return;
+    await Promise.all(items.map(async (item) => {
+      try {
+        const saved = await api.addProjectAsset(projectId, {
+          task_id: item.taskId,
+          url: item.url,
+          prompt: item.prompt,
+          model: item.model,
+          mode: item.mode,
+          size: item.size,
+        });
+        // 回填 assetId，让删除走项目资产删除而非 host task 删除
+        setGallery(prev => prev.map(g => (g.id === item.id ? { ...g, assetId: saved.id } : g)));
+      } catch { /* 持久化失败不阻塞展示 */ }
+    }));
+  }, []);
 
   useEffect(() => {
     if (!recoveryPromiseRef.current) {
@@ -433,6 +527,22 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       recoveryPromiseRef.current = recoverTasks(controller.signal);
     }
   }, [recoverTasks]);
+
+  // 加载项目列表（探测后端是否启用了项目功能）。后端 /projects 在首次访问时会自动
+  // 确保有一个默认项目；若返回 503（未配置 DB）则 projectsEnabled 保持 false，退回全部视图。
+  useEffect(() => {
+    let active = true;
+    api.listProjects()
+      .then((list) => {
+        if (!active) return;
+        setProjects(list);
+        setProjectsEnabled(true);
+      })
+      .catch(() => {
+        if (active) setProjectsEnabled(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   // Re-check processing tasks on visibility change (e.g. tab switch back, service restart)
   useEffect(() => {
@@ -534,51 +644,99 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               ? options.prompts
               : Array.from({ length: options?.count ?? 4 }, () => prompt);
 
-            const batchTasks = prompts.map(async (p) => {
-              const created = await api.createGenerationTask({
-                kind: 'image',
-                operation: 'generate',
-                platform: selectedPlatform,
-                model: selectedModelId,
-                prompt: p,
-                parameters: imageSize ? { size: imageSize } : undefined,
-              });
-              remoteTaskIds.push(created.id);
-              updateTask({ remoteTaskIds: [...remoteTaskIds] });
-              const completed = await pollGenerationTask(created.id, signal);
-              return parseMarkdownImages(completed.result_content || '').map(img => ({
-                ...img,
-                prompt: p,
-                taskId: created.id,
-                createdAt: taskAssetCreatedAt(completed),
-              }));
+            // 批量子任务的执行上下文：捕获当前模型/尺寸/项目/参考图，
+            // 之后写进 task，供「全部重试」在不依赖即时 UI state 的前提下复用。
+            const batchSources = options?.sourceImages?.length
+              ? options.sourceImages
+              : options?.sourceImage
+              ? [options.sourceImage]
+              : [];
+            const batchGroupId = activeProjectIdRef.current >= 1 ? activeProjectIdRef.current : undefined;
+            const batchOperation: 'generate' | 'edit' = batchSources.length > 0 ? 'edit' : 'generate';
+
+            // 初始化 N 个子任务，全部置为 processing，立即渲染聚合卡。
+            const subtasks: BatchSubtask[] = prompts.map((p) => ({
+              id: uid(),
+              status: 'processing' as const,
+              prompt: p,
+            }));
+            updateTask({
+              subtasks: subtasks.map(s => ({ ...s })),
+              batchSources,
+              batchGroupId,
             });
 
-            const settled = await Promise.allSettled(batchTasks);
+            // patchSubtask 局部更新单个子任务状态（实时反映到聚合卡）。
+            const patchSubtask = (subId: string, patch: Partial<BatchSubtask>) => {
+              setTasks(prev => prev.map(t => {
+                if (t.id !== taskId || !t.subtasks) return t;
+                return { ...t, subtasks: t.subtasks.map(s => (s.id === subId ? { ...s, ...patch } : s)) };
+              }));
+            };
 
-            const allItems: GalleryItem[] = [];
-            for (const outcome of settled) {
-              if (outcome.status === 'fulfilled') {
-                for (const img of outcome.value) {
-                  allItems.push({
-                    id: uid(),
-                    taskId: img.taskId,
-                    url: img.url,
-                    alt: img.alt,
-                    prompt: img.prompt,
-                    model: selectedModelId,
-                    mode,
-                    size: imageSize,
-                    createdAt: img.createdAt,
-                  });
-                }
+            const runSubtask = async (sub: BatchSubtask): Promise<GalleryItem[]> => {
+              const created = await api.createGenerationTask({
+                kind: 'image',
+                operation: batchOperation,
+                platform: selectedPlatform,
+                model: selectedModelId,
+                prompt: sub.prompt,
+                group_id: batchGroupId,
+                parameters: imageSize ? { size: imageSize } : undefined,
+                inputs: batchSources.length > 0
+                  ? batchSources.map(url => ({ type: 'image' as const, role: 'source' as const, url }))
+                  : undefined,
+              });
+              remoteTaskIds.push(created.id);
+              patchSubtask(sub.id, { remoteTaskId: created.id });
+              updateTask({ remoteTaskIds: [...remoteTaskIds] });
+              const completed = await pollGenerationTask(created.id, signal);
+              const items: GalleryItem[] = parseMarkdownImages(completed.result_content || '').map(img => ({
+                id: uid(),
+                taskId: created.id,
+                url: img.url,
+                alt: img.alt,
+                prompt: sub.prompt,
+                model: selectedModelId,
+                mode,
+                size: imageSize,
+                createdAt: taskAssetCreatedAt(completed),
+                sourceUrl: batchSources[0],
+              }));
+              // 成功一张立即进画廊 + 落项目（不等整组完成）。
+              if (items.length > 0) {
+                setGallery(prev => [...items, ...prev]);
+                void persistActiveProjectAssets(items);
               }
-            }
+              patchSubtask(sub.id, { status: 'completed' });
+              return items;
+            };
 
-            if (allItems.length === 0) throw new Error('Batch generation: all tasks failed');
+            const settled = await Promise.allSettled(
+              subtasks.map(async (sub) => {
+                try {
+                  return await runSubtask(sub);
+                } catch (err) {
+                  if (signal.aborted) {
+                    patchSubtask(sub.id, { status: 'failed', error: 'Generation cancelled' });
+                  } else {
+                    const msg = err instanceof Error ? err.message : 'Generation failed';
+                    patchSubtask(sub.id, { status: 'failed', error: msg });
+                  }
+                  throw err;
+                }
+              }),
+            );
 
-            setGallery(prev => [...allItems, ...prev]);
-            updateTask({ status: 'completed', result: allItems, remoteTaskIds: [...remoteTaskIds] });
+            const okCount = settled.filter(s => s.status === 'fulfilled').length;
+            const allItems = settled.flatMap(s => (s.status === 'fulfilled' ? s.value : []));
+            // 整组状态：全成功 → completed；部分/全失败 → failed（聚合卡据此显示「全部重试」）。
+            updateTask({
+              status: okCount === subtasks.length ? 'completed' : 'failed',
+              result: allItems,
+              remoteTaskIds: [...remoteTaskIds],
+              error: okCount === 0 ? '本批次全部生成失败' : undefined,
+            });
 
           } else {
             // text2img / img2img / inpaint — 统一走 task 系统
@@ -588,6 +746,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               platform: selectedPlatform,
               model: selectedModelId,
               prompt,
+              group_id: activeProjectIdRef.current >= 1 ? activeProjectIdRef.current : undefined,
               parameters: imageSize ? { size: imageSize } : undefined,
             };
 
@@ -642,6 +801,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
             setGallery(prev => [...galleryItems, ...prev]);
             updateTask({ status: 'completed', result: galleryItems, remoteTaskIds: [created.id] });
+            void persistActiveProjectAssets(galleryItems);
           }
         } catch (err) {
           if (signal.aborted) {
@@ -667,6 +827,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       referenceImages,
       selectedPlatform,
       selectedModelId,
+      persistActiveProjectAssets,
     ],
   );
 
@@ -690,6 +851,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const deleteGalleryItem = useCallback((id: string) => {
     const item = gallery.find(g => g.id === id);
     if (!item) return;
+    // 项目视图条目：删 studio_assets 记录（不动底层 host task / 资产对象，可能被「全部」视图共享）。
+    if (item.assetId && activeProjectIdRef.current >= 1) {
+      const projectId = activeProjectIdRef.current;
+      setGallery(prev => prev.filter(g => g.id !== id));
+      api.deleteProjectAsset(projectId, item.assetId).catch(() => {});
+      return;
+    }
     const matchingTask = item.taskId
       ? tasks.find(task => taskRemoteIds(task).includes(item.taskId!))
       : undefined;
@@ -728,6 +896,125 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }, 0);
   }, [generate, setSelectedModelId, setImageMode, setImageSize]);
 
+  // retryBatchFailures —— 只重发某个批量任务里失败的子任务，复用 task 自身保存的
+  // 执行上下文（model/size/sources/groupId），不依赖当前 UI state，因此用户切换
+  // 项目或模型后重试也不会错乱。成功的子任务原样保留，不重复消耗额度。
+  const retryBatchFailures = useCallback((uiId: string) => {
+    const task = tasks.find(t => t.id === uiId);
+    if (!task || !task.subtasks) return;
+    const failed = task.subtasks.filter(s => s.status === 'failed');
+    if (failed.length === 0) return;
+
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const model = task.model || selectedModelId;
+    const platform = task.platform || selectedPlatform;
+    const size = task.size;
+    const sources = task.batchSources ?? [];
+    const groupId = task.batchGroupId;
+    const operation: 'generate' | 'edit' = sources.length > 0 ? 'edit' : 'generate';
+
+    const patchSubtask = (subId: string, patch: Partial<BatchSubtask>) => {
+      setTasks(prev => prev.map(t => {
+        if (t.id !== uiId || !t.subtasks) return t;
+        return { ...t, subtasks: t.subtasks.map(s => (s.id === subId ? { ...s, ...patch } : s)) };
+      }));
+    };
+
+    // 把失败子任务置回 processing，整组回到 processing。
+    setTasks(prev => prev.map(t => {
+      if (t.id !== uiId || !t.subtasks) return t;
+      return {
+        ...t,
+        status: 'processing',
+        error: undefined,
+        subtasks: t.subtasks.map(s => (s.status === 'failed' ? { ...s, status: 'processing', error: undefined } : s)),
+      };
+    }));
+    activeCountRef.current += 1;
+    setIsGenerating(true);
+
+    const runRetry = async () => {
+      await Promise.allSettled(failed.map(async (sub) => {
+        try {
+          const created = await api.createGenerationTask({
+            kind: 'image',
+            operation,
+            platform,
+            model,
+            prompt: sub.prompt,
+            group_id: groupId,
+            parameters: size ? { size } : undefined,
+            inputs: sources.length > 0
+              ? sources.map(url => ({ type: 'image' as const, role: 'source' as const, url }))
+              : undefined,
+          });
+          patchSubtask(sub.id, { remoteTaskId: created.id });
+          const completed = await pollGenerationTask(created.id, signal);
+          const items: GalleryItem[] = parseMarkdownImages(completed.result_content || '').map(img => ({
+            id: uid(),
+            taskId: created.id,
+            url: img.url,
+            alt: img.alt,
+            prompt: sub.prompt,
+            model,
+            mode: 'batch' as ImageMode,
+            size,
+            createdAt: taskAssetCreatedAt(completed),
+            sourceUrl: sources[0],
+          }));
+          if (items.length > 0) {
+            setGallery(prev => [...items, ...prev]);
+            void persistActiveProjectAssets(items);
+          }
+          patchSubtask(sub.id, { status: 'completed' });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Generation failed';
+          patchSubtask(sub.id, { status: 'failed', error: signal.aborted ? 'Generation cancelled' : msg });
+        }
+      }));
+      // 重算整组状态
+      setTasks(prev => prev.map(t => {
+        if (t.id !== uiId || !t.subtasks) return t;
+        const stillFailed = t.subtasks.some(s => s.status === 'failed');
+        return { ...t, status: stillFailed ? 'failed' : 'completed', error: stillFailed ? '部分图片仍生成失败' : undefined };
+      }));
+      activeCountRef.current -= 1;
+      if (activeCountRef.current <= 0) {
+        activeCountRef.current = 0;
+        setIsGenerating(false);
+      }
+    };
+    void runRetry();
+  }, [tasks, selectedModelId, selectedPlatform, persistActiveProjectAssets]);
+
+  // ── Project CRUD ──────────────────────────────────────────────────────────
+
+  const createProject = useCallback(async (name?: string): Promise<Project | null> => {
+    try {
+      const project = await api.createProject(name);
+      setProjects(prev => [project, ...prev]);
+      selectProject(project.id);
+      return project;
+    } catch {
+      return null;
+    }
+  }, [selectProject]);
+
+  const renameProject = useCallback(async (id: number, name: string): Promise<void> => {
+    await api.renameProject(id, name);
+    setProjects(prev => prev.map(p => (p.id === id ? { ...p, name } : p)));
+  }, []);
+
+  const deleteProject = useCallback(async (id: number): Promise<void> => {
+    await api.deleteProject(id);
+    setProjects(prev => prev.filter(p => p.id !== id));
+    // 删的是当前项目则回退到全部视图
+    if (activeProjectIdRef.current === id) {
+      selectProject(ALL_VIEW_ID);
+    }
+  }, [selectProject]);
+
   // ── Context value ─────────────────────────────────────────────────────────
 
   const value: StudioContextValue = {
@@ -756,8 +1043,16 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setPreviewItem,
     deleteGalleryItem,
     deleteTask,
+    retryBatchFailures,
     useAsReference,
     regenerate,
+    projectsEnabled,
+    projects,
+    activeProjectId,
+    selectProject,
+    createProject,
+    renameProject,
+    deleteProject,
   };
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;

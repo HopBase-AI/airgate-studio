@@ -758,6 +758,16 @@ export const studioCSS = `
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   }
 
+  .studio-skill-pill:hover:not(:disabled) {
+    border-color: ${cssVar('primary')};
+    color: ${cssVar('text')};
+    background: ${cssVar('bgHover')};
+  }
+
+  .studio-skill-preset:hover {
+    background: ${cssVar('primarySubtle')};
+  }
+
   .studio-console-link:hover {
     color: ${cssVar('text')} !important;
     background: ${cssVar('bgHover')};
@@ -828,31 +838,37 @@ export const studioCSS = `
     display: none;
   }
 
-  .studio-panel-inspiration {
-    flex: 0 0 320px;
-    transition: flex-basis 0.2s ease;
+  .studio-panel-projects {
+    flex: 0 0 200px;
+    overflow: hidden;
   }
-  .studio-panel-inspiration[data-collapsed="true"] {
-    flex: 0 0 48px;
+
+  .studio-inspiration-drawer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 60;
+    opacity: 0;
+    animation: studioFadeIn 0.2s ease forwards;
   }
-  .studio-panel-inspiration[data-collapsed="true"] .studio-inspiration-content {
-    display: none;
+  .studio-inspiration-drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 360px;
+    max-width: 86vw;
+    z-index: 61;
+    background: ${cssVar('bgDeep')};
+    border-left: 1px solid ${cssVar('borderSubtle')};
+    box-shadow: -16px 0 48px rgba(0, 0, 0, 0.32);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    animation: studioDrawerIn 0.22s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   }
-  .studio-panel-inspiration:not([data-collapsed="true"]) .studio-inspiration-strip {
-    display: none;
-  }
-  .studio-collapsed-strip:hover {
-    background: ${cssVar('bgHover')} !important;
-    color: ${cssVar('text')} !important;
-  }
-  .studio-collapsed-strip:hover .studio-collapse-icon,
-  .studio-collapse-btn:hover {
-    background: ${cssVar('bgHover')} !important;
-    color: ${cssVar('text')} !important;
-  }
-  .studio-collapse-btn svg,
-  .studio-collapse-icon svg {
-    stroke-width: 2.5;
+  @keyframes studioDrawerIn {
+    to { transform: translateX(0); }
   }
 
   @media (max-width: 1023px) {
@@ -862,27 +878,25 @@ export const studioCSS = `
     [data-mobile-tab] {
       flex-direction: column !important;
     }
-    [data-mobile-tab="create"] .studio-panel-inspiration {
+    [data-mobile-tab="create"] .studio-panel-projects {
       display: none !important;
     }
-    [data-mobile-tab="inspiration"] .studio-panel-create {
+    [data-mobile-tab="projects"] .studio-panel-create {
       display: none !important;
     }
-    .studio-panel-inspiration,
+    .studio-panel-projects,
     .studio-panel-create {
       flex: 1 !important;
       min-height: 0 !important;
       width: 100% !important;
     }
-    .studio-panel-inspiration .studio-inspiration-content {
-      display: block !important;
-    }
-    .studio-panel-inspiration .studio-inspiration-strip {
-      display: none !important;
+    .studio-project-sidebar {
+      width: 100% !important;
     }
     .studio-composer-toolbar-left {
       flex-wrap: wrap;
       gap: 4px !important;
+      overflow: visible !important;
     }
     .studio-composer-toolbar-left .studio-size-picker {
       width: 140px !important;

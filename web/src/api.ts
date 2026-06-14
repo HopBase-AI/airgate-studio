@@ -92,6 +92,27 @@ export interface UserInfo {
   role: string;
 }
 
+export interface Project {
+  id: number;
+  user_id: number;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectAsset {
+  id: number;
+  user_id: number;
+  project_id: number;
+  task_id: number;
+  url: string;
+  prompt: string;
+  model: string;
+  mode: string;
+  size: string;
+  created_at: string;
+}
+
 export const api = {
   createGenerationTask(params: {
     kind: string;
@@ -139,5 +160,47 @@ export const api = {
 
   getPublicSettings(): Promise<Record<string, string>> {
     return requestCore<Record<string, string>>('/api/v1/settings/public');
+  },
+
+  // ── Projects ──
+
+  listProjects(): Promise<Project[]> {
+    return request<{ projects: Project[] }>('GET', '/projects').then(r => r.projects || []);
+  },
+
+  createProject(name?: string): Promise<Project> {
+    return request('POST', '/projects', { name: name || '' });
+  },
+
+  renameProject(id: number, name: string): Promise<void> {
+    return request('PUT', `/projects/${id}`, { name });
+  },
+
+  deleteProject(id: number): Promise<void> {
+    return request('DELETE', `/projects/${id}`);
+  },
+
+  listProjectAssets(projectId: number, params?: { limit?: number; offset?: number }): Promise<{ assets: ProjectAsset[]; total: number }> {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs}` : '';
+    return request<{ assets: ProjectAsset[]; total: number }>('GET', `/projects/${projectId}/assets${suffix}`)
+      .then(r => ({ assets: r.assets || [], total: r.total || 0 }));
+  },
+
+  addProjectAsset(projectId: number, asset: {
+    task_id?: number;
+    url: string;
+    prompt?: string;
+    model?: string;
+    mode?: string;
+    size?: string;
+  }): Promise<ProjectAsset> {
+    return request('POST', `/projects/${projectId}/assets`, asset);
+  },
+
+  deleteProjectAsset(projectId: number, assetId: number): Promise<void> {
+    return request('DELETE', `/projects/${projectId}/assets/${assetId}`);
   },
 };

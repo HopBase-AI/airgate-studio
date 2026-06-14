@@ -1,6 +1,6 @@
 # AirGate 创作中心插件 Makefile
 
-GO := GOTOOLCHAIN=local go
+GO := go
 
 WEBDIST := backend/internal/studio/webdist
 
