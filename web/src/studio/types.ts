@@ -44,5 +44,4 @@ export interface StudioGenerationTask {
   // 避免用户切换项目/模型后重试时上下文错乱）。
   subtasks?: BatchSubtask[];
   batchSources?: string[];
-  batchGroupId?: number;
 }

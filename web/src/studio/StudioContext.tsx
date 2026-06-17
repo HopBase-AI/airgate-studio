@@ -644,14 +644,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               ? options.prompts
               : Array.from({ length: options?.count ?? 4 }, () => prompt);
 
-            // 批量子任务的执行上下文：捕获当前模型/尺寸/项目/参考图，
+            // 批量子任务的执行上下文：捕获当前模型/尺寸/参考图，
             // 之后写进 task，供「全部重试」在不依赖即时 UI state 的前提下复用。
             const batchSources = options?.sourceImages?.length
               ? options.sourceImages
               : options?.sourceImage
               ? [options.sourceImage]
               : [];
-            const batchGroupId = activeProjectIdRef.current >= 1 ? activeProjectIdRef.current : undefined;
             const batchOperation: 'generate' | 'edit' = batchSources.length > 0 ? 'edit' : 'generate';
 
             // 初始化 N 个子任务，全部置为 processing，立即渲染聚合卡。
@@ -663,7 +662,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask({
               subtasks: subtasks.map(s => ({ ...s })),
               batchSources,
-              batchGroupId,
             });
 
             // patchSubtask 局部更新单个子任务状态（实时反映到聚合卡）。
@@ -681,7 +679,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 platform: selectedPlatform,
                 model: selectedModelId,
                 prompt: sub.prompt,
-                group_id: batchGroupId,
                 parameters: imageSize ? { size: imageSize } : undefined,
                 inputs: batchSources.length > 0
                   ? batchSources.map(url => ({ type: 'image' as const, role: 'source' as const, url }))
@@ -746,7 +743,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               platform: selectedPlatform,
               model: selectedModelId,
               prompt,
-              group_id: activeProjectIdRef.current >= 1 ? activeProjectIdRef.current : undefined,
               parameters: imageSize ? { size: imageSize } : undefined,
             };
 
@@ -897,7 +893,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [generate, setSelectedModelId, setImageMode, setImageSize]);
 
   // retryBatchFailures —— 只重发某个批量任务里失败的子任务，复用 task 自身保存的
-  // 执行上下文（model/size/sources/groupId），不依赖当前 UI state，因此用户切换
+  // 执行上下文（model/size/sources），不依赖当前 UI state，因此用户切换
   // 项目或模型后重试也不会错乱。成功的子任务原样保留，不重复消耗额度。
   const retryBatchFailures = useCallback((uiId: string) => {
     const task = tasks.find(t => t.id === uiId);
@@ -911,7 +907,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const platform = task.platform || selectedPlatform;
     const size = task.size;
     const sources = task.batchSources ?? [];
-    const groupId = task.batchGroupId;
     const operation: 'generate' | 'edit' = sources.length > 0 ? 'edit' : 'generate';
 
     const patchSubtask = (subId: string, patch: Partial<BatchSubtask>) => {
@@ -943,7 +938,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             platform,
             model,
             prompt: sub.prompt,
-            group_id: groupId,
             parameters: size ? { size } : undefined,
             inputs: sources.length > 0
               ? sources.map(url => ({ type: 'image' as const, role: 'source' as const, url }))
