@@ -17,7 +17,7 @@ func buildPluginInfo() sdk.PluginInfo {
 		Version:     PluginVersion,
 		SDKVersion:  sdk.SDKVersion,
 		Description: "面向图片、视频、音频等多模态内容生成的统一创作中心",
-		Author:      "AirGate",
+		Author:      "HopBase",
 		Type:        sdk.PluginTypeExtension,
 		Capabilities: []sdk.Capability{
 			sdk.CapabilityHostInvoke,
