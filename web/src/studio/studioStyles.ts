@@ -423,7 +423,7 @@ export const studioStyles: Record<string, CSSProperties> = {
     width: '100%',
     overflowY: 'auto',
     overflowX: 'hidden',
-    padding: '20px',
+    padding: '20px 20px 220px',
     boxSizing: 'border-box',
     background: cssVar('bgElevated'),
   } as CSSProperties,
@@ -776,6 +776,50 @@ export const studioCSS = `
   .studio-gallery-action:hover {
     background: ${cssVar('bgHover')} !important;
     color: ${cssVar('text')} !important;
+  }
+
+  .studio-source-thumb::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.22), transparent 58%);
+    opacity: 0;
+    transition: opacity 0.16s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .studio-source-thumb:hover,
+  .studio-source-thumb:focus-visible,
+  .studio-source-thumb:focus-within {
+    border-color: color-mix(in oklab, ${cssVar('primary')} 38%, ${cssVar('borderSubtle')});
+    box-shadow: 0 0 0 1px color-mix(in oklab, ${cssVar('primary')} 18%, transparent), 0 5px 16px rgba(0, 0, 0, 0.22);
+    transform: translateY(-1px);
+  }
+  .studio-source-thumb:focus-visible,
+  .studio-source-thumb:focus-within {
+    outline: 2px solid color-mix(in oklab, ${cssVar('primary')} 45%, transparent);
+    outline-offset: 2px;
+  }
+  .studio-source-thumb:hover::after,
+  .studio-source-thumb:focus-visible::after,
+  .studio-source-thumb:focus-within::after {
+    opacity: 1;
+  }
+  .studio-source-thumb-remove {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.86);
+    pointer-events: none;
+  }
+  .studio-source-thumb:hover .studio-source-thumb-remove,
+  .studio-source-thumb:focus-visible .studio-source-thumb-remove,
+  .studio-source-thumb:focus-within .studio-source-thumb-remove {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+  .studio-source-thumb-remove:hover {
+    background: rgba(239, 68, 68, 0.86) !important;
+    border-color: rgba(255, 255, 255, 0.42) !important;
+    color: #fff !important;
   }
 
   .studio-gen-btn:hover:not(:disabled) {

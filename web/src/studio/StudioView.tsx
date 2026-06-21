@@ -747,6 +747,19 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     setSelection(null);
   };
 
+  const handleSourceThumbKeyDown = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      e.stopPropagation();
+      removeSource(index);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setEditorIndex(index);
+    }
+  };
+
   const clearAllSources = () => {
     setSourceImages([]);
     setReferenceImages([]);
@@ -773,24 +786,62 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       {hasSource && (
         <div style={c.sourceStrip}>
           {allSources.map((src, i) => (
-            <div key={i} style={c.thumbWrap} onClick={() => setEditorIndex(i)}>
-              <img
-                src={src}
-                alt="source"
-                style={c.thumbImg}
-              />
-              {isSingleSource && selection && (
-                <div
-                  style={{
-                    ...c.thumbMaskOverlay,
-                    left: `${selection.x * 100}%`,
-                    top: `${selection.y * 100}%`,
-                    width: `max(${selection.width * 100}%, 10px)`,
-                    height: `max(${selection.height * 100}%, 10px)`,
-                  }}
-                  title="已选区"
+            <div
+              key={i}
+              style={c.thumbWrap}
+              className="studio-source-thumb"
+            >
+              <button
+                type="button"
+                style={c.thumbOpenBtn}
+                onClick={() => setEditorIndex(i)}
+                onKeyDown={e => handleSourceThumbKeyDown(e, i)}
+                aria-label={t('playground.studio_source_image_keyboard_hint', { defaultValue: '参考图，按回车打开，按 Delete 删除' })}
+                title={t('playground.studio_source_image_keyboard_hint', { defaultValue: '参考图，按回车打开，按 Delete 删除' })}
+              >
+                <img
+                  src={src}
+                  alt="source"
+                  style={c.thumbImg}
                 />
-              )}
+                {isSingleSource && selection && (
+                  <div
+                    style={{
+                      ...c.thumbMaskOverlay,
+                      left: `${selection.x * 100}%`,
+                      top: `${selection.y * 100}%`,
+                      width: `max(${selection.width * 100}%, 10px)`,
+                      height: `max(${selection.height * 100}%, 10px)`,
+                    }}
+                    title="已选区"
+                  />
+                )}
+              </button>
+              <button
+                type="button"
+                style={c.thumbRemoveBtn}
+                className="studio-source-thumb-remove"
+                onClick={e => {
+                  e.stopPropagation();
+                  removeSource(i);
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Delete' || e.key === 'Backspace') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeSource(i);
+                    return;
+                  }
+                  e.stopPropagation();
+                }}
+                aria-label={t('playground.studio_remove_source_image', { defaultValue: '移除参考图' })}
+                title={t('playground.studio_remove_source_image', { defaultValue: '移除参考图' })}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
             </div>
           ))}
           {allSources.length > 1 && (
@@ -921,6 +972,7 @@ const c: Record<string, CSSProperties> = {
     border: `1px solid ${cssVar('glassBorder')}`,
     boxShadow: '0 8px 48px rgba(0, 0, 0, 0.4), 0 2px 12px rgba(0, 0, 0, 0.2)',
     transition: 'box-shadow 0.3s, border-color 0.15s',
+    pointerEvents: 'auto',
   },
   cardDragging: {
     borderColor: cssVar('primary'),
@@ -946,6 +998,20 @@ const c: Record<string, CSSProperties> = {
     cursor: 'pointer',
     lineHeight: 0,
     flexShrink: 0,
+    background: cssVar('bgDeep'),
+    transition: 'border-color 0.16s, box-shadow 0.16s, transform 0.16s',
+  },
+  thumbOpenBtn: {
+    display: 'block',
+    position: 'relative',
+    border: 'none',
+    background: 'transparent',
+    color: 'inherit',
+    cursor: 'pointer',
+    lineHeight: 0,
+    padding: 0,
+    font: 'inherit',
+    outline: 'none',
   },
   thumbImg: {
     display: 'block',
@@ -963,6 +1029,28 @@ const c: Record<string, CSSProperties> = {
     boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.65), 0 0 12px rgba(248, 113, 113, 0.65)',
     boxSizing: 'border-box',
     pointerEvents: 'none',
+  },
+  thumbRemoveBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    zIndex: 3,
+    width: 22,
+    height: 22,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '1px solid rgba(255, 255, 255, 0.28)',
+    borderRadius: 999,
+    background: 'rgba(20, 20, 20, 0.58)',
+    color: 'rgba(255, 255, 255, 0.92)',
+    cursor: 'pointer',
+    padding: 0,
+    lineHeight: 1,
+    outline: 'none',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    transition: 'opacity 0.16s, transform 0.16s, background 0.16s, border-color 0.16s',
   },
   sourceActionBtn: {
     padding: '3px 8px',
@@ -1249,7 +1337,7 @@ const landing: Record<string, CSSProperties> = {
   loadingGallery: {
     flex: 1,
     minHeight: 0,
-    padding: 20,
+    padding: '20px 20px 220px',
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
     gridAutoRows: 'minmax(140px, 220px)',
@@ -1278,11 +1366,16 @@ const galleryLayout: Record<string, CSSProperties> = {
     overflow: 'hidden',
   },
   composerWrap: {
-    flexShrink: 0,
-    padding: '12px 20px 16px',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: '0 20px 18px',
     display: 'flex',
     justifyContent: 'center',
-    background: cssVar('bgElevated'),
+    background: 'transparent',
+    zIndex: 30,
+    pointerEvents: 'none',
   },
 };
 
