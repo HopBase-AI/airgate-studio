@@ -29,13 +29,23 @@ export const MODEL_REGISTRY: ModelConfig[] = [
       { value: '1024x1024', label: '1024×1024',  tier: '1K', price: 0.10, aspect: '1:1' },
       { value: '1536x1024', label: '1536×1024',  tier: '1K', price: 0.10, aspect: '3:2' },
       { value: '1024x1536', label: '1024×1536',  tier: '1K', price: 0.10, aspect: '2:3' },
+      { value: '1536x864',  label: '1536×864',   tier: '1K', price: 0.10, aspect: '16:9' },
+      { value: '864x1536',  label: '864×1536',   tier: '1K', price: 0.10, aspect: '9:16' },
+      { value: '1536x1152', label: '1536×1152',  tier: '1K', price: 0.10, aspect: '4:3' },
+      { value: '1152x1536', label: '1152×1536',  tier: '1K', price: 0.10, aspect: '3:4' },
       // 2K (1537-2048)
       { value: '2048x2048', label: '2048×2048',  tier: '2K', price: 0.20, aspect: '1:1' },
       { value: '2048x1152', label: '2048×1152',  tier: '2K', price: 0.20, aspect: '16:9' },
       { value: '1152x2048', label: '1152×2048',  tier: '2K', price: 0.20, aspect: '9:16' },
+      { value: '2048x1536', label: '2048×1536',  tier: '2K', price: 0.20, aspect: '4:3' },
+      { value: '1536x2048', label: '1536×2048',  tier: '2K', price: 0.20, aspect: '3:4' },
+      { value: '2000x1600', label: '2000×1600',  tier: '2K', price: 0.20, aspect: '5:4' },
+      { value: '1600x2000', label: '1600×2000',  tier: '2K', price: 0.20, aspect: '4:5' },
       // 4K (>2048)
       { value: '3840x2160', label: '3840×2160',  tier: '4K', price: 0.40, aspect: '16:9' },
       { value: '2160x3840', label: '2160×3840',  tier: '4K', price: 0.40, aspect: '9:16' },
+      { value: '3360x1440', label: '3360×1440',  tier: '4K', price: 0.40, aspect: '21:9' },
+      { value: '1440x3360', label: '1440×3360',  tier: '4K', price: 0.40, aspect: '9:21' },
     ],
   },
 ];

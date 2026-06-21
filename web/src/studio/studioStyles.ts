@@ -660,6 +660,17 @@ export const studioStyles: Record<string, CSSProperties> = {
     cursor: 'pointer',
   },
 
+  previewStage: {
+    width: 'min(92vw, 1280px)',
+    height: 'min(76vh, 860px)',
+    overflow: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    boxSizing: 'border-box',
+  },
+
   previewOverlayImg: {
     maxWidth: '60vw',
     maxHeight: '65vh',
@@ -667,6 +678,49 @@ export const studioStyles: Record<string, CSSProperties> = {
     objectFit: 'contain',
     boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
     cursor: 'default',
+  },
+
+  previewToolbar: {
+    position: 'absolute',
+    top: 20,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: 5,
+    borderRadius: 12,
+    background: 'rgba(255, 255, 255, 0.08)',
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    color: '#fff',
+    cursor: 'default',
+  },
+
+  previewZoomBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 30,
+    height: 28,
+    border: 'none',
+    borderRadius: 8,
+    background: 'transparent',
+    color: '#fff',
+    cursor: 'pointer',
+    fontSize: 14,
+    fontWeight: 700,
+    fontFamily: 'inherit',
+  },
+
+  previewZoomLabel: {
+    minWidth: 42,
+    textAlign: 'center',
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 11,
+    fontFamily: cssVar('fontMono'),
+    userSelect: 'none',
   },
 
   previewCloseBtn: {

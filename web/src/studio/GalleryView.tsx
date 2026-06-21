@@ -1009,7 +1009,7 @@ export function GalleryView() {
   const filteredGallery = q ? gallery.filter(it => (it.prompt || '').toLowerCase().includes(q)) : gallery;
   const isEmpty = gallery.length === 0 && visibleTasks.length === 0;
   const selectedCount = selectedIds.size;
-  const allVisibleSelected = gallery.length > 0 && gallery.every(item => selectedIds.has(item.id));
+  const allVisibleSelected = filteredGallery.length > 0 && filteredGallery.every(item => selectedIds.has(item.id));
 
   useEffect(() => {
     setSelectedIds(prev => {
@@ -1041,7 +1041,8 @@ export function GalleryView() {
   };
 
   const selectAllVisible = () => {
-    setSelectedIds(new Set(gallery.map(item => item.id)));
+    // 只全选「当前可见」(搜索过滤后) 的素材，避免选中并误删被搜索隐藏的图片。
+    setSelectedIds(new Set(filteredGallery.map(item => item.id)));
   };
 
   const clearSelection = () => {

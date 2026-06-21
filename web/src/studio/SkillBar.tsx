@@ -91,6 +91,7 @@ export interface SkillBarProps {
   busySkillId: string | null;
   // 触发一个技能。preset 仅对 style/bg 有值。
   onTrigger: (skill: SkillConfig, preset?: { id: string; label: string; prompt: string }) => void;
+  placement?: 'top' | 'bottom';
 }
 
 /**
@@ -98,9 +99,14 @@ export interface SkillBarProps {
  * 设计原则：所有技能都把结果汇聚回输入框/生成管线，用户始终用同一个发送键，
  * 不在此处产生隐藏的最终操作。style / bg 点开二级预设菜单。
  */
-export function SkillBar({ hasImage, busySkillId, onTrigger }: SkillBarProps) {
+export function SkillBar({ hasImage, busySkillId, onTrigger, placement = 'top' }: SkillBarProps) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  const skills = SKILL_REGISTRY.filter(skill => (
+    placement === 'bottom'
+      ? skill.id === 'style' || skill.id === 'bg'
+      : skill.id !== 'style' && skill.id !== 'bg'
+  ));
 
   // 点外部关闭弹层
   useEffect(() => {
@@ -127,9 +133,11 @@ export function SkillBar({ hasImage, busySkillId, onTrigger }: SkillBarProps) {
     onTrigger(skill, preset);
   };
 
+  if (skills.length === 0) return null;
+
   return (
     <div style={s.bar} ref={barRef} className="studio-skillbar">
-      {SKILL_REGISTRY.map(skill => {
+      {skills.map(skill => {
         const busy = busySkillId === skill.id;
         const hasMenu = skill.id === 'style' || skill.id === 'bg';
         const presets = skill.id === 'style' ? STYLE_PRESETS : skill.id === 'bg' ? BG_PRESETS : [];
