@@ -5,10 +5,7 @@ import { StudioProvider, useStudio } from './StudioContext';
 import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
-import { SkillBar } from './SkillBar';
 import { ProjectSidebar } from './ProjectSidebar';
-import { api } from '../api';
-import type { SkillConfig } from './skillConfig';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -48,7 +45,7 @@ const me: Record<string, CSSProperties> = {
     background: 'rgba(0,0,0,0.82)',
     display: 'flex', flexDirection: 'column',
     alignItems: 'center', justifyContent: 'center',
-    gap: 14, padding: 40,
+    gap: 12, padding: 24,
   },
   hint: {
     fontSize: 12, color: 'rgba(255,255,255,0.5)',
@@ -59,10 +56,21 @@ const me: Record<string, CSSProperties> = {
     position: 'relative', borderRadius: 10, overflow: 'hidden',
     cursor: 'crosshair', userSelect: 'none', lineHeight: 0,
     boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+    margin: 'auto',
   },
   img: {
     display: 'block', maxWidth: '70vw', maxHeight: '60vh',
     objectFit: 'contain', pointerEvents: 'none',
+  },
+  stage: {
+    width: 'min(92vw, 1280px)',
+    height: 'min(72vh, 820px)',
+    overflow: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    boxSizing: 'border-box',
   },
   selRect: {
     position: 'absolute',
@@ -73,6 +81,40 @@ const me: Record<string, CSSProperties> = {
   } as CSSProperties,
   actions: {
     display: 'flex', gap: 8,
+  },
+  zoomBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '5px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.12)',
+    background: 'rgba(255,255,255,0.08)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+  },
+  zoomBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 30,
+    height: 28,
+    border: 'none',
+    borderRadius: 8,
+    background: 'transparent',
+    color: '#fff',
+    cursor: 'pointer',
+    fontSize: 14,
+    fontWeight: 700,
+    fontFamily: 'inherit',
+  },
+  zoomLabel: {
+    minWidth: 42,
+    textAlign: 'center',
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 11,
+    fontFamily: cssVar('fontMono'),
+    userSelect: 'none',
   },
   btn: {
     padding: '8px 20px', border: '1px solid rgba(255,255,255,0.12)',
@@ -111,12 +153,21 @@ function MaskEditor({ src, selection: initialSelection, onConfirm, onClose, onDe
   const [sel, setSel] = useState<NormalizedRect | null>(initialSelection);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [liveRect, setLiveRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const zoomImage = useCallback((delta: number) => {
+    setZoom(value => Math.max(0.5, Math.min(3, Math.round((value + delta) * 10) / 10)));
+  }, []);
 
   useEffect(() => {
-    const handleKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const handleKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === '+' || e.key === '=') zoomImage(0.25);
+      if (e.key === '-' || e.key === '_') zoomImage(-0.25);
+      if (e.key === '0') setZoom(1);
+    };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose]);
+  }, [onClose, zoomImage]);
 
   const getImageMetrics = useCallback(() => {
     const container = containerRef.current;
@@ -210,17 +261,36 @@ function MaskEditor({ src, selection: initialSelection, onConfirm, onClose, onDe
       {maskingEnabled && (
         <div style={me.hint}>在图片上拖拽框选要局部修改的区域，不框选则为整图变换</div>
       )}
+      <div style={me.zoomBar} onClick={e => e.stopPropagation()}>
+        <button type="button" style={me.zoomBtn} onClick={() => zoomImage(-0.25)} aria-label="缩小">−</button>
+        <span style={me.zoomLabel}>{Math.round(zoom * 100)}%</span>
+        <button type="button" style={me.zoomBtn} onClick={() => zoomImage(0.25)} aria-label="放大">+</button>
+        <button type="button" style={me.zoomBtn} onClick={() => setZoom(1)} aria-label="适配屏幕">适配</button>
+      </div>
       <div
-        ref={containerRef}
-        style={maskingEnabled ? me.canvas : { ...me.canvas, cursor: 'default' }}
+        style={{
+          ...me.stage,
+          alignItems: zoom > 1 ? 'flex-start' : 'center',
+          justifyContent: zoom > 1 ? 'flex-start' : 'center',
+        }}
         onClick={e => e.stopPropagation()}
-        onMouseDown={maskingEnabled ? onDown : undefined}
-        onMouseMove={maskingEnabled ? onMove : undefined}
-        onMouseUp={maskingEnabled ? onUp : undefined}
-        onMouseLeave={maskingEnabled ? onUp : undefined}
       >
-        <img ref={imgRef} src={src} alt="source" style={me.img} />
-        {maskingEnabled && overlay}
+        <div
+          ref={containerRef}
+          style={maskingEnabled ? me.canvas : { ...me.canvas, cursor: 'default' }}
+          onMouseDown={maskingEnabled ? onDown : undefined}
+          onMouseMove={maskingEnabled ? onMove : undefined}
+          onMouseUp={maskingEnabled ? onUp : undefined}
+          onMouseLeave={maskingEnabled ? onUp : undefined}
+        >
+          <img
+            ref={imgRef}
+            src={src}
+            alt="source"
+            style={{ ...me.img, maxWidth: `${70 * zoom}vw`, maxHeight: `${60 * zoom}vh` }}
+          />
+          {maskingEnabled && overlay}
+        </div>
       </div>
       <div style={me.actions} onClick={e => e.stopPropagation()}>
         {onDelete && (
@@ -407,12 +477,23 @@ const floatNav: Record<string, CSSProperties> = {
     padding: 0,
     transition: 'all 0.15s',
   },
+  topLeft: {
+    position: 'absolute',
+    top: 16,
+    left: 20,
+    zIndex: 20,
+  },
+  topRight: {
+    position: 'absolute',
+    top: 16,
+    right: 20,
+    zIndex: 20,
+  },
 };
 
-function FloatingNav() {
-  const { t } = useTranslation();
+// ThemeToggle 独立于创作框：主题切换属于全局外观，不该挤在「生成」工具栏里。放工作坊右上角。
+function ThemeToggle() {
   const [theme, setThemeState] = useState<ThemeName>(() => getStoredTheme());
-
   const toggleTheme = () => {
     const next: ThemeName = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
@@ -420,27 +501,37 @@ function FloatingNav() {
     document.documentElement.classList.toggle('dark', next === 'dark');
     setThemeState(next);
   };
-
   return (
-    <div style={floatNav.wrap}>
-      <a href="/" style={floatNav.btn} className="studio-console-link">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
+    <button
+      type="button"
+      style={{ ...floatNav.iconBtn, ...floatNav.topRight }}
+      className="studio-console-link"
+      onClick={toggleTheme}
+      title={theme === 'dark' ? '浅色模式' : '深色模式'}
+      aria-label="切换主题"
+    >
+      {theme === 'dark' ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
         </svg>
-        {t('playground.studio_console', { defaultValue: '控制台' })}
-      </a>
-      <button type="button" style={floatNav.iconBtn} className="studio-console-link" onClick={toggleTheme}>
-        {theme === 'dark' ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-          </svg>
-        )}
-      </button>
-    </div>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+function ConsoleBackLink() {
+  const { t } = useTranslation();
+  return (
+    <a href="/" style={{ ...floatNav.btn, ...floatNav.topLeft }} className="studio-console-link">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
+      </svg>
+      <span>{t('playground.studio_console', { defaultValue: '控制台' })}</span>
+    </a>
   );
 }
 
@@ -510,22 +601,13 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     imageSize, setImageSize,
     generate,
     referenceImages, setReferenceImages,
+    editRequest, clearEditRequest,
   } = useStudio();
 
   const [prompt, setPrompt] = useState('');
   const [count, setCount] = useState(1);
-  const [theme, setThemeState] = useState<ThemeName>(() => getStoredTheme());
-  const toggleTheme = () => {
-    const next: ThemeName = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    document.documentElement.classList.toggle('light', next === 'light');
-    document.documentElement.classList.toggle('dark', next === 'dark');
-    setThemeState(next);
-  };
   const [sourceImages, setSourceImages] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [busySkillId, setBusySkillId] = useState<string | null>(null);
-  const [skillError, setSkillError] = useState<string | null>(null);
 
   // mask state (only for single image → inpaint)
   const [selection, setSelection] = useState<NormalizedRect | null>(null);
@@ -543,6 +625,16 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       };
     }
   }, [promptRef]);
+
+  // 「编辑这张」：结果卡片请求编辑某图 → 载入主框为唯一源图并打开蒙版编辑器（局部重绘）。
+  useEffect(() => {
+    if (!editRequest) return;
+    setSourceImages([editRequest]);
+    setSelection(null);
+    setEditorIndex(0);
+    clearEditRequest();
+    textareaRef.current?.focus();
+  }, [editRequest, clearEditRequest]);
 
   // Union: composer uploads come first, then gallery "use as reference" picks.
   // Both can coexist now (previously gallery picks only showed when composer
@@ -582,36 +674,6 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
-    }
-  };
-
-  // handleSkillTrigger —— 技能调度核心。当前只开放 generate 类技能。
-  const handleSkillTrigger = async (skill: SkillConfig, preset?: { id: string; label: string; prompt: string }) => {
-    if (busySkillId) return;
-    setSkillError(null);
-
-    // 需要参考图但当前没有：引导上传，而不是禁用按钮（降低操作门槛）。
-    if (skill.needsImage && !hasSource) {
-      fileInputRef.current?.click();
-      setSkillError(t('playground.studio_skill_need_image', { defaultValue: '请先选择一张参考图，再使用该技能' }));
-      return;
-    }
-
-    try {
-      setBusySkillId(skill.id);
-
-      if (skill.kind === 'generate') {
-        // 风格迁移 / 换背景：套预设 prompt，直接 img2img 生成（结果进画廊）
-        const basePrompt = preset?.prompt ?? skill.wrap?.(prompt.trim()) ?? prompt.trim();
-        if (!basePrompt) return;
-        setImageMode('img2img');
-        void generate(basePrompt, { mode: 'img2img', sourceImages: allSources, count: 1 });
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '技能执行失败';
-      setSkillError(msg);
-    } finally {
-      setBusySkillId(null);
     }
   };
 
@@ -752,30 +814,33 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       )}
       <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFileInput} />
 
-      {/* Skills 胶囊行 —— 所有技能结果都汇聚回输入框/生成管线 */}
-      <SkillBar hasImage={hasSource} busySkillId={busySkillId} onTrigger={handleSkillTrigger} />
-      {skillError && <div style={c.skillError}>{skillError}</div>}
-
       {/* Prompt textarea */}
-      <textarea
-        ref={textareaRef}
-        style={c.textarea}
-        value={prompt}
-        onChange={e => setPrompt(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={t('playground.studio_quick_placeholder', { defaultValue: placeholder })}
-        rows={5}
-      />
+      <div style={c.promptArea}>
+        <button
+          type="button"
+          style={c.promptUploadBtn}
+          className="studio-gallery-action"
+          onClick={() => fileInputRef.current?.click()}
+          title={t('playground.studio_add_reference', { defaultValue: '添加参考图' })}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+          </svg>
+        </button>
+        <textarea
+          ref={textareaRef}
+          style={c.textareaWithUpload}
+          value={prompt}
+          onChange={e => setPrompt(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={t('playground.studio_quick_placeholder', { defaultValue: placeholder })}
+          rows={5}
+        />
+      </div>
 
       {/* Toolbar row */}
       <div style={c.toolbar}>
         <div style={c.toolbarLeft} className="studio-composer-toolbar-left">
-          <a href="/" style={floatNav.btn} className="studio-console-link">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
-            </svg>
-            <span className="studio-hide-mobile">{t('playground.studio_console', { defaultValue: '控制台' })}</span>
-          </a>
           <span style={c.modelBadge}>
             <span style={c.modelDot} />
             {currentModel.name}
@@ -783,21 +848,10 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           <div style={c.sizePicker} className="studio-size-picker">
             <SizeSelector value={imageSize} sizes={currentModel.sizes} onChange={setImageSize} upward compact />
           </div>
-          <button
-            type="button"
-            style={c.imgUploadBtn}
-            className="studio-gallery-action"
-            onClick={() => fileInputRef.current?.click()}
-            title={t('playground.studio_add_reference', { defaultValue: '添加参考图' })}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
-            </svg>
-          </button>
           {onOpenInspiration && (
             <button
               type="button"
-              style={c.imgUploadBtn}
+              style={{ ...c.imgUploadBtn, width: 'auto', gap: 4, padding: '0 9px' }}
               className="studio-gallery-action"
               onClick={onOpenInspiration}
               title={t('playground.studio_inspiration_gallery', { defaultValue: '灵感画廊' })}
@@ -805,8 +859,10 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z" />
               </svg>
+              <span style={{ fontSize: 11, fontWeight: 500 }}>{t('playground.studio_inspiration_gallery', { defaultValue: '灵感' })}</span>
             </button>
           )}
+          <span style={{ fontSize: 10, color: cssVar('textTertiary'), marginLeft: 2, flexShrink: 0, whiteSpace: 'nowrap' }}>数量</span>
           <div style={c.countGroup}>
             {COUNT_OPTIONS.map(n => (
               <button
@@ -819,17 +875,6 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               </button>
             ))}
           </div>
-          <button type="button" style={floatNav.iconBtn} className="studio-console-link" onClick={toggleTheme}>
-            {theme === 'dark' ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-            )}
-          </button>
         </div>
         <button
           type="button"
@@ -929,12 +974,51 @@ const c: Record<string, CSSProperties> = {
     letterSpacing: '0.02em',
     opacity: 0.6,
   },
+  promptArea: {
+    position: 'relative',
+    minHeight: COMPOSER_TEXTAREA_HEIGHT,
+  },
+  promptUploadBtn: {
+    position: 'absolute',
+    left: 14,
+    top: 10,
+    zIndex: 2,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 30,
+    height: 26,
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 6,
+    background: 'transparent',
+    color: cssVar('textTertiary'),
+    cursor: 'pointer',
+    padding: 0,
+    transition: 'all 0.15s',
+  },
   textarea: {
     width: '100%',
     height: COMPOSER_TEXTAREA_HEIGHT,
     minHeight: COMPOSER_TEXTAREA_HEIGHT,
     maxHeight: COMPOSER_TEXTAREA_HEIGHT,
     padding: '8px 14px',
+    border: 'none',
+    background: 'transparent',
+    color: cssVar('text'),
+    fontSize: 14,
+    fontFamily: 'inherit',
+    resize: 'none',
+    outline: 'none',
+    lineHeight: 1.6,
+    overflowY: 'auto',
+    boxSizing: 'border-box',
+  },
+  textareaWithUpload: {
+    width: '100%',
+    height: COMPOSER_TEXTAREA_HEIGHT,
+    minHeight: COMPOSER_TEXTAREA_HEIGHT,
+    maxHeight: COMPOSER_TEXTAREA_HEIGHT,
+    padding: '8px 14px 8px 54px',
     border: 'none',
     background: 'transparent',
     color: cssVar('text'),
@@ -1250,6 +1334,8 @@ function StudioLayout() {
         {mobileTabs}
         {projectPanel}
         <div className="studio-panel-create" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: cssVar('bgElevated'), overflow: 'hidden', position: 'relative' } as CSSProperties}>
+          <ConsoleBackLink />
+        <ThemeToggle />
           <div style={landing.emptyScroll}>
             <div style={landing.hero}>
               <div style={landing.iconWrap}>
@@ -1283,6 +1369,8 @@ function StudioLayout() {
       {mobileTabs}
       {projectPanel}
       <div className="studio-panel-create" style={{ ...galleryLayout.wrapper, flex: 1, minWidth: 0, position: 'relative' }}>
+        <ConsoleBackLink />
+        <ThemeToggle />
         <GalleryView />
         <div style={galleryLayout.composerWrap}>
           <ComposerBar promptRef={promptRef} onOpenInspiration={() => setInspirationOpen(true)} />

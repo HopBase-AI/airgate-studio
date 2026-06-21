@@ -10,7 +10,7 @@ import {
 import { api } from '../api';
 import type { GenerationTask, Project, ProjectAsset } from '../api';
 import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType } from './types';
-import { getModelConfig, getDefaultModel, MODEL_REGISTRY, type ModelConfig } from './modelConfig';
+import { getModelConfig, getDefaultModel, type ModelConfig } from './modelConfig';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -166,6 +166,7 @@ async function pollGenerationTask(
   taskId: number,
   signal: AbortSignal,
   maxAttempts = POLL_MAX_ATTEMPTS,
+  onPoll?: (task: GenerationTask) => void,
 ): Promise<GenerationTask> {
   let networkErrors = 0;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -184,6 +185,7 @@ async function pollGenerationTask(
       if (task.status === 'failed') {
         throw new Error(task.error_message || 'Image generation task failed');
       }
+      onPoll?.(task); // 透传中途进度给 UI（仅 processing/pending）
     }
     const backoff = networkErrors > 0 ? Math.min(POLL_INTERVAL_MS * 2, 6000) : POLL_INTERVAL_MS;
     await delay(backoff, signal);
@@ -235,6 +237,11 @@ export interface StudioContextValue {
   retryBatchFailures: (uiId: string) => void;
   useAsReference: (item: GalleryItem) => void;
   regenerate: (item: GalleryItem) => void;
+  variations: (item: GalleryItem) => void;
+  // 「编辑这张」：把某张结果图载入主创作框并打开蒙版编辑器（ComposerBar 监听 editRequest）。
+  editRequest: string | null;
+  requestEdit: (url: string) => void;
+  clearEditRequest: () => void;
 
   // Projects (轻量项目维度). projectsEnabled=false 时（后端未配置 DB）退回「全部」视图。
   projectsEnabled: boolean;
@@ -774,7 +781,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             const created = await api.createGenerationTask(taskData);
             if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
             updateTask({ remoteTaskIds: [created.id] });
-            const completed = await pollGenerationTask(created.id, signal);
+            const completed = await pollGenerationTask(created.id, signal, POLL_MAX_ATTEMPTS, (t) => {
+              if (typeof t.progress === 'number') updateTask({ progress: t.progress });
+            });
             const images = parseMarkdownImages(completed.result_content || '');
 
             const galleryItems: GalleryItem[] = images.map(img => ({
@@ -891,6 +900,25 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       });
     }, 0);
   }, [generate, setSelectedModelId, setImageMode, setImageSize]);
+
+  // variations —— 「变体」：同 prompt 出 4 张（gpt-image-2 无固定 seed，自然各异），复用批量路径。
+  const variations = useCallback((item: GalleryItem) => {
+    const mode = item.mode === 'batch' ? 'text2img' : item.mode;
+    const sourceImage = item.sourceUrl ?? (mode === 'img2img' || mode === 'inpaint' ? item.url : undefined);
+    setSelectedModelId(item.model);
+    setImageMode(mode);
+    if (item.size) setImageSize(item.size);
+    setReferenceImages(sourceImage ? [sourceImage] : []);
+    setTimeout(() => {
+      generate(item.prompt, { mode: 'batch', count: 4, sourceImages: sourceImage ? [sourceImage] : undefined });
+    }, 0);
+  }, [generate, setSelectedModelId, setImageMode, setImageSize]);
+
+  // editRequest —— 「编辑这张」桥接：GalleryCard 调 requestEdit(url)，ComposerBar 监听后
+  // 把该图载入主框并打开蒙版编辑器（局部重绘），用完 clearEditRequest 清空。
+  const [editRequest, setEditRequest] = useState<string | null>(null);
+  const requestEdit = useCallback((url: string) => setEditRequest(url), []);
+  const clearEditRequest = useCallback(() => setEditRequest(null), []);
 
   // retryBatchFailures —— 只重发某个批量任务里失败的子任务，复用 task 自身保存的
   // 执行上下文（model/size/sources），不依赖当前 UI state，因此用户切换
@@ -1040,6 +1068,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     retryBatchFailures,
     useAsReference,
     regenerate,
+    variations,
+    editRequest,
+    requestEdit,
+    clearEditRequest,
     projectsEnabled,
     projects,
     activeProjectId,

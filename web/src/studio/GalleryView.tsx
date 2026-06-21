@@ -255,10 +255,124 @@ const batchCardStyles: Record<string, CSSProperties> = {
   },
 };
 
+const batchStyles: Record<string, CSSProperties> = {
+  toolbar: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 25,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    margin: '0 0 14px',
+    padding: '8px 10px',
+    borderRadius: 12,
+    background: cssVar('bgElevated'),
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+  },
+  toolbarLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
+  },
+  toolbarRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  label: {
+    fontSize: 12,
+    color: cssVar('textSecondary'),
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+  },
+  hint: {
+    fontSize: 11,
+    color: cssVar('textTertiary'),
+    whiteSpace: 'nowrap',
+  },
+  actionBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 30,
+    padding: '0 10px',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 7,
+    background: 'transparent',
+    color: cssVar('textSecondary'),
+    cursor: 'pointer',
+    fontSize: 11,
+    fontWeight: 600,
+    fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
+    transition: 'all 0.15s',
+  },
+  dangerBtn: {
+    border: `1px solid ${cssVar('dangerSubtle')}`,
+    color: cssVar('danger'),
+  },
+  disabledBtn: {
+    opacity: 0.45,
+    cursor: 'not-allowed',
+  },
+  cardSelectable: {
+    cursor: 'default',
+  },
+  cardSelected: {
+    borderColor: cssVar('primary'),
+    boxShadow: `0 0 0 1px ${cssVar('primaryGlow')}, 0 2px 8px rgba(0, 0, 0, 0.12)`,
+  },
+  selectBtn: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    zIndex: 5,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
+    padding: 0,
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 7,
+    background: cssVar('bgElevated'),
+    color: cssVar('textTertiary'),
+    cursor: 'pointer',
+    transition: 'all 0.15s',
+  },
+  selectBtnSelected: {
+    borderColor: cssVar('primary'),
+    background: cssVar('primarySubtle'),
+    color: cssVar('text'),
+  },
+};
+
 function TaskCard({ task }: { task: StudioGenerationTask }) {
   const { t } = useTranslation();
-  const { deleteTask, generate, setSelectedModelId, setImageSize, setImageMode, retryBatchFailures } = useStudio();
+  const { deleteTask, generate, setSelectedModelId, setImageSize, setImageMode, retryBatchFailures, tasks } = useStudio();
   const { copied, copy } = useCopyOnClick(task.prompt);
+
+  // 生成反馈：已用时计时（每秒）、队列位置、按尺寸档的 ETA 估算。
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (task.status === 'completed' || task.status === 'failed') return;
+    const started = new Date(task.createdAt).getTime();
+    const tick = () => setElapsed(Math.max(0, Math.round((Date.now() - started) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [task.createdAt, task.status]);
+  const queuePos = task.status === 'queued'
+    ? tasks.filter(x => x.status === 'queued').findIndex(x => x.id === task.id) + 1
+    : 0;
+  const etaSeconds = /3840|2160|4k/i.test(task.size || '') ? 40 : /2048|2k/i.test(task.size || '') ? 25 : 15;
 
   // 批量任务：渲染聚合卡（子任务进度 + 全部重试）。
   const isBatch = !!task.subtasks && task.subtasks.length > 0;
@@ -371,6 +485,26 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
         <div style={taskCardStyles.spinner} />
       )}
       <div style={taskCardStyles.statusLabel}>{statusLabel}</div>
+      {task.status !== 'failed' && (
+        <>
+          <div style={{ width: '72%', maxWidth: 200, height: 3, borderRadius: 999, background: cssVar('bgHover'), overflow: 'hidden', margin: '1px 0' }}>
+            <div style={{
+              height: '100%',
+              width: typeof task.progress === 'number' && task.progress > 0 ? `${Math.min(100, task.progress)}%` : '40%',
+              background: cssVar('primary'),
+              borderRadius: 999,
+              opacity: typeof task.progress === 'number' && task.progress > 0 ? 1 : 0.45,
+              transition: 'width 0.4s ease',
+            }} />
+          </div>
+          <div style={{ fontSize: 10, color: cssVar('textTertiary'), fontFamily: cssVar('fontMono') }}>
+            {task.status === 'queued' && queuePos > 0
+              ? t('playground.studio_queue_position', { defaultValue: '队列中 · 第 {{pos}} 位', pos: queuePos })
+              : t('playground.studio_eta', { defaultValue: '已用 {{elapsed}}s · 约 {{eta}}s', elapsed, eta: etaSeconds })}
+            {typeof task.progress === 'number' && task.progress > 0 ? ` · ${Math.round(task.progress)}%` : ''}
+          </div>
+        </>
+      )}
       {task.status === 'failed' && task.error && (
         <div style={taskCardStyles.errorText}>{task.error}</div>
       )}
@@ -417,9 +551,17 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
 const GALLERY_COL_WIDTH = 200;
 const GALLERY_OVERLAY_HEIGHT = 104;
 
-function GalleryCard({ item, index }: { item: GalleryItem; index: number }) {
+interface GalleryCardProps {
+  item: GalleryItem;
+  index: number;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelected?: (id: string) => void;
+}
+
+function GalleryCard({ item, index, selectionMode = false, selected = false, onToggleSelected }: GalleryCardProps) {
   const { t } = useTranslation();
-  const { setPreviewItem, deleteGalleryItem, useAsReference, regenerate, generatedAssetRetentionDays } = useStudio();
+  const { setPreviewItem, deleteGalleryItem, useAsReference, regenerate, variations, requestEdit, generatedAssetRetentionDays } = useStudio();
   const { copied, copy } = useCopyOnClick(item.prompt);
   const aspectRatio = parseAspectRatio(item.size);
   const createdAtLabel = formatCreatedAt(item.createdAt);
@@ -451,12 +593,27 @@ function GalleryCard({ item, index }: { item: GalleryItem; index: number }) {
     deleteGalleryItem(item.id);
   };
 
+  const handleToggleSelected = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleSelected?.(item.id);
+  };
+
+  const handlePreview = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (selectionMode) {
+      onToggleSelected?.(item.id);
+      return;
+    }
+    setPreviewItem(item);
+  };
+
   if (!near && placeholderHeight > 0) {
     return (
       <div
         ref={ref}
         style={{
           ...ss.galleryCard,
+          ...(selected ? batchStyles.cardSelected : {}),
           height: placeholderHeight,
           background: cssVar('bgElevated'),
         }}
@@ -468,9 +625,36 @@ function GalleryCard({ item, index }: { item: GalleryItem; index: number }) {
   return (
     <div
       ref={ref}
-      style={{ ...ss.galleryCard, animationDelay: `${Math.min(index * 50, 300)}ms` }}
+      style={{
+        ...ss.galleryCard,
+        ...(selectionMode ? batchStyles.cardSelectable : {}),
+        ...(selected ? batchStyles.cardSelected : {}),
+        animationDelay: `${Math.min(index * 50, 300)}ms`,
+      }}
       className="studio-gallery-card"
+      onClick={selectionMode ? handleToggleSelected : undefined}
     >
+      {selectionMode && (
+        <button
+          type="button"
+          style={{
+            ...batchStyles.selectBtn,
+            ...(selected ? batchStyles.selectBtnSelected : {}),
+          }}
+          className="studio-gallery-action"
+          onClick={handleToggleSelected}
+          aria-pressed={selected}
+          title={selected
+            ? t('playground.studio_batch_unselect', { defaultValue: '取消选择' })
+            : t('playground.studio_batch_select', { defaultValue: '选择' })}
+        >
+          {selected && (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          )}
+        </button>
+      )}
       <img
         src={item.url}
         srcSet={buildThumbSrcSet(item.url)}
@@ -480,7 +664,7 @@ function GalleryCard({ item, index }: { item: GalleryItem; index: number }) {
         loading="lazy"
         decoding="async"
         fetchPriority="low"
-        onClick={() => setPreviewItem(item)}
+        onClick={handlePreview}
       />
       <div style={ss.galleryCardOverlay}>
         <div style={ss.galleryCardMetaRow}>
@@ -567,6 +751,32 @@ function GalleryCard({ item, index }: { item: GalleryItem; index: number }) {
             type="button"
             style={ss.galleryCardActionBtn}
             className="studio-gallery-action"
+            onClick={(e) => { e.stopPropagation(); requestEdit(item.url); }}
+            title={t('playground.studio_edit_this', { defaultValue: '编辑这张' })}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            style={ss.galleryCardActionBtn}
+            className="studio-gallery-action"
+            onClick={(e) => { e.stopPropagation(); variations(item); }}
+            title={t('playground.studio_variations', { defaultValue: '变体（4 张）' })}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            style={ss.galleryCardActionBtn}
+            className="studio-gallery-action"
             onClick={handleDelete}
             title={t('playground.studio_delete', { defaultValue: '删除' })}
           >
@@ -587,15 +797,22 @@ function GalleryCard({ item, index }: { item: GalleryItem; index: number }) {
 function PreviewOverlay() {
   const { previewItem, setPreviewItem } = useStudio();
   const [hiResReady, setHiResReady] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const zoomImage = useCallback((delta: number) => {
+    setZoom(value => Math.max(0.5, Math.min(3, Math.round((value + delta) * 10) / 10)));
+  }, []);
 
   useEffect(() => {
     if (!previewItem) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setPreviewItem(null);
+      if (e.key === '+' || e.key === '=') zoomImage(0.25);
+      if (e.key === '-' || e.key === '_') zoomImage(-0.25);
+      if (e.key === '0') setZoom(1);
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [previewItem, setPreviewItem]);
+  }, [previewItem, setPreviewItem, zoomImage]);
 
   // Preload the original off-DOM. When ready, swap the displayed src from the
   // 512-wide thumb (often already cached by the gallery grid) to the full-res
@@ -603,6 +820,7 @@ function PreviewOverlay() {
   // re-shows the placeholder until the new hi-res arrives.
   useEffect(() => {
     setHiResReady(false);
+    setZoom(1);
     if (!previewItem) return;
     if (!isLocalRuntimeAsset(previewItem.url)) {
       setHiResReady(true);
@@ -625,6 +843,12 @@ function PreviewOverlay() {
 
   return (
     <div style={ss.previewOverlay} onClick={() => setPreviewItem(null)}>
+      <div style={ss.previewToolbar} onClick={e => e.stopPropagation()}>
+        <button type="button" style={ss.previewZoomBtn} onClick={() => zoomImage(-0.25)} aria-label="缩小">−</button>
+        <span style={ss.previewZoomLabel}>{Math.round(zoom * 100)}%</span>
+        <button type="button" style={ss.previewZoomBtn} onClick={() => zoomImage(0.25)} aria-label="放大">+</button>
+        <button type="button" style={ss.previewZoomBtn} onClick={() => setZoom(1)} aria-label="适配屏幕">适配</button>
+      </div>
       <button
         type="button"
         style={ss.previewCloseBtn}
@@ -633,14 +857,22 @@ function PreviewOverlay() {
       >
         ×
       </button>
-      <img
-        src={displaySrc}
-        alt={previewItem.alt || previewItem.prompt}
-        style={useProgressive
-          ? { ...ss.previewOverlayImg, filter: 'blur(6px)', transition: 'filter 0.25s' }
-          : { ...ss.previewOverlayImg, filter: 'blur(0)', transition: 'filter 0.25s' }}
+      <div
+        style={{
+          ...ss.previewStage,
+          alignItems: zoom > 1 ? 'flex-start' : 'center',
+          justifyContent: zoom > 1 ? 'flex-start' : 'center',
+        }}
         onClick={e => e.stopPropagation()}
-      />
+      >
+        <img
+          src={displaySrc}
+          alt={previewItem.alt || previewItem.prompt}
+          style={useProgressive
+            ? { ...ss.previewOverlayImg, maxWidth: `${60 * zoom}vw`, maxHeight: `${65 * zoom}vh`, filter: 'blur(6px)', transition: 'filter 0.25s' }
+            : { ...ss.previewOverlayImg, maxWidth: `${60 * zoom}vw`, maxHeight: `${65 * zoom}vh`, filter: 'blur(0)', transition: 'filter 0.25s' }}
+        />
+      </div>
     </div>
   );
 }
@@ -750,8 +982,12 @@ function EmptyState() {
 // ── GalleryView ─────────────────────────────────────────────────────────────
 
 export function GalleryView() {
-  const { gallery, tasks, previewItem, hasMore, loadingMore, loadMore } = useStudio();
+  const { gallery, tasks, previewItem, hasMore, loadingMore, loadMore, deleteGalleryItem } = useStudio();
+  const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [query, setQuery] = useState('');
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -769,7 +1005,58 @@ export function GalleryView() {
   }, [handleScroll]);
 
   const visibleTasks = tasks.filter(t => t.status !== 'completed');
+  const q = query.trim().toLowerCase();
+  const filteredGallery = q ? gallery.filter(it => (it.prompt || '').toLowerCase().includes(q)) : gallery;
   const isEmpty = gallery.length === 0 && visibleTasks.length === 0;
+  const selectedCount = selectedIds.size;
+  const allVisibleSelected = gallery.length > 0 && gallery.every(item => selectedIds.has(item.id));
+
+  useEffect(() => {
+    setSelectedIds(prev => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(gallery.map(item => item.id));
+      const next = new Set([...prev].filter(id => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [gallery]);
+
+  const toggleSelectionMode = () => {
+    setSelectionMode(prev => {
+      const next = !prev;
+      if (!next) setSelectedIds(new Set());
+      return next;
+    });
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const selectAllVisible = () => {
+    setSelectedIds(new Set(gallery.map(item => item.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  const deleteSelected = async () => {
+    if (selectedCount === 0) return;
+    const ok = await confirm(t('playground.studio_confirm_delete_selected', { defaultValue: '确定要删除选中的 {{count}} 张图片吗？', count: selectedCount }));
+    if (!ok) return;
+    const ids = [...selectedIds];
+    ids.forEach(id => deleteGalleryItem(id));
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  };
 
   return (
     <div ref={scrollRef} style={ss.gallery} className="studio-gallery">
@@ -778,14 +1065,94 @@ export function GalleryView() {
       {isEmpty ? (
         <EmptyState />
       ) : (
-        <div style={ss.galleryGrid}>
-          {visibleTasks.map(task => (
-            <TaskCard key={task.id} task={task} />
-          ))}
-          {gallery.map((item, i) => (
-            <GalleryCard key={item.id} item={item} index={i} />
-          ))}
-        </div>
+        <>
+          <div style={batchStyles.toolbar}>
+            <div style={batchStyles.toolbarLeft}>
+              <span style={batchStyles.label}>
+                {selectionMode
+                  ? t('playground.studio_batch_selected_count', { defaultValue: '已选择 {{count}} 张', count: selectedCount })
+                  : t('playground.studio_batch_manage_assets', { defaultValue: '素材管理' })}
+              </span>
+              {selectionMode ? (
+                <span style={batchStyles.hint}>
+                  {t('playground.studio_batch_select_hint', { defaultValue: '点击图片选择素材' })}
+                </span>
+              ) : gallery.length > 0 ? (
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t('playground.studio_search_prompt', { defaultValue: '搜索提示词…' })}
+                  style={{
+                    marginLeft: 6, maxWidth: 220, width: '40vw', minWidth: 0,
+                    padding: '4px 10px', borderRadius: 7, fontSize: 12,
+                    border: `1px solid ${cssVar('borderSubtle')}`, background: cssVar('bgElevated'),
+                    color: cssVar('text'), fontFamily: 'inherit', outline: 'none',
+                  }}
+                />
+              ) : null}
+            </div>
+            <div style={batchStyles.toolbarRight}>
+              {selectionMode && (
+                <>
+                  <button
+                    type="button"
+                    style={batchStyles.actionBtn}
+                    className="studio-gallery-action"
+                    onClick={allVisibleSelected ? clearSelection : selectAllVisible}
+                  >
+                    {allVisibleSelected
+                      ? t('playground.studio_batch_clear_selection', { defaultValue: '取消全选' })
+                      : t('playground.studio_batch_select_all', { defaultValue: '全选当前' })}
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...batchStyles.actionBtn,
+                      ...batchStyles.dangerBtn,
+                      ...(selectedCount === 0 ? batchStyles.disabledBtn : {}),
+                    }}
+                    className="studio-gallery-action"
+                    onClick={() => { void deleteSelected(); }}
+                    disabled={selectedCount === 0}
+                  >
+                    {t('playground.studio_batch_delete', { defaultValue: '删除选中' })}
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                style={batchStyles.actionBtn}
+                className="studio-gallery-action"
+                onClick={toggleSelectionMode}
+              >
+                {selectionMode
+                  ? t('playground.studio_batch_done_manage', { defaultValue: '完成' })
+                  : t('playground.studio_batch_manage', { defaultValue: '批量操作' })}
+              </button>
+            </div>
+          </div>
+          <div style={ss.galleryGrid}>
+            {visibleTasks.map(task => (
+              <TaskCard key={task.id} task={task} />
+            ))}
+            {filteredGallery.length === 0 && q && (
+              <div style={{ gridColumn: '1 / -1', padding: '24px 8px', textAlign: 'center', fontSize: 12, color: cssVar('textTertiary') }}>
+                {t('playground.studio_search_empty', { defaultValue: '没有匹配「{{q}}」的作品', q: query.trim() })}
+              </div>
+            )}
+            {filteredGallery.map((item, i) => (
+              <GalleryCard
+                key={item.id}
+                item={item}
+                index={i}
+                selectionMode={selectionMode}
+                selected={selectedIds.has(item.id)}
+                onToggleSelected={toggleSelected}
+              />
+            ))}
+          </div>
+        </>
       )}
       {loadingMore && (
         <div style={{ textAlign: 'center', padding: '16px 0', color: cssVar('textTertiary'), fontSize: 12 }}>加载中...</div>

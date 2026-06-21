@@ -144,11 +144,14 @@ export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSe
     const el = triggerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const width = Math.max(rect.width, 220);
+    // 下拉是 fixed 定位，会逃逸父级 overflow；窄屏下钳制 width/left 保证不冲出视口。
+    const vw = window.innerWidth;
+    const width = Math.min(Math.max(rect.width, 220), vw - 16);
+    const left = Math.max(8, Math.min(rect.left, vw - width - 8));
     if (upward) {
-      setPos({ top: rect.top - 6, left: rect.left, width });
+      setPos({ top: rect.top - 6, left, width });
     } else {
-      setPos({ top: rect.bottom + 6, left: rect.left, width });
+      setPos({ top: rect.bottom + 6, left, width });
     }
   }, [upward]);
 
