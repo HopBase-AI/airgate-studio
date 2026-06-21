@@ -113,6 +113,31 @@ export interface ProjectAsset {
   created_at: string;
 }
 
+export interface InspirationSource {
+  name: string;
+  url?: string;
+  note?: string;
+}
+
+export interface InspirationItem {
+  id: string;
+  category: string;
+  scenario?: string;
+  title: string;
+  description?: string;
+  kind: 'image' | 'prompt' | string;
+  image?: string;
+  prompt: string;
+  tags?: string[];
+  source?: string;
+}
+
+export interface InspirationCatalog {
+  version: string;
+  sources?: InspirationSource[];
+  items: InspirationItem[];
+}
+
 export const api = {
   createGenerationTask(params: {
     kind: string;
@@ -156,6 +181,11 @@ export const api = {
     if (capability) qs.set('capability', capability);
     const suffix = qs.toString() ? `?${qs}` : '';
     return request<{ models: ModelInfo[] }>('GET', `/models${suffix}`).then(r => r.models || []);
+  },
+
+  listInspirations(): Promise<InspirationCatalog> {
+    return request<InspirationCatalog>('GET', '/inspirations')
+      .then(r => ({ ...r, items: r.items || [] }));
   },
 
   getPublicSettings(): Promise<Record<string, string>> {

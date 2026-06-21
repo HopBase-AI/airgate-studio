@@ -6,6 +6,7 @@ import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
 import { ProjectSidebar } from './ProjectSidebar';
+import { api, type InspirationCatalog, type InspirationItem } from '../api';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -311,10 +312,16 @@ function MaskEditor({ src, selection: initialSelection, onConfirm, onClose, onDe
 // ── Templates ───────────────────────────────────────────────────────────────
 
 interface Inspiration {
+  id?: string;
   category: string;
+  scenario?: string;
   title: string;
-  image: string;
+  description?: string;
+  kind?: 'image' | 'prompt' | string;
+  image?: string;
   prompt: string;
+  tags?: string[];
+  source?: string;
 }
 
 const INSPIRATIONS: Inspiration[] = [
@@ -338,6 +345,17 @@ const INSPIRATIONS: Inspiration[] = [
   { category: '角色', title: '机甲少女', image: '/plugins/airgate-studio/assets/inspirations/mecha-girl.jpg', prompt: 'A mecha girl mid-teens, pale skin smudged with soot and salt spray, sharp amber eyes with glowing HUD reticles, waist-length ash-white hair tied in a high ponytail whipping in the sea wind, matte gunmetal exoskeleton armor plating her shoulders forearms and shins, exposed hydraulic pistons at the joints, chest rig with glowing cyan coolant lines, massive rail cannon resting on her right shoulder. Standing on rusted steel platform jutting out over dark water. Vast derelict sea-city at dusk, colossal megastructures rising from the ocean. Cinematic anime key visual, 16:9.' },
   { category: '角色', title: 'GTA 风格花市', image: '/plugins/airgate-studio/assets/inspirations/gta-market.jpg', prompt: 'GTA 6 style artwork set in a vibrant Bangalore flower market in India. Bold stylized characters, dramatic poses, vivid colors, urban street energy mixed with traditional Indian market atmosphere. Game cover art composition, cinematic lighting, detailed environment.' },
   { category: '角色', title: '动漫街头潮牌', image: '/plugins/airgate-studio/assets/inspirations/anime-streetwear.jpg', prompt: 'Stylized anime streetwear brand poster of a fast-food mascot character, full-body dynamic pose, highly detailed manga illustration, modern urban fashion outfit inspired by restaurant brand colors, oversized hoodie, tactical straps, sneakers, chains, branded accessories, holding signature food item. Bold graphic typography, editorial magazine layout, Japanese text elements, grunge textures, paint splashes. Collectible poster aesthetic, cyber street fashion meets commercial advertising, vibrant red/orange/black/white palette.' },
+  { category: '电商', scenario: '商品主图', kind: 'prompt', title: '白底平台主图', description: '适合 Listing 首图，干净真实，方便后期裁切。', tags: ['白底图', 'Listing', '主图'], prompt: 'Create a clean e-commerce product listing image for [PRODUCT]. Center the product on a pure white background, accurate proportions, true-to-life materials, soft shadow directly under the product, crisp edges, no props, no text, no logo changes, commercial packshot photography, high-resolution, ready for marketplace listing.' },
+  { category: '电商', scenario: '场景图', kind: 'prompt', title: '生活方式场景图', description: '把商品放到真实使用场景，适合详情页和店铺首页。', tags: ['Lifestyle', '详情页', '场景图'], prompt: 'Create a premium lifestyle product photo for [PRODUCT] used by [TARGET CUSTOMER] in a realistic [SCENE]. Keep the product clearly visible as the hero, natural hand placement if relevant, warm daylight, believable scale, editorial composition, shallow depth of field, aspirational but not stock-like, no text, no extra logos.' },
+  { category: '电商', scenario: 'A+详情', kind: 'prompt', title: 'A+详情页模块', description: '用于商品卖点解释图，留出后期排版空间。', tags: ['A+内容', '详情页', '卖点'], prompt: 'Design an Amazon A+ content visual for [PRODUCT] highlighting [BENEFIT]. Use a clean premium layout, product on one side, contextual background related to [USE CASE], subtle callout spaces without rendering text, organized negative space for copy placement, accurate product shape and material, commercial studio lighting.' },
+  { category: '电商', scenario: '卖点图', kind: 'prompt', title: '卖点信息图底图', description: '生成可后期加字的卖点图，不让模型直接画文字。', tags: ['卖点图', '信息图', '详情页'], prompt: 'Create a clean product benefit infographic background for [PRODUCT]. Show the product large and sharp, include 3-4 empty visual callout zones with subtle lines or icon placeholders but no readable text, use brand color accents [BRAND COLORS], bright commercial lighting, high clarity, suitable for adding Chinese copy later.' },
+  { category: '电商', scenario: '效果对比', kind: 'prompt', title: '前后对比图', description: '适合清洁、护肤、收纳、修复等结果类商品。', tags: ['对比图', '效果展示'], prompt: 'Create a split-screen before-and-after product result image for [PRODUCT]. Left side shows the problem state [BEFORE STATE], right side shows the improved state [AFTER STATE]. Keep lighting and perspective consistent, realistic transformation, clean divider space for labels added later, no text, no exaggerated impossible claims.' },
+  { category: '电商', scenario: '套装陈列', kind: 'prompt', title: '套装 Flatlay', description: '适合礼盒、套装、配件组合和内容物展示。', tags: ['Flatlay', '套装', '礼盒'], prompt: 'Create a top-down flatlay product bundle photo for [PRODUCT SET]. Arrange all items neatly with balanced spacing, premium textured background, soft natural shadows, coherent color palette, realistic packaging, clear view of every component, no text, commercial catalog photography.' },
+  { category: '电商', scenario: '社媒广告', kind: 'prompt', title: '9:16 社媒广告底图', description: '适合小红书、TikTok、Reels 的竖版广告图。', tags: ['小红书', 'TikTok', '社媒广告'], prompt: 'Create a 9:16 vertical social ad visual for [PRODUCT]. Product must be the first focal point, energetic composition, one strong use-case moment, space at top and bottom for copy overlays, modern direct-to-consumer brand aesthetic, bright but natural lighting, no generated text, no fake UI.' },
+  { category: '电商', scenario: 'UGC素材', kind: 'prompt', title: 'UGC 手持实拍感', description: '适合达人种草图、买家秀和真实使用反馈素材。', tags: ['UGC', '种草', '买家秀'], prompt: 'Create a realistic UGC-style handheld photo of [PRODUCT] being used by [TARGET CUSTOMER]. Casual but polished framing, natural indoor light, slight phone-camera realism, authentic environment, product label readable only if supplied, no over-retouching, no text overlay, trustworthy review-photo mood.' },
+  { category: '服饰', scenario: '商品主图', kind: 'prompt', title: '服装幽灵模特图', description: '适合服装主图，展示版型和面料细节。', tags: ['服饰', '主图', 'Ghost mannequin'], prompt: 'Create a ghost mannequin e-commerce photo for [GARMENT]. Show the garment floating naturally with correct structure and fit, front view, clean light gray or white studio background, accurate fabric texture, realistic folds, no human body visible, no text, premium fashion catalog lighting.' },
+  { category: '服饰', scenario: '模特图', kind: 'prompt', title: 'Lookbook 模特图', description: '适合服装品牌调性展示和店铺首页素材。', tags: ['Lookbook', '模特', '服饰'], prompt: 'Create an editorial lookbook image for [GARMENT] worn by [MODEL DESCRIPTION] in [SCENE]. Preserve garment details, natural pose, full-body composition, premium fashion photography, soft directional light, clean background, realistic fabric movement, no text or logos beyond the garment.' },
+  { category: '广告', scenario: '节日营销', kind: 'prompt', title: '节日营销KV', description: '适合大促、礼赠、节日活动首图。', tags: ['大促', '节日', 'KV'], prompt: 'Create a premium seasonal campaign key visual for [PRODUCT] during [FESTIVAL OR SHOPPING EVENT]. Product centered as hero, festive but restrained props, brand color palette [BRAND COLORS], elegant commercial lighting, space for promotional copy, no generated text, high-end e-commerce campaign style.' },
 ];
 
 // ── InspirationSidebar ─────────────────────────────────────────────────────────
@@ -368,11 +386,26 @@ const tpl: Record<string, CSSProperties> = {
     fontFamily: cssVar('fontMono'),
     opacity: 0.6,
   },
+  sectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    padding: '8px 4px 6px',
+  },
+  catCount: {
+    fontSize: 10,
+    color: cssVar('textTertiary'),
+    fontFamily: cssVar('fontMono'),
+    opacity: 0.55,
+  },
   grid: {
     columns: '160px',
     columnGap: 10,
   } as CSSProperties,
   card: {
+    width: '100%',
+    textAlign: 'left',
     borderRadius: 10,
     overflow: 'hidden',
     cursor: 'pointer',
@@ -382,6 +415,27 @@ const tpl: Record<string, CSSProperties> = {
     background: cssVar('bgElevated'),
     breakInside: 'avoid',
     marginBottom: 10,
+    padding: 0,
+    font: 'inherit',
+    color: 'inherit',
+  } as CSSProperties,
+  promptCard: {
+    width: '100%',
+    textAlign: 'left',
+    borderRadius: 10,
+    cursor: 'pointer',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    boxShadow: '0 1px 4px rgba(0, 0, 0, 0.05)',
+    transition: 'all 0.15s',
+    background: cssVar('bgElevated'),
+    breakInside: 'avoid',
+    marginBottom: 10,
+    padding: '10px 10px 9px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 7,
+    font: 'inherit',
+    color: 'inherit',
   } as CSSProperties,
   thumb: {
     width: '100%',
@@ -411,6 +465,93 @@ const tpl: Record<string, CSSProperties> = {
     fontWeight: 600,
     flexShrink: 0,
     cursor: 'pointer',
+  },
+  cardScenario: {
+    fontSize: 10,
+    color: cssVar('primary'),
+    fontWeight: 700,
+    fontFamily: cssVar('fontMono'),
+  },
+  cardDesc: {
+    fontSize: 11,
+    lineHeight: 1.45,
+    color: cssVar('textTertiary'),
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+  },
+  tagRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  tag: {
+    fontSize: 10,
+    lineHeight: 1.2,
+    padding: '2px 5px',
+    borderRadius: 5,
+    background: cssVar('bgHover'),
+    color: cssVar('textTertiary'),
+  },
+  drawerTools: {
+    padding: '10px 14px 8px',
+    borderBottom: `1px solid ${cssVar('borderSubtle')}`,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    flexShrink: 0,
+  },
+  searchInput: {
+    width: '100%',
+    height: 34,
+    padding: '0 10px',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 8,
+    background: cssVar('bgDeep'),
+    color: cssVar('text'),
+    fontSize: 12,
+    outline: 'none',
+    boxSizing: 'border-box',
+    fontFamily: 'inherit',
+  },
+  filterRow: {
+    display: 'flex',
+    gap: 6,
+    overflowX: 'auto',
+    paddingBottom: 2,
+  },
+  filterBtn: {
+    flexShrink: 0,
+    height: 26,
+    padding: '0 9px',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 7,
+    background: 'transparent',
+    color: cssVar('textTertiary'),
+    cursor: 'pointer',
+    fontSize: 11,
+    fontFamily: 'inherit',
+    transition: 'all 0.15s',
+  },
+  filterBtnActive: {
+    background: cssVar('primarySubtle'),
+    border: `1px solid color-mix(in oklab, ${cssVar('primary')} 32%, transparent)`,
+    color: cssVar('text'),
+    fontWeight: 700,
+  },
+  emptyState: {
+    padding: '28px 12px',
+    textAlign: 'center',
+    color: cssVar('textTertiary'),
+    fontSize: 12,
+    lineHeight: 1.5,
+  },
+  sourceNote: {
+    fontSize: 10,
+    color: cssVar('textTertiary'),
+    opacity: 0.62,
+    padding: '0 2px',
   },
   drawerHeader: {
     display: 'flex',
@@ -545,28 +686,143 @@ function ConsoleBackLink() {
   );
 }
 
-function InspirationGrid({ onSelect, gridStyle }: { onSelect: (prompt: string) => void; gridStyle?: CSSProperties }) {
-  const categories = [...new Set(INSPIRATIONS.map(i => i.category))];
+const fallbackInspirationCatalog: InspirationCatalog = {
+  version: 'local',
+  items: INSPIRATIONS.map((item, index) => ({
+    id: item.id ?? `local-${index}-${item.title}`,
+    category: item.category,
+    scenario: item.scenario,
+    title: item.title,
+    description: item.description,
+    kind: item.kind ?? (item.image ? 'image' : 'prompt'),
+    image: item.image,
+    prompt: item.prompt,
+    tags: item.tags,
+    source: item.source ?? 'local',
+  })),
+};
+
+function normalizeCatalogItem(item: InspirationItem): Inspiration {
+  return {
+    id: item.id,
+    category: item.category,
+    scenario: item.scenario,
+    title: item.title,
+    description: item.description,
+    kind: item.kind,
+    image: item.image,
+    prompt: item.prompt,
+    tags: item.tags,
+    source: item.source,
+  };
+}
+
+function itemMatchesQuery(item: Inspiration, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = [
+    item.category,
+    item.scenario,
+    item.title,
+    item.description,
+    item.prompt,
+    ...(item.tags ?? []),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(q);
+}
+
+function useInspirationCatalog() {
+  const [catalog, setCatalog] = useState<InspirationCatalog>(fallbackInspirationCatalog);
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'fallback'>('loading');
+
+  useEffect(() => {
+    let alive = true;
+    api.listInspirations()
+      .then(next => {
+        if (!alive) return;
+        setCatalog(next.items.length ? next : fallbackInspirationCatalog);
+        setLoadState('ready');
+      })
+      .catch(() => {
+        if (!alive) return;
+        setCatalog(fallbackInspirationCatalog);
+        setLoadState('fallback');
+      });
+    return () => { alive = false; };
+  }, []);
+
+  return {
+    catalog,
+    loadState,
+    items: catalog.items.map(normalizeCatalogItem),
+  };
+}
+
+function InspirationCard({ item, onSelect }: { item: Inspiration; onSelect: (prompt: string) => void }) {
+  const tags = item.tags?.slice(0, 3) ?? [];
+  const isPromptOnly = !item.image || item.kind === 'prompt';
+  if (isPromptOnly) {
+    return (
+      <button
+        type="button"
+        style={tpl.promptCard}
+        className="studio-template-card"
+        onClick={() => onSelect(item.prompt)}
+        title={item.prompt.slice(0, 160) + '...'}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span style={tpl.cardScenario}>{item.scenario || item.category}</span>
+          <span style={tpl.useBtn}>使用</span>
+        </div>
+        <div style={{ ...tpl.cardLabel, whiteSpace: 'normal' }}>{item.title}</div>
+        {item.description && <div style={tpl.cardDesc}>{item.description}</div>}
+        {tags.length > 0 && (
+          <div style={tpl.tagRow}>
+            {tags.map(tag => <span key={tag} style={tpl.tag}>{tag}</span>)}
+          </div>
+        )}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      style={tpl.card}
+      className="studio-template-card"
+      onClick={() => onSelect(item.prompt)}
+      title={item.prompt.slice(0, 160) + '...'}
+    >
+      <img src={item.image} alt={item.title} style={tpl.thumb} loading="lazy" />
+      <div style={tpl.cardBottom}>
+        <span style={tpl.cardLabel}>{item.title}</span>
+        <span style={tpl.useBtn}>使用</span>
+      </div>
+    </button>
+  );
+}
+
+function InspirationGrid({
+  onSelect,
+  gridStyle,
+  items,
+}: {
+  onSelect: (prompt: string) => void;
+  gridStyle?: CSSProperties;
+  items?: Inspiration[];
+}) {
+  const sourceItems = items ?? fallbackInspirationCatalog.items.map(normalizeCatalogItem);
+  const categories = [...new Set(sourceItems.map(i => i.category))];
   return (
     <>
       {categories.map(cat => (
         <div key={cat}>
-          <div style={tpl.catLabel}>{cat}</div>
+          <div style={tpl.sectionHeader}>
+            <div style={tpl.catLabel}>{cat}</div>
+            <span style={tpl.catCount}>{sourceItems.filter(i => i.category === cat).length}</span>
+          </div>
           <div style={gridStyle ?? tpl.grid}>
-            {INSPIRATIONS.filter(i => i.category === cat).map(item => (
-              <div
-                key={item.title}
-                style={tpl.card}
-                className="studio-template-card"
-                onClick={() => onSelect(item.prompt)}
-                title={item.prompt.slice(0, 100) + '...'}
-              >
-                <img src={item.image} alt={item.title} style={tpl.thumb} loading="lazy" />
-                <div style={tpl.cardBottom}>
-                  <span style={tpl.cardLabel}>{item.title}</span>
-                  <span style={tpl.useBtn}>使用</span>
-                </div>
-              </div>
+            {sourceItems.filter(i => i.category === cat).map(item => (
+              <InspirationCard key={item.id ?? item.title} item={item} onSelect={onSelect} />
             ))}
           </div>
         </div>
@@ -575,9 +831,27 @@ function InspirationGrid({ onSelect, gridStyle }: { onSelect: (prompt: string) =
   );
 }
 
+function InspirationHomeGrid({ onSelect, gridStyle }: { onSelect: (prompt: string) => void; gridStyle?: CSSProperties }) {
+  const { items } = useInspirationCatalog();
+  return <InspirationGrid onSelect={onSelect} gridStyle={gridStyle} items={items} />;
+}
+
 // InspirationDrawer —— 从右侧滑入的灵感抽屉。点击卡片填词后自动关闭。
 function InspirationDrawer({ onSelect, onClose }: { onSelect: (prompt: string) => void; onClose: () => void }) {
   const { t } = useTranslation();
+  const { items: allItems, loadState } = useInspirationCatalog();
+  const [query, setQuery] = useState('');
+  const [kind, setKind] = useState<'all' | 'image' | 'prompt'>('all');
+  const [category, setCategory] = useState('全部');
+
+  const categories = ['全部', ...new Set(allItems.map(item => item.category))];
+  const visibleItems = allItems.filter(item => {
+    const itemKind = item.image && item.kind !== 'prompt' ? 'image' : 'prompt';
+    if (kind !== 'all' && itemKind !== kind) return false;
+    if (category !== '全部' && item.category !== category) return false;
+    return itemMatchesQuery(item, query);
+  });
+
   return (
     <>
       <div className="studio-inspiration-drawer-backdrop" onClick={onClose} />
@@ -590,8 +864,51 @@ function InspirationDrawer({ onSelect, onClose }: { onSelect: (prompt: string) =
             </svg>
           </button>
         </div>
+        <div style={tpl.drawerTools}>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            style={tpl.searchInput}
+            placeholder="搜索商品主图、详情页、UGC、海报..."
+          />
+          <div style={tpl.filterRow} className="studio-inspiration-filters">
+            {(['all', 'image', 'prompt'] as const).map(nextKind => (
+              <button
+                key={nextKind}
+                type="button"
+                style={kind === nextKind ? { ...tpl.filterBtn, ...tpl.filterBtnActive } : tpl.filterBtn}
+                onClick={() => setKind(nextKind)}
+              >
+                {nextKind === 'all' ? '全部' : nextKind === 'image' ? '案例图' : '业务提示词'}
+              </button>
+            ))}
+          </div>
+          <div style={tpl.filterRow} className="studio-inspiration-filters">
+            {categories.map(cat => (
+              <button
+                key={cat}
+                type="button"
+                style={category === cat ? { ...tpl.filterBtn, ...tpl.filterBtnActive } : tpl.filterBtn}
+                onClick={() => setCategory(cat)}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+          <div style={tpl.sourceNote}>
+            {loadState === 'loading'
+              ? '正在加载灵感资源库...'
+              : loadState === 'fallback'
+              ? '使用内置灵感库'
+              : `${visibleItems.length} / ${allItems.length} 个灵感素材`}
+          </div>
+        </div>
         <div style={tpl.drawerBody} className="studio-gallery">
-          <InspirationGrid onSelect={(p) => { onSelect(p); onClose(); }} />
+          {visibleItems.length > 0 ? (
+            <InspirationGrid items={visibleItems} onSelect={(p) => { onSelect(p); onClose(); }} />
+          ) : (
+            <div style={tpl.emptyState}>没有匹配的灵感素材，换个关键词或分类试试。</div>
+          )}
         </div>
       </div>
     </>
@@ -1506,7 +1823,7 @@ function StudioLayout() {
             {/* 空状态把灵感网格铺在主区，回收原本浪费的空白 */}
             <div style={landing.inspireSection}>
               <div style={landing.inspireHeading}>{'灵感画廊'}</div>
-              <InspirationGrid onSelect={handleTemplate} gridStyle={landing.inspireGrid} />
+              <InspirationHomeGrid onSelect={handleTemplate} gridStyle={landing.inspireGrid} />
             </div>
           </div>
           {drawer}

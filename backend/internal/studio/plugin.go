@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
@@ -21,6 +23,12 @@ type StudioPlugin struct {
 	skillTextModel   string
 	skillVisionModel string
 	skillGroupID     int64 // skill LLM 调用绑定的分组（用折扣分组省钱）；0 = 不绑分组按标准价
+
+	inspirationCatalogURL string
+	inspirationCacheMu    sync.Mutex
+	inspirationCacheURL   string
+	inspirationCache      InspirationCatalog
+	inspirationCacheUntil time.Time
 }
 
 func (p *StudioPlugin) Info() sdk.PluginInfo { return buildPluginInfo() }
@@ -42,6 +50,7 @@ func (p *StudioPlugin) Init(ctx sdk.PluginContext) error {
 		p.skillPlatform = strings.TrimSpace(cfg.GetString("skill_platform"))
 		p.skillTextModel = strings.TrimSpace(cfg.GetString("skill_text_model"))
 		p.skillVisionModel = strings.TrimSpace(cfg.GetString("skill_vision_model"))
+		p.inspirationCatalogURL = strings.TrimSpace(cfg.GetString("inspiration_catalog_url"))
 		if p.skillPlatform == "" {
 			p.skillPlatform = "openai"
 		}

@@ -18,6 +18,7 @@ func registerRoutes(p *StudioPlugin, r sdk.RouteRegistrar) {
 	r.Handle(http.MethodDelete, "/generation-tasks/", p.handleDeleteGenerationTask)
 	r.Handle(http.MethodGet, "/platforms", p.handleListPlatforms)
 	r.Handle(http.MethodGet, "/models", p.handleListModels)
+	r.Handle(http.MethodGet, "/inspirations", p.handleListInspirations)
 
 	// 项目 / 资产（需要 DB；用 requireProjectService 守护，未配置态返回 503）。
 	// 路由匹配为「先精确、再最长 `/` 前缀」，故 /projects/{id} 与 /projects/{id}/assets
