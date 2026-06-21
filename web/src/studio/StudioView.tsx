@@ -823,7 +823,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           onClick={() => fileInputRef.current?.click()}
           title={t('playground.studio_add_reference', { defaultValue: '添加参考图' })}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
           </svg>
         </button>
@@ -981,15 +981,15 @@ const c: Record<string, CSSProperties> = {
   promptUploadBtn: {
     position: 'absolute',
     left: 14,
-    top: 10,
+    top: 8,
     zIndex: 2,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 30,
-    height: 26,
+    width: 42,
+    height: 36,
     border: `1px solid ${cssVar('borderSubtle')}`,
-    borderRadius: 6,
+    borderRadius: 9,
     background: 'transparent',
     color: cssVar('textTertiary'),
     cursor: 'pointer',
@@ -1018,7 +1018,7 @@ const c: Record<string, CSSProperties> = {
     height: COMPOSER_TEXTAREA_HEIGHT,
     minHeight: COMPOSER_TEXTAREA_HEIGHT,
     maxHeight: COMPOSER_TEXTAREA_HEIGHT,
-    padding: '8px 14px 8px 54px',
+    padding: '8px 14px 8px 68px',
     border: 'none',
     background: 'transparent',
     color: cssVar('text'),

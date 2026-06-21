@@ -663,7 +663,7 @@ export const studioStyles: Record<string, CSSProperties> = {
   previewStage: {
     width: 'min(92vw, 1280px)',
     height: 'min(76vh, 860px)',
-    overflow: 'auto',
+    overflow: 'hidden',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -677,7 +677,9 @@ export const studioStyles: Record<string, CSSProperties> = {
     borderRadius: 12,
     objectFit: 'contain',
     boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
-    cursor: 'default',
+    transformOrigin: 'center center',
+    userSelect: 'none',
+    touchAction: 'none',
   },
 
   previewToolbar: {
