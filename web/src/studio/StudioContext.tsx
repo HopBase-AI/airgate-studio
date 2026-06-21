@@ -196,6 +196,9 @@ async function pollGenerationTask(
 // ── Context type ──────────────────────────────────────────────────────────────
 
 export interface StudioContextValue {
+  // Initial shell/data recovery
+  initialLoadComplete: boolean;
+
   // Media type
   mediaType: MediaType;
   setMediaType: (type: MediaType) => void;
@@ -291,9 +294,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const galleryOffsetRef = useRef(0);
 
   const recoveryPromiseRef = useRef<Promise<void> | null>(null);
+  const [galleryRecovered, setGalleryRecovered] = useState(false);
 
   // Projects
   const [projectsEnabled, setProjectsEnabled] = useState(false);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<number>(ALL_VIEW_ID);
   // activeProjectId 的 ref 副本，供 generate 的异步回调读取最新值（避免闭包捕获旧值）。
@@ -530,8 +535,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!recoveryPromiseRef.current) {
+      let active = true;
       const controller = new AbortController();
-      recoveryPromiseRef.current = recoverTasks(controller.signal);
+      recoveryPromiseRef.current = recoverTasks(controller.signal).finally(() => {
+        if (active) setGalleryRecovered(true);
+      });
+      return () => { active = false; };
     }
   }, [recoverTasks]);
 
@@ -547,6 +556,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         if (active) setProjectsEnabled(false);
+      })
+      .finally(() => {
+        if (active) setProjectsLoaded(true);
       });
     return () => { active = false; };
   }, []);
@@ -1040,6 +1052,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // ── Context value ─────────────────────────────────────────────────────────
 
   const value: StudioContextValue = {
+    initialLoadComplete: galleryRecovered && projectsLoaded,
     mediaType,
     setMediaType,
     imageMode,

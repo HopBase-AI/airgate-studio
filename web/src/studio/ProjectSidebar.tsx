@@ -102,6 +102,23 @@ const s: Record<string, CSSProperties> = {
     outline: 'none',
     fontFamily: 'inherit',
   },
+  footer: {
+    flexShrink: 0,
+    padding: '8px',
+    borderTop: `1px solid ${cssVar('borderSubtle')}`,
+  },
+  consoleLink: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+    padding: '8px 10px',
+    borderRadius: 8,
+    color: cssVar('textTertiary'),
+    fontSize: 12,
+    fontWeight: 600,
+    textDecoration: 'none',
+    transition: cssVar('transition'),
+  },
 };
 
 function IconPlus() {
@@ -124,6 +141,14 @@ function IconFolder() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+}
+
+function IconArrowLeft() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
     </svg>
   );
 }
@@ -233,6 +258,17 @@ export function ProjectSidebar() {
             </div>
           );
         })}
+      </div>
+      <div style={s.footer}>
+        <a
+          href="/"
+          style={s.consoleLink}
+          className="studio-console-link"
+          title={t('playground.studio_back_console', { defaultValue: '返回控制台' })}
+        >
+          <IconArrowLeft />
+          <span style={s.itemName}>{t('playground.studio_back_console', { defaultValue: '返回控制台' })}</span>
+        </a>
       </div>
     </div>
   );

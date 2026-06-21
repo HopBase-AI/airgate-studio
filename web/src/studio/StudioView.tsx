@@ -491,6 +491,16 @@ const floatNav: Record<string, CSSProperties> = {
   },
 };
 
+const createPanelBase: CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  minWidth: 0,
+  background: cssVar('bgElevated'),
+  overflow: 'hidden',
+  position: 'relative',
+};
+
 // ThemeToggle 独立于创作框：主题切换属于全局外观，不该挤在「生成」工具栏里。放工作坊右上角。
 function ThemeToggle() {
   const [theme, setThemeState] = useState<ThemeName>(() => getStoredTheme());
@@ -1236,6 +1246,25 @@ const landing: Record<string, CSSProperties> = {
     gap: 12,
     marginBottom: 8,
   },
+  loadingGallery: {
+    flex: 1,
+    minHeight: 0,
+    padding: 20,
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+    gridAutoRows: 'minmax(140px, 220px)',
+    gap: 14,
+    overflow: 'hidden',
+  },
+  loadingCard: {
+    minHeight: 160,
+    borderRadius: 14,
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    background: `linear-gradient(110deg, ${cssVar('bgDeep')} 0%, ${cssVar('bgHover')} 42%, ${cssVar('bgDeep')} 78%)`,
+    backgroundSize: '200% 100%',
+    animation: 'studioShimmer 1.4s linear infinite',
+    opacity: 0.62,
+  },
 };
 
 // ── Gallery mode ────────────────────────────────────────────────────────────
@@ -1296,7 +1325,7 @@ const mobileTabStyle: Record<string, CSSProperties> = {
 };
 
 function StudioLayout() {
-  const { gallery, tasks, projectsEnabled } = useStudio();
+  const { gallery, tasks, projectsEnabled, initialLoadComplete } = useStudio();
   const promptRef = useRef<{ set: (v: string) => void } | null>(null);
   const [mobileTab, setMobileTab] = useState<'projects' | 'create'>('create');
   const [inspirationOpen, setInspirationOpen] = useState(false);
@@ -1327,15 +1356,45 @@ function StudioLayout() {
     <InspirationDrawer onSelect={handleTemplate} onClose={() => setInspirationOpen(false)} />
   ) : null;
 
+  const fallbackConsoleLink = initialLoadComplete && !projectsEnabled ? <ConsoleBackLink /> : null;
+
+  if (!initialLoadComplete) {
+    return (
+      <div style={ss.layout} data-mobile-tab={mobileTab}>
+        <style>{studioCSS}</style>
+        {mobileTabs}
+        {projectPanel}
+        <div className="studio-panel-create" style={createPanelBase}>
+          {fallbackConsoleLink}
+          <ThemeToggle />
+          <div style={landing.loadingGallery} aria-busy="true" aria-label="加载作品">
+            {Array.from({ length: 12 }).map((_, index) => (
+              <div
+                key={index}
+                style={{
+                  ...landing.loadingCard,
+                  height: 140 + (index % 4) * 26,
+                }}
+              />
+            ))}
+          </div>
+          <div style={galleryLayout.composerWrap}>
+            <ComposerBar promptRef={promptRef} onOpenInspiration={() => setInspirationOpen(true)} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (isEmpty) {
     return (
       <div style={ss.layout} data-mobile-tab={mobileTab}>
         <style>{studioCSS}</style>
         {mobileTabs}
         {projectPanel}
-        <div className="studio-panel-create" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: cssVar('bgElevated'), overflow: 'hidden', position: 'relative' } as CSSProperties}>
-          <ConsoleBackLink />
-        <ThemeToggle />
+        <div className="studio-panel-create" style={createPanelBase}>
+          {fallbackConsoleLink}
+          <ThemeToggle />
           <div style={landing.emptyScroll}>
             <div style={landing.hero}>
               <div style={landing.iconWrap}>
@@ -1369,7 +1428,7 @@ function StudioLayout() {
       {mobileTabs}
       {projectPanel}
       <div className="studio-panel-create" style={{ ...galleryLayout.wrapper, flex: 1, minWidth: 0, position: 'relative' }}>
-        <ConsoleBackLink />
+        {fallbackConsoleLink}
         <ThemeToggle />
         <GalleryView />
         <div style={galleryLayout.composerWrap}>
