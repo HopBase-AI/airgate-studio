@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type DragEvent, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { cssVar, setTheme, getStoredTheme, type ThemeName } from '@doudou-start/airgate-theme';
+import { cssVar } from '@doudou-start/airgate-theme';
 import { StudioProvider, useStudio } from './StudioContext';
 import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
-import { ProjectSidebar } from './ProjectSidebar';
+import { ProjectSidebar, ThemeToggleButton } from './ProjectSidebar';
 import { api, type InspirationCatalog, type InspirationItem } from '../api';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -618,17 +618,27 @@ const floatNav: Record<string, CSSProperties> = {
     padding: 0,
     transition: 'all 0.15s',
   },
-  topLeft: {
+  bottomLeft: {
     position: 'absolute',
-    top: 16,
     left: 20,
-    zIndex: 20,
+    bottom: 18,
+    zIndex: 31,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
   },
-  topRight: {
+  mobileBottomLeft: {
     position: 'absolute',
-    top: 16,
-    right: 20,
-    zIndex: 20,
+    left: 20,
+    bottom: 178,
+    zIndex: 31,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
+  compactThemeBtn: {
+    width: 28,
+    height: 28,
   },
 };
 
@@ -642,47 +652,32 @@ const createPanelBase: CSSProperties = {
   position: 'relative',
 };
 
-// ThemeToggle 独立于创作框：主题切换属于全局外观，不该挤在「生成」工具栏里。放工作坊右上角。
-function ThemeToggle() {
-  const [theme, setThemeState] = useState<ThemeName>(() => getStoredTheme());
-  const toggleTheme = () => {
-    const next: ThemeName = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    document.documentElement.classList.toggle('light', next === 'light');
-    document.documentElement.classList.toggle('dark', next === 'dark');
-    setThemeState(next);
-  };
-  return (
-    <button
-      type="button"
-      style={{ ...floatNav.iconBtn, ...floatNav.topRight }}
-      className="studio-console-link"
-      onClick={toggleTheme}
-      title={theme === 'dark' ? '浅色模式' : '深色模式'}
-      aria-label="切换主题"
-    >
-      {theme === 'dark' ? (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-        </svg>
-      ) : (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-        </svg>
-      )}
-    </button>
-  );
-}
-
 function ConsoleBackLink() {
   const { t } = useTranslation();
   return (
-    <a href="/" style={{ ...floatNav.btn, ...floatNav.topLeft }} className="studio-console-link">
+    <a href="/" style={floatNav.btn} className="studio-console-link">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
       </svg>
       <span>{t('playground.studio_console', { defaultValue: '控制台' })}</span>
     </a>
+  );
+}
+
+function FloatingStudioControls({ showConsoleLink }: { showConsoleLink: boolean }) {
+  return (
+    <div style={floatNav.bottomLeft} className="studio-corner-controls">
+      {showConsoleLink && <ConsoleBackLink />}
+      <ThemeToggleButton style={floatNav.compactThemeBtn} />
+    </div>
+  );
+}
+
+function MobileStudioControls() {
+  return (
+    <div style={floatNav.mobileBottomLeft} className="studio-mobile-corner-controls">
+      <ThemeToggleButton style={floatNav.compactThemeBtn} />
+    </div>
   );
 }
 
@@ -1766,7 +1761,10 @@ function StudioLayout() {
     <InspirationDrawer onSelect={handleTemplate} onClose={() => setInspirationOpen(false)} />
   ) : null;
 
-  const fallbackConsoleLink = initialLoadComplete && !projectsEnabled ? <ConsoleBackLink /> : null;
+  const showFallbackConsoleLink = initialLoadComplete && !projectsEnabled;
+  const floatingControls = projectsEnabled
+    ? <MobileStudioControls />
+    : <FloatingStudioControls showConsoleLink={showFallbackConsoleLink} />;
 
   if (!initialLoadComplete) {
     return (
@@ -1775,8 +1773,7 @@ function StudioLayout() {
         {mobileTabs}
         {projectPanel}
         <div className="studio-panel-create" style={createPanelBase}>
-          {fallbackConsoleLink}
-          <ThemeToggle />
+          {floatingControls}
           <div style={landing.loadingGallery} aria-busy="true" aria-label="加载作品">
             {Array.from({ length: 12 }).map((_, index) => (
               <div
@@ -1803,8 +1800,7 @@ function StudioLayout() {
         {mobileTabs}
         {projectPanel}
         <div className="studio-panel-create" style={createPanelBase}>
-          {fallbackConsoleLink}
-          <ThemeToggle />
+          {floatingControls}
           <div style={landing.emptyScroll}>
             <div style={landing.hero}>
               <div style={landing.iconWrap}>
@@ -1838,8 +1834,7 @@ function StudioLayout() {
       {mobileTabs}
       {projectPanel}
       <div className="studio-panel-create" style={{ ...galleryLayout.wrapper, flex: 1, minWidth: 0, position: 'relative' }}>
-        {fallbackConsoleLink}
-        <ThemeToggle />
+        {floatingControls}
         <GalleryView />
         <div style={galleryLayout.composerWrap}>
           <ComposerBar promptRef={promptRef} onOpenInspiration={() => setInspirationOpen(true)} />

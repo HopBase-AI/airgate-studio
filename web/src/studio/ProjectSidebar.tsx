@@ -1,6 +1,6 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { cssVar } from '@doudou-start/airgate-theme';
+import { cssVar, getStoredTheme, setTheme, type ThemeName } from '@doudou-start/airgate-theme';
 import { useStudio } from './StudioContext';
 
 const s: Record<string, CSSProperties> = {
@@ -106,6 +106,9 @@ const s: Record<string, CSSProperties> = {
     flexShrink: 0,
     padding: '8px',
     borderTop: `1px solid ${cssVar('borderSubtle')}`,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
   },
   consoleLink: {
     display: 'flex',
@@ -118,6 +121,23 @@ const s: Record<string, CSSProperties> = {
     fontWeight: 600,
     textDecoration: 'none',
     transition: cssVar('transition'),
+    minWidth: 0,
+    flex: 1,
+  },
+  themeBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    background: 'transparent',
+    color: cssVar('textTertiary'),
+    cursor: 'pointer',
+    padding: 0,
+    transition: cssVar('transition'),
+    flexShrink: 0,
   },
 };
 
@@ -152,6 +172,52 @@ function IconArrowLeft() {
     </svg>
   );
 }
+
+function ThemeToggleButton({ style }: { style?: CSSProperties }) {
+  const [theme, setThemeState] = useState<ThemeName>(() => getStoredTheme());
+
+  useEffect(() => {
+    const syncTheme = () => setThemeState(getStoredTheme());
+    window.addEventListener('storage', syncTheme);
+    window.addEventListener('airgate-theme-change', syncTheme);
+    return () => {
+      window.removeEventListener('storage', syncTheme);
+      window.removeEventListener('airgate-theme-change', syncTheme);
+    };
+  }, []);
+
+  const toggleTheme = () => {
+    const current = getStoredTheme();
+    const next: ThemeName = current === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    document.documentElement.classList.toggle('light', next === 'light');
+    document.documentElement.classList.toggle('dark', next === 'dark');
+    setThemeState(next);
+    window.dispatchEvent(new Event('airgate-theme-change'));
+  };
+  return (
+    <button
+      type="button"
+      style={{ ...s.themeBtn, ...style }}
+      className="studio-console-link"
+      onClick={toggleTheme}
+      title={theme === 'dark' ? '浅色模式' : '深色模式'}
+      aria-label="切换主题"
+    >
+      {theme === 'dark' ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+export { ThemeToggleButton };
 
 export function ProjectSidebar() {
   const { t } = useTranslation();
@@ -269,6 +335,7 @@ export function ProjectSidebar() {
           <IconArrowLeft />
           <span style={s.itemName}>{t('playground.studio_back_console', { defaultValue: '返回控制台' })}</span>
         </a>
+        <ThemeToggleButton />
       </div>
     </div>
   );

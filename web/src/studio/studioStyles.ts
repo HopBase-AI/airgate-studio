@@ -971,6 +971,10 @@ export const studioCSS = `
     to { transform: translateX(0); }
   }
 
+  .studio-mobile-corner-controls {
+    display: none !important;
+  }
+
   @media (max-width: 1023px) {
     .studio-mobile-tabs {
       display: flex !important;
@@ -1003,6 +1007,12 @@ export const studioCSS = `
     }
     .studio-hide-mobile {
       display: none !important;
+    }
+    .studio-corner-controls {
+      bottom: 178px !important;
+    }
+    .studio-mobile-corner-controls {
+      display: flex !important;
     }
   }
 `;
