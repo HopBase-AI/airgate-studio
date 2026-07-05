@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '../api';
-import type { GenerationTask, Project, ProjectAsset } from '../api';
+import type { GenerationTask, ImageGroup, Project, ProjectAsset } from '../api';
 import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType } from './types';
 import { getModelConfig, getDefaultModel, type ModelConfig } from './modelConfig';
 
@@ -215,6 +215,12 @@ export interface StudioContextValue {
   imageSize: string;
   setImageSize: (size: string) => void;
 
+  // 计费分组选择（按当前平台拉取，用户可自选高/低倍率通道；null = 交给
+  // core 自动选最便宜分组，与不传 group_id 的历史行为一致）。
+  imageGroups: ImageGroup[];
+  selectedGroupId: number | null;
+  setSelectedGroupId: (id: number) => void;
+
   // Reference images (for img2img / inpaint).
   // Array so multiple gallery items can be added as references; ComposerBar
   // unions this with its locally uploaded sourceImages.
@@ -316,6 +322,48 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setImageSize(newModel.defaultSize);
     }
   }, [imageSize]);
+
+  // ── 计费分组选择 ──────────────────────────────────────────────────────────
+  // 平台切换时重新拉取该用户可用的分组（core 已按最便宜优先排序）。
+  // 用户的选择按平台记在 localStorage；拉取失败或没有分组时回到 null，
+  // 请求不带 group_id，由 core 自动选组（兼容历史行为）。
+
+  const GROUP_STORE_PREFIX = 'studio.imageGroup.';
+  const [imageGroups, setImageGroups] = useState<ImageGroup[]>([]);
+  const [selectedGroupId, setSelectedGroupIdRaw] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setImageGroups([]);
+    setSelectedGroupIdRaw(null);
+    api.listImageGroups(selectedPlatform)
+      .then((groups) => {
+        if (!active) return;
+        setImageGroups(groups);
+        if (groups.length === 0) return;
+        let preferred: number | null = null;
+        try {
+          const raw = window.localStorage.getItem(GROUP_STORE_PREFIX + selectedPlatform);
+          if (raw) preferred = Number.parseInt(raw, 10);
+        } catch { /* ignore */ }
+        const match = groups.find(g => g.id === preferred);
+        setSelectedGroupIdRaw((match ?? groups[0]).id);
+      })
+      .catch(() => {
+        if (active) {
+          setImageGroups([]);
+          setSelectedGroupIdRaw(null);
+        }
+      });
+    return () => { active = false; };
+  }, [selectedPlatform]);
+
+  const setSelectedGroupId = useCallback((id: number) => {
+    setSelectedGroupIdRaw(id);
+    try {
+      window.localStorage.setItem(GROUP_STORE_PREFIX + selectedPlatform, String(id));
+    } catch { /* ignore */ }
+  }, [selectedPlatform]);
 
   // ── Initialization ────────────────────────────────────────────────────────
 
@@ -633,6 +681,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const now = new Date().toISOString();
       const mode = resolveGenerationMode(imageMode, options);
       const remoteTaskIds: number[] = [];
+      // 发起时刻的分组选择：写进 task 供「全部重试」沿用，避免用户中途切组导致错扣。
+      const groupId = selectedGroupId ?? undefined;
 
       const task: StudioGenerationTask = {
         id: taskId,
@@ -642,6 +692,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         createdAt: now,
         platform: selectedPlatform,
         model: selectedModelId,
+        groupId,
         size: imageSize,
         remoteTaskIds: [],
       };
@@ -698,6 +749,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 platform: selectedPlatform,
                 model: selectedModelId,
                 prompt: sub.prompt,
+                group_id: groupId,
                 parameters: imageSize ? { size: imageSize } : undefined,
                 inputs: batchSources.length > 0
                   ? batchSources.map(url => ({ type: 'image' as const, role: 'source' as const, url }))
@@ -762,6 +814,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               platform: selectedPlatform,
               model: selectedModelId,
               prompt,
+              group_id: groupId,
               parameters: imageSize ? { size: imageSize } : undefined,
             };
 
@@ -844,6 +897,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       referenceImages,
       selectedPlatform,
       selectedModelId,
+      selectedGroupId,
       persistActiveProjectAssets,
     ],
   );
@@ -946,6 +1000,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const model = task.model || selectedModelId;
     const platform = task.platform || selectedPlatform;
     const size = task.size;
+    const groupId = task.groupId;
     const sources = task.batchSources ?? [];
     const operation: 'generate' | 'edit' = sources.length > 0 ? 'edit' : 'generate';
 
@@ -978,6 +1033,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             platform,
             model,
             prompt: sub.prompt,
+            group_id: groupId,
             parameters: size ? { size } : undefined,
             inputs: sources.length > 0
               ? sources.map(url => ({ type: 'image' as const, role: 'source' as const, url }))
@@ -1063,6 +1119,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     selectedPlatform,
     imageSize,
     setImageSize,
+    imageGroups,
+    selectedGroupId,
+    setSelectedGroupId,
     referenceImages,
     setReferenceImages,
     isGenerating,

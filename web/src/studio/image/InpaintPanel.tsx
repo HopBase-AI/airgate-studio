@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   useState,
   useCallback,
@@ -11,8 +12,9 @@ import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
 import { useStudio } from '../StudioContext';
 import { CustomSelect } from '../CustomSelect';
+import { GroupSelector } from '../GroupSelector';
 import { SizeSelector } from '../SizeSelector';
-import { MODEL_REGISTRY } from '../modelConfig';
+import { EDIT_MODEL_REGISTRY } from '../modelConfig';
 import { studioStyles as ss } from '../studioStyles';
 
 interface NormalizedRect {
@@ -160,6 +162,13 @@ export function InpaintPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+
+  // 当前模型不支持局部重绘（如 gemini/imagen 系）时自动切到首个支持编辑的模型。
+  useEffect(() => {
+    if (!EDIT_MODEL_REGISTRY.some(m => m.id === selectedModelId) && EDIT_MODEL_REGISTRY.length > 0) {
+      setSelectedModelId(EDIT_MODEL_REGISTRY[0].id);
+    }
+  }, [selectedModelId, setSelectedModelId]);
 
   const canGenerate = prompt.trim().length > 0 && sourceImage !== null;
 
@@ -401,16 +410,18 @@ export function InpaintPanel() {
         <label style={ss.formLabel}>
           {t('playground.studio_model', { defaultValue: '模型' })}
         </label>
-        {MODEL_REGISTRY.length === 1 ? (
+        {EDIT_MODEL_REGISTRY.length === 1 ? (
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
         ) : (
           <CustomSelect
             value={selectedModelId}
-            options={MODEL_REGISTRY.map(m => ({ value: m.id, label: m.name }))}
+            options={EDIT_MODEL_REGISTRY.map(m => ({ value: m.id, label: m.name }))}
             onChange={setSelectedModelId}
           />
         )}
       </div>
+
+      <GroupSelector />
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>

@@ -5,7 +5,42 @@ import (
 	"strings"
 )
 
-const executorPluginID = "gateway-openai"
+const defaultExecutorPluginID = "gateway-openai"
+
+func generationExecutorPluginID(platform string) string {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "gemini":
+		return "gateway-gemini"
+	default:
+		return defaultExecutorPluginID
+	}
+}
+
+// generationExecutorPluginIDs 是 studio 会创建/消费任务的全部执行插件。
+// 任务的 list/get/delete 都必须限定在这个集合内——tasks.* host 方法允许
+// 跨插件查询，不加限定会把同用户其他插件的任务泄漏进创作中心历史。
+func generationExecutorPluginIDs() []string {
+	return []string{defaultExecutorPluginID, "gateway-gemini"}
+}
+
+func isGenerationExecutor(pluginID string) bool {
+	for _, id := range generationExecutorPluginIDs() {
+		if id == pluginID {
+			return true
+		}
+	}
+	return false
+}
+
+// executorSupportsTaskType 校验执行插件是否支持该任务类型。
+// gateway-gemini 当前只实现了文生图（image.edit 会被插件直接 fail），
+// 在创建入口就拦下，给前端明确报错而不是排队后失败。
+func executorSupportsTaskType(executorID, taskType string) bool {
+	if executorID == "gateway-gemini" {
+		return taskType == "image.generate"
+	}
+	return true
+}
 
 type createGenerationTaskRequest struct {
 	Kind       string                 `json:"kind"`

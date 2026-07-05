@@ -71,3 +71,41 @@ func TestBuildGenerationTaskResponseReturnsInputImages(t *testing.T) {
 		t.Fatalf("input_mask = %v", got)
 	}
 }
+
+func TestGenerationExecutorPluginID(t *testing.T) {
+	if got := generationExecutorPluginID("gemini"); got != "gateway-gemini" {
+		t.Fatalf("gemini executor = %q", got)
+	}
+	if got := generationExecutorPluginID(" openai "); got != defaultExecutorPluginID {
+		t.Fatalf("openai executor = %q", got)
+	}
+}
+
+func TestIsGenerationExecutor(t *testing.T) {
+	for _, id := range generationExecutorPluginIDs() {
+		if !isGenerationExecutor(id) {
+			t.Fatalf("%q should be a generation executor", id)
+		}
+	}
+	if isGenerationExecutor("airgate-playground") {
+		t.Fatal("other plugin should not be a generation executor")
+	}
+}
+
+func TestExecutorSupportsTaskType(t *testing.T) {
+	cases := []struct {
+		executor string
+		taskType string
+		want     bool
+	}{
+		{"gateway-gemini", "image.generate", true},
+		{"gateway-gemini", "image.edit", false},
+		{"gateway-openai", "image.generate", true},
+		{"gateway-openai", "image.edit", true},
+	}
+	for _, c := range cases {
+		if got := executorSupportsTaskType(c.executor, c.taskType); got != c.want {
+			t.Errorf("executorSupportsTaskType(%q, %q) = %v, want %v", c.executor, c.taskType, got, c.want)
+		}
+	}
+}

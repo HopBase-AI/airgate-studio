@@ -18,6 +18,7 @@ const (
 	hostMethodTasksDelete    = "tasks.delete"
 	hostMethodPlatformsList  = "platforms.list"
 	hostMethodModelsList     = "models.list"
+	hostMethodGroupsList     = "groups.list"
 	hostMethodUsersGet       = "users.get"
 	hostMethodGatewayForward = "gateway.forward"
 	hostMethodAssetsGetBytes = "assets.get_bytes"
@@ -48,6 +49,7 @@ func hostInvoke(ctx context.Context, host sdk.Host, method string, payload map[s
 
 type hostTask struct {
 	ID           int64                  `json:"id"`
+	PluginID     string                 `json:"plugin_id"`
 	TaskType     string                 `json:"task_type"`
 	Status       string                 `json:"status"`
 	Progress     int                    `json:"progress"`
@@ -99,7 +101,7 @@ type hostTaskListResponse struct {
 	Total int
 }
 
-func hostListTasks(ctx context.Context, host sdk.Host, pluginID string, userID int64, taskType, status string, limit, offset int) (*hostTaskListResponse, error) {
+func hostListTasks(ctx context.Context, host sdk.Host, pluginIDs []string, userID int64, taskType, status string, limit, offset int) (*hostTaskListResponse, error) {
 	payload := map[string]interface{}{
 		"user_id":   userID,
 		"task_type": taskType,
@@ -107,8 +109,8 @@ func hostListTasks(ctx context.Context, host sdk.Host, pluginID string, userID i
 		"limit":     limit,
 		"offset":    offset,
 	}
-	if pluginID != "" {
-		payload["plugin_id"] = pluginID
+	if len(pluginIDs) > 0 {
+		payload["plugin_ids"] = pluginIDs
 	}
 	resp, err := hostInvoke(ctx, host, hostMethodTasksList, payload)
 	if err != nil {

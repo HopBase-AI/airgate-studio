@@ -92,6 +92,15 @@ export interface UserInfo {
   role: string;
 }
 
+export interface ImageGroup {
+  id: number;
+  name: string;
+  platform: string;
+  rate_multiplier: number;
+  effective_rate: number;
+  note?: string;
+}
+
 export interface Project {
   id: number;
   user_id: number;
@@ -181,6 +190,12 @@ export const api = {
     if (capability) qs.set('capability', capability);
     const suffix = qs.toString() ? `?${qs}` : '';
     return request<{ models: ModelInfo[] }>('GET', `/models${suffix}`).then(r => r.models || []);
+  },
+
+  // 当前用户在指定平台下可选的图像生成计费分组（最便宜优先）。
+  listImageGroups(platform: string): Promise<ImageGroup[]> {
+    const qs = new URLSearchParams({ platform });
+    return request<{ groups: ImageGroup[] }>('GET', `/image-groups?${qs}`).then(r => r.groups || []);
   },
 
   listInspirations(): Promise<InspirationCatalog> {

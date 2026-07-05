@@ -1,0 +1,40 @@
+import { useTranslation } from 'react-i18next';
+import { useStudio } from './StudioContext';
+import { CustomSelect } from './CustomSelect';
+import { studioStyles as ss } from './studioStyles';
+
+// 计费分组（通道）选择器：让用户在同平台的不同倍率分组间自选（高质量/低价等）。
+// 只有一个可选分组时不渲染——没有选择余地，交给默认行为即可。
+export function GroupSelector() {
+  const { t } = useTranslation();
+  const { imageGroups, selectedGroupId, setSelectedGroupId } = useStudio();
+
+  if (imageGroups.length <= 1) return null;
+
+  const options = imageGroups.map(g => ({
+    value: String(g.id),
+    label: g.effective_rate === 1
+      ? g.name
+      : `${g.name} ×${trimRate(g.effective_rate)}`,
+  }));
+
+  return (
+    <div style={ss.formRow}>
+      <label style={ss.formLabel}>
+        {t('playground.studio_group', { defaultValue: '通道' })}
+      </label>
+      <CustomSelect
+        value={selectedGroupId != null ? String(selectedGroupId) : ''}
+        options={options}
+        onChange={value => {
+          const id = Number.parseInt(value, 10);
+          if (Number.isFinite(id)) setSelectedGroupId(id);
+        }}
+      />
+    </div>
+  );
+}
+
+function trimRate(rate: number): string {
+  return Number.isInteger(rate) ? String(rate) : rate.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}

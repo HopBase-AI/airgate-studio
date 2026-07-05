@@ -1,10 +1,11 @@
-import { useCallback, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
 import { useStudio } from '../StudioContext';
 import { CustomSelect } from '../CustomSelect';
+import { GroupSelector } from '../GroupSelector';
 import { SizeSelector } from '../SizeSelector';
-import { MODEL_REGISTRY } from '../modelConfig';
+import { EDIT_MODEL_REGISTRY, MODEL_REGISTRY } from '../modelConfig';
 import { studioStyles as ss } from '../studioStyles';
 
 const local: Record<string, CSSProperties> = {
@@ -137,6 +138,17 @@ export function BatchPanel() {
   const [imagePrompt, setImagePrompt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 多图片模式走 img2img（image.edit），只有支持编辑的模型可选；
+  // 切进该模式时若当前模型不支持则自动换成首个支持编辑的模型。
+  const availableModels = mode === 'multi_image' ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY;
+  useEffect(() => {
+    if (mode === 'multi_image'
+      && !EDIT_MODEL_REGISTRY.some(m => m.id === selectedModelId)
+      && EDIT_MODEL_REGISTRY.length > 0) {
+      setSelectedModelId(EDIT_MODEL_REGISTRY[0].id);
+    }
+  }, [mode, selectedModelId, setSelectedModelId]);
+
   const promptLines = multiPrompts.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
   const canGenerate = (
@@ -250,16 +262,17 @@ export function BatchPanel() {
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>{t('playground.studio_model', { defaultValue: '模型' })}</label>
-        {MODEL_REGISTRY.length === 1 ? (
+        {availableModels.length === 1 ? (
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
         ) : (
           <CustomSelect
             value={selectedModelId}
-            options={MODEL_REGISTRY.map(m => ({ value: m.id, label: m.name }))}
+            options={availableModels.map(m => ({ value: m.id, label: m.name }))}
             onChange={setSelectedModelId}
           />
         )}
       </div>
+      <GroupSelector />
       <div style={ss.formRow}>
         <label style={ss.formLabel}>{t('playground.studio_size', { defaultValue: '尺寸' })}</label>
         <SizeSelector

@@ -4,6 +4,7 @@ import { cssVar } from '@doudou-start/airgate-theme';
 import { useStudio } from '../StudioContext';
 import { CustomSelect } from '../CustomSelect';
 import { SizeSelector } from '../SizeSelector';
+import { GroupSelector } from '../GroupSelector';
 import { MODEL_REGISTRY } from '../modelConfig';
 import { studioStyles as ss } from '../studioStyles';
 
@@ -89,6 +90,8 @@ export function TextToImagePanel() {
           />
         )}
       </div>
+
+      <GroupSelector />
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>

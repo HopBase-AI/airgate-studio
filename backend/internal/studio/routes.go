@@ -18,6 +18,7 @@ func registerRoutes(p *StudioPlugin, r sdk.RouteRegistrar) {
 	r.Handle(http.MethodDelete, "/generation-tasks/", p.handleDeleteGenerationTask)
 	r.Handle(http.MethodGet, "/platforms", p.handleListPlatforms)
 	r.Handle(http.MethodGet, "/models", p.handleListModels)
+	r.Handle(http.MethodGet, "/image-groups", p.requireUser(p.handleListImageGroups))
 	r.Handle(http.MethodGet, "/inspirations", p.handleListInspirations)
 
 	// 项目 / 资产（需要 DB；用 requireProjectService 守护，未配置态返回 503）。
@@ -116,11 +117,25 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 	}
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
 
+	// 用户显式选择了计费分组时先做资格校验，给出明确错误；
+	// core 的 gateway.forward 侧还有专属分组授权兜底。
+	if req.GroupID > 0 {
+		if err := validateGenerationGroup(r.Context(), p.host, userID, req.GroupID, req.Platform); err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
 	taskType := resolveTaskType(req.Kind, req.Operation)
 	input := buildTaskInput(req)
 	attributes := buildTaskAttributes(req)
+	executorID := generationExecutorPluginID(req.Platform)
+	if !executorSupportsTaskType(executorID, taskType) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该平台暂只支持文生图，请切换到文生图模式或更换模型"})
+		return
+	}
 
-	task, err := hostCreateTask(r.Context(), p.host, executorPluginID, taskType, userID, input, attributes)
+	task, err := hostCreateTask(r.Context(), p.host, executorID, taskType, userID, input, attributes)
 	if err != nil {
 		p.logger.Error("create_generation_task_failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "创建任务失败: " + err.Error()})
@@ -139,9 +154,14 @@ func (p *StudioPlugin) handleGetGenerationTask(w http.ResponseWriter, r *http.Re
 	}
 
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
-	task, err := hostGetTask(r.Context(), p.host, executorPluginID, userID, taskID)
+	task, err := hostGetTask(r.Context(), p.host, "", userID, taskID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询任务失败: " + err.Error()})
+		return
+	}
+	// 只暴露生成任务执行插件的任务，避免同用户其他插件的任务泄漏进创作中心。
+	if !isGenerationExecutor(task.PluginID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
 
@@ -157,7 +177,17 @@ func (p *StudioPlugin) handleDeleteGenerationTask(w http.ResponseWriter, r *http
 	}
 
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
-	if err := hostDeleteTask(r.Context(), p.host, executorPluginID, userID, taskID); err != nil {
+	task, err := hostGetTask(r.Context(), p.host, "", userID, taskID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询任务失败: " + err.Error()})
+		return
+	}
+	// 与查询同一条红线：不允许经 studio 删除其他插件的任务。
+	if !isGenerationExecutor(task.PluginID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	if err := hostDeleteTask(r.Context(), p.host, task.PluginID, userID, taskID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "删除任务失败: " + err.Error()})
 		return
 	}
@@ -178,7 +208,7 @@ func (p *StudioPlugin) handleListGenerationTasks(w http.ResponseWriter, r *http.
 	}
 	status := r.URL.Query().Get("status")
 
-	result, err := hostListTasks(r.Context(), p.host, executorPluginID, userID, "", status, limit, offset)
+	result, err := hostListTasks(r.Context(), p.host, generationExecutorPluginIDs(), userID, "", status, limit, offset)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询任务列表失败: " + err.Error()})
 		return
@@ -209,6 +239,27 @@ func (p *StudioPlugin) handleListModels(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"models": models})
+}
+
+// handleListImageGroups 返回当前用户在指定平台下可选的图像生成计费分组，
+// 已按有效倍率最便宜优先排序（与不指定分组时的自动选组顺序一致）。
+func (p *StudioPlugin) handleListImageGroups(w http.ResponseWriter, r *http.Request) {
+	platform := r.URL.Query().Get("platform")
+	if strings.TrimSpace(platform) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "platform is required"})
+		return
+	}
+	userID := parseUserIDInt64(r)
+	groups, err := hostListImageGroups(r.Context(), p.host, userID, platform)
+	if err != nil {
+		p.logger.Error("list_image_groups_failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询可用分组失败"})
+		return
+	}
+	if groups == nil {
+		groups = []imageGroup{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"groups": groups})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
