@@ -66,6 +66,22 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     supportsEdit: true,
   },
   {
+    id: 'gemini-2.5-flash-image',
+    name: 'Nano Banana 香蕉 (2.5 Flash Image)',
+    platform: 'gemini',
+    defaultSize: '1024x1024',
+    sizes: GOOGLE_IMAGE_SIZES,
+    supportsEdit: false,
+  },
+  {
+    id: 'gemini-2.5-flash-image-preview',
+    name: 'Nano Banana 香蕉 Preview',
+    platform: 'gemini',
+    defaultSize: '1024x1024',
+    sizes: GOOGLE_IMAGE_SIZES,
+    supportsEdit: false,
+  },
+  {
     id: 'gemini-3-pro-image-preview',
     name: 'Gemini 3 Pro Image Preview',
     platform: 'gemini',
