@@ -714,24 +714,33 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       if (!prompt.trim()) return;
       const mode = resolveGenerationMode(imageMode, options);
 
-      if (imageGroupsLoaded && (imageGroupsByPlatform[selectedPlatform]?.length ?? 0) === 0) {
-        const platformLabel = selectedPlatform === 'gemini'
-          ? 'Gemini'
-          : selectedPlatform === 'openai'
-          ? 'OpenAI'
-          : selectedPlatform;
+      const failLocalTask = (message: string) => {
         setTasks(prev => [{
           id: uid(),
           prompt,
           mode,
           status: 'failed',
-          error: `当前没有可用的 ${platformLabel} 图片分组，请先在后台创建分组并绑定可用账号。`,
+          error: message,
           createdAt: new Date().toISOString(),
           platform: selectedPlatform,
           model: selectedModelId,
           size: imageSize,
           remoteTaskIds: [],
         }, ...prev]);
+      };
+
+      if (!imageGroupsLoaded) {
+        failLocalTask('正在加载可用图片分组，请稍后再试。');
+        return;
+      }
+
+      if ((imageGroupsByPlatform[selectedPlatform]?.length ?? 0) === 0) {
+        const platformLabel = selectedPlatform === 'gemini'
+          ? 'Gemini'
+          : selectedPlatform === 'openai'
+          ? 'OpenAI'
+          : selectedPlatform;
+        failLocalTask(`当前没有可用的 ${platformLabel} 图片分组，请先在后台创建分组并绑定可用账号。`);
         return;
       }
 
