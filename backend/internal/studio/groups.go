@@ -51,9 +51,21 @@ func hostListImageGroups(ctx context.Context, host sdk.Host, userID int64, platf
 // core 的 gateway.forward 侧另有专属分组授权兜底，这里做前置校验只为给
 // 前端返回明确的错误信息。
 func validateGenerationGroup(ctx context.Context, host sdk.Host, userID, groupID int64, platform string) error {
+	return validateGenerationAccess(ctx, host, userID, groupID, platform)
+}
+
+// validateGenerationAccess 校验指定平台至少有一个当前用户可用的图片分组；
+// 如传了 group_id，则进一步确认该分组在可用列表内。
+func validateGenerationAccess(ctx context.Context, host sdk.Host, userID, groupID int64, platform string) error {
 	groups, err := hostListImageGroups(ctx, host, userID, platform)
 	if err != nil {
 		return fmt.Errorf("查询可用分组失败: %w", err)
+	}
+	if len(groups) == 0 {
+		return fmt.Errorf("当前没有可用的 %s 图片分组，请先在后台创建分组并绑定可用账号", displayPlatformName(platform))
+	}
+	if groupID <= 0 {
+		return nil
 	}
 	for _, g := range groups {
 		if g.ID == groupID {
@@ -61,4 +73,15 @@ func validateGenerationGroup(ctx context.Context, host sdk.Host, userID, groupID
 		}
 	}
 	return fmt.Errorf("分组不可用或无权访问")
+}
+
+func displayPlatformName(platform string) string {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "gemini":
+		return "Gemini"
+	case "openai":
+		return "OpenAI"
+	default:
+		return strings.TrimSpace(platform)
+	}
 }

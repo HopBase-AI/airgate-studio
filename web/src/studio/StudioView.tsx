@@ -968,13 +968,14 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const allSources = [...sourceImages, ...referenceImages];
   const hasSource = allSources.length > 0;
   const isSingleSource = allSources.length === 1;
-  const canSend = prompt.trim().length > 0;
   const baseModelOptions = hasSource ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY;
   const modelOptions = useMemo(() => {
     if (!imageGroupsLoaded) return baseModelOptions;
     const filtered = baseModelOptions.filter(model => availableImagePlatforms.includes(model.platform));
-    return filtered.length > 0 ? filtered : baseModelOptions;
+    return filtered;
   }, [availableImagePlatforms, baseModelOptions, imageGroupsLoaded]);
+  const hasSelectableModel = !imageGroupsLoaded || modelOptions.length > 0;
+  const canSend = prompt.trim().length > 0 && hasSelectableModel;
 
   useEffect(() => {
     if (!modelOptions.some(m => m.id === selectedModelId) && modelOptions.length > 0) {
@@ -1235,8 +1236,10 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               value={selectedModelId}
               options={modelOptions.map(m => ({ value: m.id, label: m.name }))}
               onChange={setSelectedModelId}
+              placeholder={imageGroupsLoaded ? '暂无可用图片模型' : '加载模型...'}
               compact
               minDropdownWidth={260}
+              disabled={!hasSelectableModel}
             />
           </div>
           <div style={c.sizePicker} className="studio-size-picker">

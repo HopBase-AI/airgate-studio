@@ -65,6 +65,10 @@ func normalizeGenerationRequest(req *createGenerationTaskRequest) {
 	if req.Kind == "" {
 		req.Kind = "image"
 	}
+	req.Platform = strings.TrimSpace(req.Platform)
+	if req.Platform == "" {
+		req.Platform = "openai"
+	}
 	req.Operation = strings.TrimSpace(req.Operation)
 	if req.Operation == "" {
 		req.Operation = "generate"

@@ -3,6 +3,7 @@ package studio
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
@@ -69,5 +70,17 @@ func TestValidateGenerationGroup(t *testing.T) {
 	}
 	if err := validateGenerationGroup(context.Background(), host, 7, 99, "gemini"); err == nil {
 		t.Fatal("expected group 99 to be rejected")
+	}
+}
+
+func TestValidateGenerationAccessRequiresAvailablePlatformGroup(t *testing.T) {
+	host := &groupTestHost{groups: []interface{}{}}
+
+	err := validateGenerationAccess(context.Background(), host, 7, 0, "gemini")
+	if err == nil {
+		t.Fatal("expected no available gemini group to be rejected")
+	}
+	if got, want := err.Error(), "当前没有可用的 Gemini 图片分组"; !strings.Contains(got, want) {
+		t.Fatalf("error = %q, want contains %q", got, want)
 	}
 }

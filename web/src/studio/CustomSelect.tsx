@@ -10,6 +10,7 @@ interface CustomSelectProps {
   placeholder?: string;
   compact?: boolean;
   minDropdownWidth?: number;
+  disabled?: boolean;
 }
 
 const triggerStyle: CSSProperties = {
@@ -37,9 +38,15 @@ const triggerOpenStyle: CSSProperties = {
 const triggerCompactStyle: CSSProperties = {
   height: 26,
   minHeight: 26,
+  maxHeight: 26,
   padding: '0 10px',
   borderRadius: 6,
   fontSize: 11,
+};
+
+const triggerDisabledStyle: CSSProperties = {
+  opacity: 0.55,
+  cursor: 'not-allowed',
 };
 
 const dropdownStyle: CSSProperties = {
@@ -104,6 +111,7 @@ export function CustomSelect({
   placeholder,
   compact,
   minDropdownWidth = 220,
+  disabled,
 }: CustomSelectProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -142,6 +150,7 @@ export function CustomSelect({
   }, [minDropdownWidth, options.length]);
 
   const handleToggle = () => {
+    if (disabled) return;
     if (!open) calcPos();
     setOpen(v => !v);
   };
@@ -203,7 +212,13 @@ export function CustomSelect({
         ref={triggerRef}
         type="button"
         onClick={handleToggle}
-        style={{ ...triggerStyle, ...(compact ? triggerCompactStyle : {}), ...(open ? triggerOpenStyle : {}) }}
+        disabled={disabled}
+        style={{
+          ...triggerStyle,
+          ...(compact ? triggerCompactStyle : {}),
+          ...(open ? triggerOpenStyle : {}),
+          ...(disabled ? triggerDisabledStyle : {}),
+        }}
         className="studio-select-trigger"
       >
         <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

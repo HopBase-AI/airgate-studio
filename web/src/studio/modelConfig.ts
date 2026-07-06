@@ -13,7 +13,7 @@ export interface ModelConfig {
   defaultSize: string;
   sizes: SizeOption[];
   // 是否支持图生图/局部重绘（image.edit）。gateway-gemini 当前只实现文生图，
-  // gemini/imagen 系模型在编辑类面板中不可选。
+  // Gemini 系模型在编辑类面板中不可选。
   supportsEdit: boolean;
 }
 
@@ -67,31 +67,23 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   },
   {
     id: 'gemini-2.5-flash-image',
-    name: 'Nano Banana 香蕉 (2.5 Flash Image)',
+    name: 'Gemini 2.5 Flash Image (Nano Banana)',
     platform: 'gemini',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_SIZES,
     supportsEdit: false,
   },
   {
-    id: 'gemini-2.5-flash-image-preview',
-    name: 'Nano Banana 香蕉 Preview',
+    id: 'gemini-3-pro-image',
+    name: 'Gemini 3 Pro Image (Nano Banana Pro)',
     platform: 'gemini',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_SIZES,
     supportsEdit: false,
   },
   {
-    id: 'gemini-3-pro-image-preview',
-    name: 'Gemini 3 Pro Image Preview',
-    platform: 'gemini',
-    defaultSize: '1024x1024',
-    sizes: GOOGLE_IMAGE_SIZES,
-    supportsEdit: false,
-  },
-  {
-    id: 'gemini-3.1-flash-image-preview',
-    name: 'Gemini 3.1 Flash Image Preview',
+    id: 'gemini-3.1-flash-image',
+    name: 'Gemini 3.1 Flash Image (Nano Banana 2)',
     platform: 'gemini',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_SIZES,
@@ -99,23 +91,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   },
   {
     id: 'gemini-3.1-flash-lite-image',
-    name: 'Gemini 3.1 Flash Lite Image',
-    platform: 'gemini',
-    defaultSize: '1024x1024',
-    sizes: GOOGLE_IMAGE_SIZES,
-    supportsEdit: false,
-  },
-  {
-    id: 'imagen-4.0-generate-001',
-    name: 'Imagen 4',
-    platform: 'gemini',
-    defaultSize: '1024x1024',
-    sizes: GOOGLE_IMAGE_SIZES,
-    supportsEdit: false,
-  },
-  {
-    id: 'imagen-4.0-fast-generate-001',
-    name: 'Imagen 4 Fast',
+    name: 'Gemini 3.1 Flash Lite Image (Nano Banana 2 Lite)',
     platform: 'gemini',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_SIZES,

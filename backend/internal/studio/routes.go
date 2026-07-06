@@ -117,13 +117,11 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 	}
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
 
-	// 用户显式选择了计费分组时先做资格校验，给出明确错误；
-	// core 的 gateway.forward 侧还有专属分组授权兜底。
-	if req.GroupID > 0 {
-		if err := validateGenerationGroup(r.Context(), p.host, userID, req.GroupID, req.Platform); err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
-			return
-		}
+	// 先校验该平台确实有当前用户可用的图片分组；显式传 group_id 时再校验该分组。
+	// core 的 gateway.forward 侧还有专属分组授权兜底，这里用于给前端明确错误。
+	if err := validateGenerationAccess(r.Context(), p.host, userID, req.GroupID, req.Platform); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
 	}
 
 	taskType := resolveTaskType(req.Kind, req.Operation)
