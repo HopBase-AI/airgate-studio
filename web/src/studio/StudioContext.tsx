@@ -16,6 +16,7 @@ import { getModelConfig, getDefaultModel, type ModelConfig } from './modelConfig
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_ATTEMPTS = 300;
+const MODEL_STORE_KEY = 'studio.selectedModelId';
 
 // activeProjectId 哨兵：0 = 「全部」视图（读 host tasks 的历史聚合，含老用户旧图），
 // >=1 = 具体项目（读 studio_assets）。详见 StudioContext 的画廊加载逻辑。
@@ -162,6 +163,15 @@ async function createMaskDataUrl(
   return canvas.toDataURL('image/png');
 }
 
+function getInitialModel(): ModelConfig {
+  if (typeof window === 'undefined') return getDefaultModel();
+  try {
+    const stored = window.localStorage.getItem(MODEL_STORE_KEY);
+    if (stored) return getModelConfig(stored) ?? getDefaultModel();
+  } catch { /* ignore */ }
+  return getDefaultModel();
+}
+
 async function pollGenerationTask(
   taskId: number,
   signal: AbortSignal,
@@ -280,8 +290,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [imageMode, setImageMode] = useState<ImageMode>('text2img');
 
   // Model selection (hardcoded registry)
-  const [selectedModelId, setSelectedModelIdRaw] = useState(getDefaultModel().id);
-  const [imageSize, setImageSize] = useState(getDefaultModel().defaultSize);
+  const [selectedModelId, setSelectedModelIdRaw] = useState(() => getInitialModel().id);
+  const [imageSize, setImageSize] = useState(() => {
+    const model = getModelConfig(selectedModelId) ?? getDefaultModel();
+    return model.defaultSize;
+  });
 
   // Reference images (accumulated via "use as reference" from gallery)
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
@@ -317,6 +330,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const setSelectedModelId = useCallback((id: string) => {
     setSelectedModelIdRaw(id);
+    try {
+      window.localStorage.setItem(MODEL_STORE_KEY, id);
+    } catch { /* ignore */ }
     const newModel = getModelConfig(id);
     if (newModel && !newModel.sizes.some(s => s.value === imageSize)) {
       setImageSize(newModel.defaultSize);

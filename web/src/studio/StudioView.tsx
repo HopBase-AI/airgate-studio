@@ -5,6 +5,8 @@ import { StudioProvider, useStudio } from './StudioContext';
 import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
+import { CustomSelect } from './CustomSelect';
+import { EDIT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
 import { ProjectSidebar, ThemeToggleButton } from './ProjectSidebar';
 import { api, type InspirationCatalog, type InspirationItem } from '../api';
 
@@ -920,6 +922,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const {
     setImageMode,
     currentModel,
+    selectedModelId, setSelectedModelId,
     imageSize, setImageSize,
     generate,
     referenceImages, setReferenceImages,
@@ -965,6 +968,15 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const hasSource = allSources.length > 0;
   const isSingleSource = allSources.length === 1;
   const canSend = prompt.trim().length > 0;
+  const modelOptions = hasSource ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY;
+
+  useEffect(() => {
+    if (hasSource
+      && !EDIT_MODEL_REGISTRY.some(m => m.id === selectedModelId)
+      && EDIT_MODEL_REGISTRY.length > 0) {
+      setSelectedModelId(EDIT_MODEL_REGISTRY[0].id);
+    }
+  }, [hasSource, selectedModelId, setSelectedModelId]);
 
   const handleSend = () => {
     const trimmed = prompt.trim();
@@ -1214,10 +1226,13 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       {/* Toolbar row */}
       <div style={c.toolbar}>
         <div style={c.toolbarLeft} className="studio-composer-toolbar-left">
-          <span style={c.modelBadge}>
-            <span style={c.modelDot} />
-            {currentModel.name}
-          </span>
+          <div style={c.modelSelect}>
+            <CustomSelect
+              value={selectedModelId}
+              options={modelOptions.map(m => ({ value: m.id, label: m.name }))}
+              onChange={setSelectedModelId}
+            />
+          </div>
           <div style={c.sizePicker} className="studio-size-picker">
             <SizeSelector value={imageSize} sizes={currentModel.sizes} onChange={setImageSize} upward compact />
           </div>
@@ -1453,33 +1468,17 @@ const c: Record<string, CSSProperties> = {
     gap: 6,
     flex: 1,
     minWidth: 0,
-    overflow: 'hidden',
+    flexWrap: 'wrap',
+    overflow: 'visible',
   },
-  modelBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 5,
-    padding: '4px 10px',
-    borderRadius: 7,
-    background: cssVar('bgHover'),
-    color: cssVar('textSecondary'),
-    fontSize: 11,
-    fontFamily: cssVar('fontMono'),
-    fontWeight: 600,
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-  },
-  modelDot: {
-    width: 5,
-    height: 5,
-    borderRadius: '50%',
-    background: '#4ade80',
-    flexShrink: 0,
-    boxShadow: '0 0 5px rgba(74, 222, 128, 0.4)',
+  modelSelect: {
+    flex: '1 1 190px',
+    minWidth: 160,
+    maxWidth: 240,
   },
   sizePicker: {
-    flexShrink: 0,
-    width: 180,
+    flex: '0 1 170px',
+    minWidth: 132,
   },
   countGroup: {
     display: 'flex',
