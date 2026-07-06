@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { cssVar } from '@doudou-start/airgate-theme';
 
@@ -81,6 +81,13 @@ const optionStyle: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
+const optionCompactStyle: CSSProperties = {
+  padding: '6px 9px',
+  borderRadius: 7,
+  fontSize: 11,
+  lineHeight: 1.2,
+};
+
 const activeOptionStyle: CSSProperties = {
   background: cssVar('primarySubtle'),
   color: cssVar('text'),
@@ -117,6 +124,16 @@ export function CustomSelect({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<DropdownPosition>({ top: 0, left: 0, width: minDropdownWidth, maxHeight: 260 });
+  const uniqueOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Option[] = [];
+    for (const option of options) {
+      if (seen.has(option.value)) continue;
+      seen.add(option.value);
+      result.push(option);
+    }
+    return result;
+  }, [options]);
 
   const calcPos = useCallback(() => {
     const el = triggerRef.current;
@@ -128,7 +145,8 @@ export function CustomSelect({
     const vh = window.innerHeight;
     const width = Math.min(Math.max(rect.width, minDropdownWidth), vw - margin * 2);
     const left = Math.max(margin, Math.min(rect.left, vw - width - margin));
-    const desiredHeight = Math.min(320, Math.max(44, options.length * 36 + 10));
+    const optionHeight = compact ? 27 : 36;
+    const desiredHeight = Math.min(320, Math.max(44, uniqueOptions.length * optionHeight + 10));
     const spaceBelow = vh - rect.bottom - gap - margin;
     const spaceAbove = rect.top - gap - margin;
     const openUp = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
@@ -147,7 +165,7 @@ export function CustomSelect({
         maxHeight: Math.max(120, Math.min(320, spaceBelow)),
       });
     }
-  }, [minDropdownWidth, options.length]);
+  }, [compact, minDropdownWidth, uniqueOptions.length]);
 
   const handleToggle = () => {
     if (disabled) return;
@@ -174,7 +192,7 @@ export function CustomSelect({
     };
   }, [calcPos, open]);
 
-  const selected = options.find(o => o.value === value);
+  const selected = uniqueOptions.find(o => o.value === value);
   const renderedDropdown = open
     ? createPortal(
         <div
@@ -188,11 +206,15 @@ export function CustomSelect({
             maxHeight: pos.maxHeight,
           }}
         >
-          {options.map(opt => (
+          {uniqueOptions.map(opt => (
             <button
               key={opt.value}
               type="button"
-              style={{ ...optionStyle, ...(opt.value === value ? activeOptionStyle : {}) }}
+              style={{
+                ...optionStyle,
+                ...(compact ? optionCompactStyle : {}),
+                ...(opt.value === value ? activeOptionStyle : {}),
+              }}
               className={opt.value === value ? '' : 'studio-select-option'}
               title={opt.label}
               onClick={() => { onChange(opt.value); setOpen(false); }}

@@ -175,6 +175,10 @@ function getInitialModel(): ModelConfig {
   return getDefaultModel();
 }
 
+function supportedSizeForModel(model: ModelConfig, size: string): string {
+  return model.sizes.some(s => s.value === size) ? size : model.defaultSize;
+}
+
 async function pollGenerationTask(
   taskId: number,
   signal: AbortSignal,
@@ -194,11 +198,11 @@ async function pollGenerationTask(
       if (networkErrors > 150) throw err;
     }
     if (task) {
+      onPoll?.(task);
       if (task.status === 'completed') return task;
       if (task.status === 'failed') {
         throw new Error(task.error_message || 'Image generation task failed');
       }
-      onPoll?.(task); // 透传中途进度给 UI（仅 processing/pending）
     }
     const backoff = networkErrors > 0 ? Math.min(POLL_INTERVAL_MS * 2, 6000) : POLL_INTERVAL_MS;
     await delay(backoff, signal);
@@ -296,7 +300,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   // Model selection (hardcoded registry)
   const [selectedModelId, setSelectedModelIdRaw] = useState(() => getInitialModel().id);
-  const [imageSize, setImageSize] = useState(() => {
+  const selectedModelIdRef = useRef(selectedModelId);
+  const [imageSize, setImageSizeRaw] = useState(() => {
     const model = getModelConfig(selectedModelId) ?? getDefaultModel();
     return model.defaultSize;
   });
@@ -334,15 +339,26 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const selectedPlatform = currentModel.platform;
 
   const setSelectedModelId = useCallback((id: string) => {
+    selectedModelIdRef.current = id;
     setSelectedModelIdRaw(id);
     try {
       window.localStorage.setItem(MODEL_STORE_KEY, id);
     } catch { /* ignore */ }
     const newModel = getModelConfig(id);
-    if (newModel && !newModel.sizes.some(s => s.value === imageSize)) {
-      setImageSize(newModel.defaultSize);
+    if (newModel) {
+      setImageSizeRaw(prev => supportedSizeForModel(newModel, prev));
     }
-  }, [imageSize]);
+  }, []);
+
+  const setImageSize = useCallback((size: string) => {
+    const model = getModelConfig(selectedModelIdRef.current) ?? getDefaultModel();
+    setImageSizeRaw(supportedSizeForModel(model, size));
+  }, []);
+
+  useEffect(() => {
+    selectedModelIdRef.current = selectedModelId;
+    setImageSizeRaw(prev => supportedSizeForModel(currentModel, prev));
+  }, [currentModel, selectedModelId]);
 
   // ── 计费分组选择 ──────────────────────────────────────────────────────────
   // 平台切换时重新拉取该用户可用的分组（core 已按最便宜优先排序）。
@@ -650,7 +666,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, []);
 
-  // Re-check processing tasks on visibility change (e.g. tab switch back, service restart)
+  // Re-check processing tasks on visibility change / timer fallback (e.g. tab switch back, service restart).
   useEffect(() => {
     const refresh = async () => {
       const processing = tasks.filter(t => t.status === 'processing' || t.status === 'queued');
@@ -692,9 +708,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const onFocus = () => void refresh();
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('focus', onFocus);
+    const timer = window.setInterval(() => { void refresh(); }, 5000);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', onFocus);
+      window.clearInterval(timer);
     };
   }, [tasks]);
 
@@ -916,6 +934,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
             updateTask({ remoteTaskIds: [created.id] });
             const completed = await pollGenerationTask(created.id, signal, POLL_MAX_ATTEMPTS, (t) => {
+              if (t.status === 'failed') {
+                updateTask({ status: 'failed', error: t.error_message || 'Task failed', progress: t.progress });
+                return;
+              }
               if (typeof t.progress === 'number') updateTask({ progress: t.progress });
             });
             const images = parseMarkdownImages(completed.result_content || '');

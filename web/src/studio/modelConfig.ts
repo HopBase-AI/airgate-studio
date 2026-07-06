@@ -45,15 +45,32 @@ const GPT_IMAGE_SIZES: SizeOption[] = [
   { value: '1440x3360', label: '1440×3360',  tier: '4K', price: 0.40, aspect: '9:21' },
 ];
 
-const GOOGLE_IMAGE_SIZES: SizeOption[] = [
+const GOOGLE_IMAGE_1K_SIZES: SizeOption[] = [
   { value: '1024x1024', label: '1024×1024', tier: '1K', price: 0, aspect: '1:1' },
   { value: '1536x1024', label: '1536×1024', tier: '1K', price: 0, aspect: '3:2' },
   { value: '1024x1536', label: '1024×1536', tier: '1K', price: 0, aspect: '2:3' },
+];
+
+const GOOGLE_IMAGE_2K_SIZES: SizeOption[] = [
   { value: '2048x2048', label: '2048×2048', tier: '2K', price: 0, aspect: '1:1' },
   { value: '2048x1152', label: '2048×1152', tier: '2K', price: 0, aspect: '16:9' },
   { value: '1152x2048', label: '1152×2048', tier: '2K', price: 0, aspect: '9:16' },
+];
+
+const GOOGLE_IMAGE_4K_SIZES: SizeOption[] = [
   { value: '3840x2160', label: '3840×2160', tier: '4K', price: 0, aspect: '16:9' },
   { value: '2160x3840', label: '2160×3840', tier: '4K', price: 0, aspect: '9:16' },
+];
+
+const GOOGLE_IMAGE_1K_ONLY_SIZES: SizeOption[] = GOOGLE_IMAGE_1K_SIZES;
+const GOOGLE_IMAGE_UP_TO_2K_SIZES: SizeOption[] = [
+  ...GOOGLE_IMAGE_1K_SIZES,
+  ...GOOGLE_IMAGE_2K_SIZES,
+];
+const GOOGLE_IMAGE_ALL_SIZES: SizeOption[] = [
+  ...GOOGLE_IMAGE_1K_SIZES,
+  ...GOOGLE_IMAGE_2K_SIZES,
+  ...GOOGLE_IMAGE_4K_SIZES,
 ];
 
 export const MODEL_REGISTRY: ModelConfig[] = [
@@ -70,7 +87,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     name: 'Gemini 2.5 Flash Image (Nano Banana)',
     platform: 'gemini',
     defaultSize: '1024x1024',
-    sizes: GOOGLE_IMAGE_SIZES,
+    sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,
     supportsEdit: false,
   },
   {
@@ -78,7 +95,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     name: 'Gemini 3 Pro Image (Nano Banana Pro)',
     platform: 'gemini',
     defaultSize: '1024x1024',
-    sizes: GOOGLE_IMAGE_SIZES,
+    sizes: GOOGLE_IMAGE_ALL_SIZES,
     supportsEdit: false,
   },
   {
@@ -86,7 +103,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     name: 'Gemini 3.1 Flash Image (Nano Banana 2)',
     platform: 'gemini',
     defaultSize: '1024x1024',
-    sizes: GOOGLE_IMAGE_SIZES,
+    sizes: GOOGLE_IMAGE_UP_TO_2K_SIZES,
     supportsEdit: false,
   },
   {
@@ -94,7 +111,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     name: 'Gemini 3.1 Flash Lite Image (Nano Banana 2 Lite)',
     platform: 'gemini',
     defaultSize: '1024x1024',
-    sizes: GOOGLE_IMAGE_SIZES,
+    sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,
     supportsEdit: false,
   },
 ];
