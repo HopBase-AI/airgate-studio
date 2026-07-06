@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, type CSSProperties } from 'react';
+import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { cssVar } from '@doudou-start/airgate-theme';
 
 interface Option { value: string; label: string }
@@ -7,6 +8,8 @@ interface CustomSelectProps {
   options: Option[];
   onChange: (value: string) => void;
   placeholder?: string;
+  compact?: boolean;
+  minDropdownWidth?: number;
 }
 
 const triggerStyle: CSSProperties = {
@@ -23,6 +26,7 @@ const triggerStyle: CSSProperties = {
   font: 'inherit',
   fontSize: 13,
   transition: 'border-color 0.2s, box-shadow 0.2s',
+  boxSizing: 'border-box',
 };
 
 const triggerOpenStyle: CSSProperties = {
@@ -30,19 +34,23 @@ const triggerOpenStyle: CSSProperties = {
   boxShadow: `0 0 0 3px ${cssVar('primaryGlow')}`,
 };
 
+const triggerCompactStyle: CSSProperties = {
+  height: 26,
+  minHeight: 26,
+  padding: '0 10px',
+  borderRadius: 6,
+  fontSize: 11,
+};
+
 const dropdownStyle: CSSProperties = {
-  position: 'absolute',
-  top: 'calc(100% + 6px)',
-  left: 0,
-  right: 0,
-  zIndex: 50,
+  position: 'fixed',
+  zIndex: 999999,
   background: cssVar('bgElevated'),
   border: `1px solid ${cssVar('glassBorder')}`,
   borderRadius: 12,
-  boxShadow: '0 12px 40px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.2)',
+  boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3)',
   backdropFilter: 'blur(20px)',
   WebkitBackdropFilter: 'blur(20px)',
-  maxHeight: 260,
   overflowY: 'auto',
   padding: 5,
   animation: 'studioFadeIn 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -60,6 +68,10 @@ const optionStyle: CSSProperties = {
   fontSize: 13,
   font: 'inherit',
   transition: 'background 0.12s',
+  boxSizing: 'border-box',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 };
 
 const activeOptionStyle: CSSProperties = {
@@ -77,28 +89,121 @@ const hoverCSS = `
   }
 `;
 
-export function CustomSelect({ value, options, onChange, placeholder }: CustomSelectProps) {
+type DropdownPosition = {
+  top?: number;
+  bottom?: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+};
+
+export function CustomSelect({
+  value,
+  options,
+  onChange,
+  placeholder,
+  compact,
+  minDropdownWidth = 220,
+}: CustomSelectProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<DropdownPosition>({ top: 0, left: 0, width: minDropdownWidth, maxHeight: 260 });
+
+  const calcPos = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    const gap = 6;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const width = Math.min(Math.max(rect.width, minDropdownWidth), vw - margin * 2);
+    const left = Math.max(margin, Math.min(rect.left, vw - width - margin));
+    const desiredHeight = Math.min(320, Math.max(44, options.length * 36 + 10));
+    const spaceBelow = vh - rect.bottom - gap - margin;
+    const spaceAbove = rect.top - gap - margin;
+    const openUp = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
+    if (openUp) {
+      setPos({
+        bottom: vh - rect.top + gap,
+        left,
+        width,
+        maxHeight: Math.max(120, Math.min(320, spaceAbove)),
+      });
+    } else {
+      setPos({
+        top: rect.bottom + gap,
+        left,
+        width,
+        maxHeight: Math.max(120, Math.min(320, spaceBelow)),
+      });
+    }
+  }, [minDropdownWidth, options.length]);
+
+  const handleToggle = () => {
+    if (!open) calcPos();
+    setOpen(v => !v);
+  };
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (dropdownRef.current?.contains(target)) return;
+      setOpen(false);
     };
+    const update = () => calcPos();
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [calcPos, open]);
 
   const selected = options.find(o => o.value === value);
+  const renderedDropdown = open
+    ? createPortal(
+        <div
+          ref={dropdownRef}
+          style={{
+            ...dropdownStyle,
+            top: pos.top,
+            bottom: pos.bottom,
+            left: pos.left,
+            width: pos.width,
+            maxHeight: pos.maxHeight,
+          }}
+        >
+          {options.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              style={{ ...optionStyle, ...(opt.value === value ? activeOptionStyle : {}) }}
+              className={opt.value === value ? '' : 'studio-select-option'}
+              title={opt.label}
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )
+    : null;
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div>
       <style>{hoverCSS}</style>
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen(!open)}
-        style={{ ...triggerStyle, ...(open ? triggerOpenStyle : {}) }}
+        onClick={handleToggle}
+        style={{ ...triggerStyle, ...(compact ? triggerCompactStyle : {}), ...(open ? triggerOpenStyle : {}) }}
         className="studio-select-trigger"
       >
         <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -111,21 +216,7 @@ export function CustomSelect({ value, options, onChange, placeholder }: CustomSe
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
-      {open && (
-        <div style={dropdownStyle}>
-          {options.map(opt => (
-            <button
-              key={opt.value}
-              type="button"
-              style={{ ...optionStyle, ...(opt.value === value ? activeOptionStyle : {}) }}
-              className={opt.value === value ? '' : 'studio-select-option'}
-              onClick={() => { onChange(opt.value); setOpen(false); }}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {renderedDropdown}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type DragEvent, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type DragEvent, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
 import { StudioProvider, useStudio } from './StudioContext';
@@ -923,6 +923,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     setImageMode,
     currentModel,
     selectedModelId, setSelectedModelId,
+    availableImagePlatforms, imageGroupsLoaded,
     imageSize, setImageSize,
     generate,
     referenceImages, setReferenceImages,
@@ -968,15 +969,18 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const hasSource = allSources.length > 0;
   const isSingleSource = allSources.length === 1;
   const canSend = prompt.trim().length > 0;
-  const modelOptions = hasSource ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY;
+  const baseModelOptions = hasSource ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY;
+  const modelOptions = useMemo(() => {
+    if (!imageGroupsLoaded) return baseModelOptions;
+    const filtered = baseModelOptions.filter(model => availableImagePlatforms.includes(model.platform));
+    return filtered.length > 0 ? filtered : baseModelOptions;
+  }, [availableImagePlatforms, baseModelOptions, imageGroupsLoaded]);
 
   useEffect(() => {
-    if (hasSource
-      && !EDIT_MODEL_REGISTRY.some(m => m.id === selectedModelId)
-      && EDIT_MODEL_REGISTRY.length > 0) {
-      setSelectedModelId(EDIT_MODEL_REGISTRY[0].id);
+    if (!modelOptions.some(m => m.id === selectedModelId) && modelOptions.length > 0) {
+      setSelectedModelId(modelOptions[0].id);
     }
-  }, [hasSource, selectedModelId, setSelectedModelId]);
+  }, [modelOptions, selectedModelId, setSelectedModelId]);
 
   const handleSend = () => {
     const trimmed = prompt.trim();
@@ -1231,6 +1235,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               value={selectedModelId}
               options={modelOptions.map(m => ({ value: m.id, label: m.name }))}
               onChange={setSelectedModelId}
+              compact
+              minDropdownWidth={260}
             />
           </div>
           <div style={c.sizePicker} className="studio-size-picker">

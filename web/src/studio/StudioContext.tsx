@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -10,13 +11,15 @@ import {
 import { api } from '../api';
 import type { GenerationTask, ImageGroup, Project, ProjectAsset } from '../api';
 import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType } from './types';
-import { getModelConfig, getDefaultModel, type ModelConfig } from './modelConfig';
+import { getModelConfig, getDefaultModel, MODEL_REGISTRY, type ModelConfig } from './modelConfig';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_ATTEMPTS = 300;
 const MODEL_STORE_KEY = 'studio.selectedModelId';
+const IMAGE_MODEL_PLATFORMS = Array.from(new Set(MODEL_REGISTRY.map(model => model.platform)));
+const EMPTY_IMAGE_GROUPS: ImageGroup[] = [];
 
 // activeProjectId 哨兵：0 = 「全部」视图（读 host tasks 的历史聚合，含老用户旧图），
 // >=1 = 具体项目（读 studio_assets）。详见 StudioContext 的画廊加载逻辑。
@@ -228,6 +231,8 @@ export interface StudioContextValue {
   // 计费分组选择（按当前平台拉取，用户可自选高/低倍率通道；null = 交给
   // core 自动选最便宜分组，与不传 group_id 的历史行为一致）。
   imageGroups: ImageGroup[];
+  availableImagePlatforms: string[];
+  imageGroupsLoaded: boolean;
   selectedGroupId: number | null;
   setSelectedGroupId: (id: number) => void;
 
@@ -345,34 +350,52 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // 请求不带 group_id，由 core 自动选组（兼容历史行为）。
 
   const GROUP_STORE_PREFIX = 'studio.imageGroup.';
-  const [imageGroups, setImageGroups] = useState<ImageGroup[]>([]);
+  const [imageGroupsByPlatform, setImageGroupsByPlatform] = useState<Record<string, ImageGroup[]>>({});
+  const [imageGroupsLoaded, setImageGroupsLoaded] = useState(false);
   const [selectedGroupId, setSelectedGroupIdRaw] = useState<number | null>(null);
+  const imageGroups = imageGroupsByPlatform[selectedPlatform] ?? EMPTY_IMAGE_GROUPS;
+  const availableImagePlatforms = useMemo(
+    () => IMAGE_MODEL_PLATFORMS.filter(platform => (imageGroupsByPlatform[platform]?.length ?? 0) > 0),
+    [imageGroupsByPlatform],
+  );
 
   useEffect(() => {
     let active = true;
-    setImageGroups([]);
-    setSelectedGroupIdRaw(null);
-    api.listImageGroups(selectedPlatform)
-      .then((groups) => {
-        if (!active) return;
-        setImageGroups(groups);
-        if (groups.length === 0) return;
-        let preferred: number | null = null;
-        try {
-          const raw = window.localStorage.getItem(GROUP_STORE_PREFIX + selectedPlatform);
-          if (raw) preferred = Number.parseInt(raw, 10);
-        } catch { /* ignore */ }
-        const match = groups.find(g => g.id === preferred);
-        setSelectedGroupIdRaw((match ?? groups[0]).id);
-      })
-      .catch(() => {
-        if (active) {
-          setImageGroups([]);
-          setSelectedGroupIdRaw(null);
-        }
-      });
+    setImageGroupsLoaded(false);
+    void Promise.all(IMAGE_MODEL_PLATFORMS.map(async (platform) => {
+      try {
+        const groups = await api.listImageGroups(platform);
+        return [platform, groups] as const;
+      } catch {
+        return [platform, [] as ImageGroup[]] as const;
+      }
+    })).then((entries) => {
+      if (!active) return;
+      const next: Record<string, ImageGroup[]> = {};
+      for (const [platform, groups] of entries) next[platform] = groups;
+      setImageGroupsByPlatform(next);
+      setImageGroupsLoaded(true);
+    });
     return () => { active = false; };
-  }, [selectedPlatform]);
+  }, []);
+
+  useEffect(() => {
+    setSelectedGroupIdRaw(null);
+    if (!imageGroupsLoaded || imageGroups.length === 0) return;
+    let preferred: number | null = null;
+    try {
+      const raw = window.localStorage.getItem(GROUP_STORE_PREFIX + selectedPlatform);
+      if (raw) preferred = Number.parseInt(raw, 10);
+    } catch { /* ignore */ }
+    const match = imageGroups.find(g => g.id === preferred);
+    setSelectedGroupIdRaw((match ?? imageGroups[0]).id);
+  }, [imageGroups, imageGroupsLoaded, selectedPlatform]);
+
+  useEffect(() => {
+    if (!imageGroupsLoaded || imageGroups.length > 0) return;
+    const fallback = MODEL_REGISTRY.find(model => (imageGroupsByPlatform[model.platform]?.length ?? 0) > 0);
+    if (fallback && fallback.id !== selectedModelId) setSelectedModelId(fallback.id);
+  }, [imageGroups, imageGroupsByPlatform, imageGroupsLoaded, selectedModelId, setSelectedModelId]);
 
   const setSelectedGroupId = useCallback((id: number) => {
     setSelectedGroupIdRaw(id);
@@ -689,13 +712,34 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       options?: GenerateOptions,
     ) => {
       if (!prompt.trim()) return;
+      const mode = resolveGenerationMode(imageMode, options);
+
+      if (imageGroupsLoaded && (imageGroupsByPlatform[selectedPlatform]?.length ?? 0) === 0) {
+        const platformLabel = selectedPlatform === 'gemini'
+          ? 'Gemini'
+          : selectedPlatform === 'openai'
+          ? 'OpenAI'
+          : selectedPlatform;
+        setTasks(prev => [{
+          id: uid(),
+          prompt,
+          mode,
+          status: 'failed',
+          error: `当前没有可用的 ${platformLabel} 图片分组，请先在后台创建分组并绑定可用账号。`,
+          createdAt: new Date().toISOString(),
+          platform: selectedPlatform,
+          model: selectedModelId,
+          size: imageSize,
+          remoteTaskIds: [],
+        }, ...prev]);
+        return;
+      }
 
       const controller = new AbortController();
       const signal = controller.signal;
 
       const taskId = uid();
       const now = new Date().toISOString();
-      const mode = resolveGenerationMode(imageMode, options);
       const remoteTaskIds: number[] = [];
       // 发起时刻的分组选择：写进 task 供「全部重试」沿用，避免用户中途切组导致错扣。
       const groupId = selectedGroupId ?? undefined;
@@ -910,6 +954,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     [
       imageMode,
       imageSize,
+      imageGroupsByPlatform,
+      imageGroupsLoaded,
       referenceImages,
       selectedPlatform,
       selectedModelId,
@@ -1136,6 +1182,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     imageSize,
     setImageSize,
     imageGroups,
+    availableImagePlatforms,
+    imageGroupsLoaded,
     selectedGroupId,
     setSelectedGroupId,
     referenceImages,
