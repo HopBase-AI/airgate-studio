@@ -19,6 +19,8 @@ const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_ATTEMPTS = 300;
 const POLL_TRANSIENT_ERROR_ATTEMPTS = 2;
 const MODEL_STORE_KEY = 'studio.selectedModelId';
+const DELETED_TASK_STORE_KEY = 'studio.deletedGenerationTaskIds';
+const DELETED_TASK_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const EMPTY_IMAGE_GROUPS: ImageGroup[] = [];
 
 // activeProjectId 哨兵：0 = 「全部」视图（读 host tasks 的历史聚合，含老用户旧图），
@@ -130,20 +132,100 @@ function taskSourceUrl(task: GenerationTask): string | undefined {
 }
 
 function isRemoteTaskActive(status: string): boolean {
-  return status === 'pending' || status === 'processing' || status === 'retrying';
+  return ['pending', 'queued', 'processing', 'retrying', 'running', 'in_progress'].includes(status);
 }
 
 function isRemoteTaskFailed(status: string): boolean {
-  return status === 'failed' || status === 'cancelled';
+  return ['failed', 'cancelled', 'canceled', 'error', 'errored', 'rejected'].includes(status);
+}
+
+function isLocalTaskTerminal(status: StudioGenerationTask['status'] | undefined): boolean {
+  return status === 'failed' || status === 'completed';
+}
+
+function isLocalTaskActive(status: StudioGenerationTask['status'] | undefined): boolean {
+  return status === 'queued' || status === 'processing';
 }
 
 function generationTaskError(task: GenerationTask, fallback = 'Image generation task failed'): string {
   return task.error_message || fallback;
 }
 
+function errorMessageFromUnknown(err: unknown, fallback = 'Generation failed'): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err.trim()) return err;
+  return fallback;
+}
+
 function isNotFoundError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err ?? '');
   return /\bnot\s*found\b/i.test(msg) || /\bNotFound\b/.test(msg) || /\b404\b/.test(msg) || msg.includes('不存在');
+}
+
+function readDeletedTaskRecords(): Record<string, number> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(DELETED_TASK_STORE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    const now = Date.now();
+    const records: Record<string, number> = {};
+    if (Array.isArray(parsed)) {
+      for (const value of parsed) {
+        const id = Number(value);
+        if (Number.isFinite(id) && id > 0) records[String(id)] = now;
+      }
+    } else if (parsed && typeof parsed === 'object') {
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        const id = Number(key);
+        const deletedAt = Number(value);
+        if (!Number.isFinite(id) || id <= 0 || !Number.isFinite(deletedAt)) continue;
+        if (now - deletedAt <= DELETED_TASK_TTL_MS) records[String(id)] = deletedAt;
+      }
+    }
+    window.localStorage.setItem(DELETED_TASK_STORE_KEY, JSON.stringify(records));
+    return records;
+  } catch {
+    return {};
+  }
+}
+
+function writeDeletedTaskRecords(records: Record<string, number>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(DELETED_TASK_STORE_KEY, JSON.stringify(records));
+  } catch { /* ignore */ }
+}
+
+function hasDeletedRemoteTaskId(records: Record<string, number>, taskId: number | undefined | null): boolean {
+  return !!taskId && !!records[String(taskId)];
+}
+
+function filterDeletedRemoteTasks(taskList: GenerationTask[], records: Record<string, number>): GenerationTask[] {
+  return taskList.filter(t => !hasDeletedRemoteTaskId(records, t.id));
+}
+
+function mergeTaskPatch(
+  task: StudioGenerationTask,
+  patch: Partial<StudioGenerationTask>,
+  patchRemoteIds: number[],
+): StudioGenerationTask {
+  const remoteTaskIds = uniqueNumbers([
+    ...taskRemoteIds(task),
+    ...patchRemoteIds,
+  ]);
+  if (isLocalTaskTerminal(task.status) && isLocalTaskActive(patch.status)) {
+    return {
+      ...task,
+      progress: patch.progress ?? task.progress,
+      remoteTaskIds,
+    };
+  }
+  return {
+    ...task,
+    ...patch,
+    remoteTaskIds,
+  };
 }
 
 async function deleteGenerationTaskIfPresent(taskId: number): Promise<void> {
@@ -393,6 +475,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [tasks, setTasks] = useState<StudioGenerationTask[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const deletedTaskRecordsRef = useRef<Record<string, number>>(readDeletedTaskRecords());
 
   // Gallery
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
@@ -561,12 +644,16 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       ]);
       if (signal.aborted) return;
 
-      setGallery(tasksToGallery(completedTasks));
+      const deletedTaskRecords = deletedTaskRecordsRef.current;
+      const visibleCompletedTasks = filterDeletedRemoteTasks(completedTasks, deletedTaskRecords);
+      const visibleRecentTasks = filterDeletedRemoteTasks(recentTasks, deletedTaskRecords);
+
+      setGallery(tasksToGallery(visibleCompletedTasks));
       galleryOffsetRef.current = completedTasks.length;
       setHasMore(completedTasks.length < completedTotal);
 
-      const failed = recentTasks.filter(t => t.status === 'failed');
-      const inFlight = recentTasks.filter(t => isRemoteTaskActive(t.status));
+      const failed = visibleRecentTasks.filter(t => isRemoteTaskFailed(t.status));
+      const inFlight = visibleRecentTasks.filter(t => isRemoteTaskActive(t.status));
 
       const recoveredTasks: StudioGenerationTask[] = [
         ...failed.map(t => ({
@@ -595,18 +682,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         const merged = recoveredTasks.map(remote => {
           const local = prev.find(item => tasksShareRemoteIdentity(item, remote));
           if (!local) return remote;
-          return {
-            ...local,
-            ...remote,
-            id: local.id,
-            remoteTaskIds: uniqueNumbers([
-              ...taskRemoteIds(local),
-              ...taskRemoteIds(remote),
-            ]),
-          };
+          return mergeTaskPatch(local, { ...remote, id: local.id }, taskRemoteIds(remote));
         });
         const localOnly = prev.filter(local =>
-          !recoveredTasks.some(remote => tasksShareRemoteIdentity(local, remote)),
+          !recoveredTasks.some(remote => tasksShareRemoteIdentity(local, remote)) &&
+          !taskRemoteIds(local).some(id => hasDeletedRemoteTaskId(deletedTaskRecords, id)),
         );
         return [...merged, ...localOnly];
       });
@@ -626,22 +706,22 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             });
             if (items.length === 0) {
               setTasks(prev => prev.map(gt => gt.id === taskUiId
-                ? { ...gt, status: 'failed', error: '任务已完成，但没有返回可展示图片' }
+                ? mergeTaskPatch(gt, { status: 'failed', error: '任务已完成，但没有返回可展示图片' }, [done.id])
                 : gt));
               return;
             }
             setGallery(prev => [...items, ...prev]);
             setTasks(prev => prev.map(gt => gt.id === taskUiId
-              ? { ...gt, status: 'completed', result: items }
+              ? mergeTaskPatch(gt, { status: 'completed', result: items }, [done.id])
               : gt));
           })
           .catch(err => {
             if (signal.aborted) return;
-            const msg = err instanceof Error ? err.message : 'Recovery failed';
+            const msg = errorMessageFromUnknown(err, 'Recovery failed');
             setTasks(prev =>
               prev.map(gt =>
                 gt.id === taskUiId
-                  ? { ...gt, status: 'failed', error: msg }
+                  ? mergeTaskPatch(gt, { status: 'failed', error: msg }, [t.id])
                   : gt,
               ),
             );
@@ -681,7 +761,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           offset: galleryOffsetRef.current,
           status: 'completed',
         });
-        const newItems = tasksToGallery(moreTasks);
+        const visibleMoreTasks = filterDeletedRemoteTasks(moreTasks, deletedTaskRecordsRef.current);
+        const newItems = tasksToGallery(visibleMoreTasks);
         setGallery(prev => [...prev, ...newItems]);
         galleryOffsetRef.current += moreTasks.length;
         setHasMore(galleryOffsetRef.current < total);
@@ -782,33 +863,35 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             });
             if (items.length === 0) {
               setTasks(prev => prev.map(gt => gt.id === uiTask.id
-                ? { ...gt, status: 'failed', error: '任务已完成，但没有返回可展示图片' }
+                ? mergeTaskPatch(gt, { status: 'failed', error: '任务已完成，但没有返回可展示图片' }, [remote.id])
                 : gt));
               return;
             }
             setGallery(prev => [...items, ...prev]);
-            setTasks(prev => prev.map(gt => gt.id === uiTask.id ? { ...gt, status: 'completed', result: items } : gt));
+            setTasks(prev => prev.map(gt => gt.id === uiTask.id
+              ? mergeTaskPatch(gt, { status: 'completed', result: items }, [remote.id])
+              : gt));
           } else if (isRemoteTaskFailed(remote.status)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? { ...gt, status: 'failed', error: generationTaskError(remote, 'Task failed') }
+              ? mergeTaskPatch(gt, { status: 'failed', error: generationTaskError(remote, 'Task failed') }, [remote.id])
               : gt));
           } else if (isRemoteTaskActive(remote.status)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? { ...gt, status: 'processing', progress: remote.progress }
+              ? mergeTaskPatch(gt, { status: 'processing', progress: remote.progress }, [remote.id])
               : gt));
           } else {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? { ...gt, status: 'failed', error: generationTaskError(remote, `任务停止：${remote.status}`) }
+              ? mergeTaskPatch(gt, { status: 'failed', error: generationTaskError(remote, `任务停止：${remote.status}`) }, [remote.id])
               : gt));
           }
         } catch (err) {
-          if (err instanceof ApiRequestError) {
-            if (err.status === 404) {
-              setTasks(prev => prev.filter(gt => gt.id !== uiTask.id));
-              return;
-            }
+          if (err instanceof ApiRequestError && err.status === 404) {
+            setTasks(prev => prev.filter(gt => gt.id !== uiTask.id));
+            return;
+          }
+          if (err instanceof ApiRequestError || isNotFoundError(err)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? { ...gt, status: 'failed', error: err.message || 'Task status check failed' }
+              ? mergeTaskPatch(gt, { status: 'failed', error: errorMessageFromUnknown(err, 'Task status check failed') }, [remoteId])
               : gt));
           }
         }
@@ -1057,7 +1140,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
             updateTask({ remoteTaskIds: [created.id] });
             const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, (t) => {
-              if (t.status === 'failed') {
+              if (isRemoteTaskFailed(t.status)) {
                 updateTask({ status: 'failed', error: generationTaskError(t, 'Task failed'), progress: t.progress, remoteTaskIds: [t.id] });
                 return;
               }
@@ -1132,6 +1215,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     ]);
     const previousTasks = tasks;
     const previousGallery = gallery;
+    const previousDeletedTaskRecords = { ...deletedTaskRecordsRef.current };
+    if (remoteIds.length > 0) {
+      const now = Date.now();
+      const nextDeletedTaskRecords = { ...deletedTaskRecordsRef.current };
+      for (const remoteId of remoteIds) nextDeletedTaskRecords[String(remoteId)] = now;
+      deletedTaskRecordsRef.current = nextDeletedTaskRecords;
+      writeDeletedTaskRecords(nextDeletedTaskRecords);
+    }
     setTasks(prev => prev.filter(t => t.id !== uiId));
     if (remoteIds.length > 0) {
       setGallery(prev => prev.filter(item => !item.taskId || !remoteIds.includes(item.taskId)));
@@ -1139,9 +1230,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     try {
       await Promise.all(remoteIds.map(remoteId => deleteGenerationTaskIfPresent(remoteId)));
     } catch (err) {
+      deletedTaskRecordsRef.current = previousDeletedTaskRecords;
+      writeDeletedTaskRecords(previousDeletedTaskRecords);
       setTasks(previousTasks);
       setGallery(previousGallery);
-      const msg = err instanceof Error ? err.message : '删除失败';
+      const msg = errorMessageFromUnknown(err, '删除失败');
       setTasks(prev => prev.map(t => t.id === uiId ? { ...t, status: 'failed', error: msg } : t));
       throw err;
     }

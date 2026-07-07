@@ -110,3 +110,17 @@ func TestHostDeleteTaskFromPluginsTreatsExecutorNotFoundAsFallback(t *testing.T)
 		t.Fatalf("second call = %+v", host.calls[1])
 	}
 }
+
+func TestHostDeleteTaskFromPluginsTreatsAllNotFoundAsDeleted(t *testing.T) {
+	host := &taskTestHost{}
+
+	if err := hostDeleteTaskFromPlugins(context.Background(), host, []string{"gateway-openai"}, 7, 99); err != nil {
+		t.Fatalf("hostDeleteTaskFromPlugins returned err: %v", err)
+	}
+	if len(host.calls) != 1 {
+		t.Fatalf("calls = %+v, want 1 call", host.calls)
+	}
+	if host.calls[0].Method != hostMethodTasksDelete || host.calls[0].PluginID != "gateway-openai" {
+		t.Fatalf("call = %+v", host.calls[0])
+	}
+}

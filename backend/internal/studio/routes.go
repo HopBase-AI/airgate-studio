@@ -115,6 +115,10 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model is required"})
 		return
 	}
+	if err := validateImageModelSize(req.Model, req.Parameters); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
 
 	// 先校验该平台确实有当前用户可用的图片分组；显式传 group_id 时再校验该分组。

@@ -109,3 +109,30 @@ func TestExecutorSupportsTaskType(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateImageModelSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		model   string
+		size    string
+		wantErr bool
+	}{
+		{name: "gpt image 4k", model: "gpt-image-2", size: "3840x2160"},
+		{name: "banana lite 1k", model: "gemini-3.1-flash-lite-image", size: "1024x1536"},
+		{name: "banana lite rejects 2k", model: "gemini-3.1-flash-lite-image", size: "2048x2048", wantErr: true},
+		{name: "banana 2 rejects 4k", model: "gemini-3.1-flash-image", size: "3840x2160", wantErr: true},
+		{name: "unknown model passes through", model: "custom-image-model", size: "2048x2048"},
+		{name: "empty size passes through", model: "gemini-3.1-flash-lite-image", size: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateImageModelSize(tt.model, map[string]interface{}{"size": tt.size})
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
