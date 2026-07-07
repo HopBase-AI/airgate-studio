@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type DragEvent, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
-import { StudioProvider, useStudio } from './StudioContext';
+import { useStudio } from './StudioContext';
 import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
@@ -1856,9 +1856,5 @@ function StudioLayout() {
 // ── StudioView (entry point) ────────────────────────────────────────────────
 
 export function StudioView() {
-  return (
-    <StudioProvider>
-      <StudioLayout />
-    </StudioProvider>
-  );
+  return <StudioLayout />;
 }

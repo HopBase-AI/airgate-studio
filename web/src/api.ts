@@ -19,6 +19,16 @@ interface ApiEnvelope<T> {
   message?: string;
 }
 
+export class ApiRequestError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const url = `${baseURL()}${path}`;
   const headers: Record<string, string> = {};
@@ -38,7 +48,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     const detail = typeof err?.error === 'string'
       ? err.error
       : err?.error?.message || err?.message;
-    throw new Error(detail || `HTTP ${resp.status}`);
+    throw new ApiRequestError(resp.status, detail || `HTTP ${resp.status}`);
   }
   return resp.json();
 }

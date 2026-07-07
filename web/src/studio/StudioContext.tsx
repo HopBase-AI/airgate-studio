@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api } from '../api';
+import { api, ApiRequestError } from '../api';
 import type { GenerationTask, ImageGroup, Project, ProjectAsset } from '../api';
 import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType } from './types';
 import { getModelConfig, getDefaultModel, MODEL_REGISTRY, type ModelConfig } from './modelConfig';
@@ -17,6 +17,7 @@ import { getModelConfig, getDefaultModel, MODEL_REGISTRY, type ModelConfig } fro
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_ATTEMPTS = 300;
+const POLL_TRANSIENT_ERROR_ATTEMPTS = 2;
 const MODEL_STORE_KEY = 'studio.selectedModelId';
 const IMAGE_MODEL_PLATFORMS = Array.from(new Set(MODEL_REGISTRY.map(model => model.platform)));
 const EMPTY_IMAGE_GROUPS: ImageGroup[] = [];
@@ -239,7 +240,7 @@ async function pollGenerationTask(
     } catch (err) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
       networkErrors++;
-      if (networkErrors > 150) throw err;
+      if (err instanceof ApiRequestError || networkErrors > POLL_TRANSIENT_ERROR_ATTEMPTS) throw err;
     }
     if (task) {
       onPoll?.(task);
