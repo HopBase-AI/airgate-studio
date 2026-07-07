@@ -291,7 +291,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
 
   const handleRetry = () => {
     if (!task.prompt) return;
-    deleteTask(task.id);
+    void deleteTask(task.id).catch(() => {});
     if (task.model) setSelectedModelId(task.model);
     if (task.size) setImageSize(task.size);
     setImageMode(task.mode);
@@ -300,7 +300,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
 
   const handleDelete = async () => {
     if (!await confirm(t('playground.studio_confirm_delete_task', { defaultValue: '确定要删除这个任务吗？' }))) return;
-    deleteTask(task.id);
+    await deleteTask(task.id).catch(() => {});
   };
 
   // ── 批量聚合卡 ──────────────────────────────────────────────────────────
@@ -488,7 +488,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!await confirm(t('playground.studio_confirm_delete', { defaultValue: '确定要删除这张图片吗？' }))) return;
-    deleteGalleryItem(item.id);
+    await deleteGalleryItem(item.id).catch(() => {});
   };
 
   const handlePreview = (e: React.MouseEvent) => {

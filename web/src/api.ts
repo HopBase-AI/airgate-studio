@@ -35,7 +35,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const resp = await fetch(url, options);
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: { message: resp.statusText } }));
-    throw new Error(err?.error?.message || `HTTP ${resp.status}`);
+    const detail = typeof err?.error === 'string'
+      ? err.error
+      : err?.error?.message || err?.message;
+    throw new Error(detail || `HTTP ${resp.status}`);
   }
   return resp.json();
 }

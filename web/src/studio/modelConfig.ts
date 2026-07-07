@@ -85,7 +85,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   {
     id: 'gemini-2.5-flash-image',
     name: 'Gemini 2.5 Flash Image (Nano Banana)',
-    platform: 'gemini',
+    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,
     supportsEdit: false,
@@ -93,7 +93,15 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   {
     id: 'gemini-3-pro-image',
     name: 'Gemini 3 Pro Image (Nano Banana Pro)',
-    platform: 'gemini',
+    platform: 'openai',
+    defaultSize: '1024x1024',
+    sizes: GOOGLE_IMAGE_ALL_SIZES,
+    supportsEdit: false,
+  },
+  {
+    id: 'gemini-3-pro-image-preview',
+    name: 'Gemini 3 Pro Image Preview (Nano Banana Pro)',
+    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_ALL_SIZES,
     supportsEdit: false,
@@ -101,7 +109,15 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   {
     id: 'gemini-3.1-flash-image',
     name: 'Gemini 3.1 Flash Image (Nano Banana 2)',
-    platform: 'gemini',
+    platform: 'openai',
+    defaultSize: '1024x1024',
+    sizes: GOOGLE_IMAGE_UP_TO_2K_SIZES,
+    supportsEdit: false,
+  },
+  {
+    id: 'gemini-3.1-flash-image-preview',
+    name: 'Gemini 3.1 Flash Image Preview (Nano Banana 2)',
+    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_UP_TO_2K_SIZES,
     supportsEdit: false,
@@ -109,7 +125,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   {
     id: 'gemini-3.1-flash-lite-image',
     name: 'Gemini 3.1 Flash Lite Image (Nano Banana 2 Lite)',
-    platform: 'gemini',
+    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,
     supportsEdit: false,

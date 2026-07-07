@@ -118,6 +118,36 @@ function taskSourceUrl(task: GenerationTask): string | undefined {
   return task.input_images?.find(url => !!url);
 }
 
+function isRemoteTaskActive(status: string): boolean {
+  return status === 'pending' || status === 'processing' || status === 'retrying';
+}
+
+function isRemoteTaskFailed(status: string): boolean {
+  return status === 'failed' || status === 'cancelled';
+}
+
+function generationTaskError(task: GenerationTask, fallback = 'Image generation task failed'): string {
+  return task.error_message || fallback;
+}
+
+function galleryItemsFromCompletedTask(
+  task: GenerationTask,
+  fallback: Pick<GalleryItem, 'prompt' | 'model' | 'mode'>,
+): GalleryItem[] {
+  return parseMarkdownImages(task.result_content || '').map(img => ({
+    id: uid(),
+    taskId: task.id,
+    url: img.url,
+    alt: img.alt,
+    prompt: task.prompt || fallback.prompt,
+    model: task.model ?? fallback.model,
+    mode: operationToImageMode(task.operation ?? 'generate') || fallback.mode,
+    size: taskSize(task),
+    createdAt: taskAssetCreatedAt(task),
+    sourceUrl: taskSourceUrl(task),
+  }));
+}
+
 async function delay(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -200,8 +230,11 @@ async function pollGenerationTask(
     if (task) {
       onPoll?.(task);
       if (task.status === 'completed') return task;
-      if (task.status === 'failed') {
-        throw new Error(task.error_message || 'Image generation task failed');
+      if (isRemoteTaskFailed(task.status)) {
+        throw new Error(generationTaskError(task));
+      }
+      if (!isRemoteTaskActive(task.status)) {
+        throw new Error(generationTaskError(task, `Image generation stopped with status: ${task.status}`));
       }
     }
     const backoff = networkErrors > 0 ? Math.min(POLL_INTERVAL_MS * 2, 6000) : POLL_INTERVAL_MS;
@@ -260,8 +293,8 @@ export interface StudioContextValue {
   generatedAssetRetentionDays: number | null;
   previewItem: GalleryItem | null;
   setPreviewItem: (item: GalleryItem | null) => void;
-  deleteGalleryItem: (id: string) => void;
-  deleteTask: (uiId: string) => void;
+  deleteGalleryItem: (id: string) => Promise<void>;
+  deleteTask: (uiId: string) => Promise<void>;
   retryBatchFailures: (uiId: string) => void;
   useAsReference: (item: GalleryItem) => void;
   regenerate: (item: GalleryItem) => void;
@@ -479,9 +512,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setHasMore(completedTasks.length < completedTotal);
 
       const failed = recentTasks.filter(t => t.status === 'failed');
-      const inFlight = recentTasks.filter(
-        t => t.status === 'pending' || t.status === 'processing',
-      );
+      const inFlight = recentTasks.filter(t => isRemoteTaskActive(t.status));
 
       setTasks([
         ...failed.map(t => ({
@@ -515,27 +546,21 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         pollGenerationTask(t.id, signal)
           .then(done => {
             if (signal.aborted) return;
-            const imgs = parseMarkdownImages(done.result_content || '');
-            setGallery(prev => [
-              ...imgs.map(img => ({
-                id: uid(),
-                taskId: t.id,
-                url: img.url,
-                alt: img.alt,
-                prompt: t.prompt,
-                model: t.model ?? '',
-                mode: operationToImageMode(t.operation ?? 'generate'),
-                size: taskSize(done),
-                createdAt: taskAssetCreatedAt(done),
-                sourceUrl: taskSourceUrl(done),
-              })),
-              ...prev,
-            ]);
-            setTasks(prev =>
-              prev.map(gt =>
-                gt.id === taskUiId ? { ...gt, status: 'completed' } : gt,
-              ),
-            );
+            const items = galleryItemsFromCompletedTask(done, {
+              prompt: t.prompt,
+              model: t.model ?? '',
+              mode: operationToImageMode(t.operation ?? 'generate'),
+            });
+            if (items.length === 0) {
+              setTasks(prev => prev.map(gt => gt.id === taskUiId
+                ? { ...gt, status: 'failed', error: '任务已完成，但没有返回可展示图片' }
+                : gt));
+              return;
+            }
+            setGallery(prev => [...items, ...prev]);
+            setTasks(prev => prev.map(gt => gt.id === taskUiId
+              ? { ...gt, status: 'completed', result: items }
+              : gt));
           })
           .catch(err => {
             if (signal.aborted) return;
@@ -676,27 +701,31 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         if (!remoteId) return;
         try {
           const remote = await api.getGenerationTask(remoteId);
-          if (remote.status === 'completed' && remote.result_content) {
-            const imgs = parseMarkdownImages(remote.result_content);
-            setGallery(prev => [
-              ...imgs.map(img => ({
-                id: uid(),
-                taskId: remoteId,
-                url: img.url,
-                alt: img.alt,
-                prompt: remote.prompt,
-                model: remote.model ?? '',
-                mode: operationToImageMode(remote.operation ?? 'generate'),
-                size: taskSize(remote),
-                createdAt: taskAssetCreatedAt(remote),
-                sourceUrl: taskSourceUrl(remote),
-              })),
-              ...prev,
-            ]);
-            setTasks(prev => prev.map(gt => gt.id === uiTask.id ? { ...gt, status: 'completed' } : gt));
-          } else if (remote.status === 'failed') {
+          if (remote.status === 'completed') {
+            const items = galleryItemsFromCompletedTask(remote, {
+              prompt: uiTask.prompt,
+              model: uiTask.model ?? '',
+              mode: uiTask.mode,
+            });
+            if (items.length === 0) {
+              setTasks(prev => prev.map(gt => gt.id === uiTask.id
+                ? { ...gt, status: 'failed', error: '任务已完成，但没有返回可展示图片' }
+                : gt));
+              return;
+            }
+            setGallery(prev => [...items, ...prev]);
+            setTasks(prev => prev.map(gt => gt.id === uiTask.id ? { ...gt, status: 'completed', result: items } : gt));
+          } else if (isRemoteTaskFailed(remote.status)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? { ...gt, status: 'failed', error: remote.error_message || 'Task failed' }
+              ? { ...gt, status: 'failed', error: generationTaskError(remote, 'Task failed') }
+              : gt));
+          } else if (isRemoteTaskActive(remote.status)) {
+            setTasks(prev => prev.map(gt => gt.id === uiTask.id
+              ? { ...gt, status: 'processing', progress: remote.progress }
+              : gt));
+          } else {
+            setTasks(prev => prev.map(gt => gt.id === uiTask.id
+              ? { ...gt, status: 'failed', error: generationTaskError(remote, `任务停止：${remote.status}`) }
               : gt));
           }
         } catch { /* single task check is non-fatal */ }
@@ -846,23 +875,20 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               patchSubtask(sub.id, { remoteTaskId: created.id });
               updateTask({ remoteTaskIds: [...remoteTaskIds] });
               const completed = await pollGenerationTask(created.id, signal);
-              const items: GalleryItem[] = parseMarkdownImages(completed.result_content || '').map(img => ({
-                id: uid(),
-                taskId: created.id,
-                url: img.url,
-                alt: img.alt,
+              const items = galleryItemsFromCompletedTask(completed, {
                 prompt: sub.prompt,
                 model: selectedModelId,
                 mode,
-                size: imageSize,
-                createdAt: taskAssetCreatedAt(completed),
+              }).map(item => ({
+                ...item,
                 sourceUrl: batchSources[0],
               }));
-              // 成功一张立即进画廊 + 落项目（不等整组完成）。
-              if (items.length > 0) {
-                setGallery(prev => [...items, ...prev]);
-                void persistActiveProjectAssets(items);
+              if (items.length === 0) {
+                throw new Error('任务已完成，但没有返回可展示图片');
               }
+              // 成功一张立即进画廊 + 落项目（不等整组完成）。
+              setGallery(prev => [...items, ...prev]);
+              void persistActiveProjectAssets(items);
               patchSubtask(sub.id, { status: 'completed' });
               return items;
             };
@@ -941,6 +967,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               if (typeof t.progress === 'number') updateTask({ progress: t.progress });
             });
             const images = parseMarkdownImages(completed.result_content || '');
+            if (images.length === 0) {
+              updateTask({ status: 'failed', error: '任务已完成，但没有返回可展示图片', remoteTaskIds: [created.id] });
+              return;
+            }
 
             const galleryItems: GalleryItem[] = images.map(img => ({
               id: uid(),
@@ -997,43 +1027,63 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   // ── Gallery helpers ───────────────────────────────────────────────────────
 
-  const deleteTask = useCallback((uiId: string) => {
+  const deleteTask = useCallback(async (uiId: string): Promise<void> => {
     const task = tasks.find(t => t.id === uiId);
     const remoteIds = uniqueNumbers([
       ...(task ? taskRemoteIds(task) : []),
       ...((uiId.startsWith('r-') ? [Number(uiId.slice(2))] : [])),
     ]);
+    const previousTasks = tasks;
+    const previousGallery = gallery;
     setTasks(prev => prev.filter(t => t.id !== uiId));
     if (remoteIds.length > 0) {
       setGallery(prev => prev.filter(item => !item.taskId || !remoteIds.includes(item.taskId)));
     }
-    for (const remoteId of remoteIds) {
-      api.deleteGenerationTask(remoteId).catch(() => {});
+    try {
+      await Promise.all(remoteIds.map(remoteId => api.deleteGenerationTask(remoteId)));
+    } catch (err) {
+      setTasks(previousTasks);
+      setGallery(previousGallery);
+      const msg = err instanceof Error ? err.message : '删除失败';
+      setTasks(prev => prev.map(t => t.id === uiId ? { ...t, status: 'failed', error: msg } : t));
+      throw err;
     }
-  }, [tasks]);
+  }, [gallery, tasks]);
 
-  const deleteGalleryItem = useCallback((id: string) => {
+  const deleteGalleryItem = useCallback(async (id: string): Promise<void> => {
     const item = gallery.find(g => g.id === id);
     if (!item) return;
     // 项目视图条目：删 studio_assets 记录（不动底层 host task / 资产对象，可能被「全部」视图共享）。
     if (item.assetId && activeProjectIdRef.current >= 1) {
       const projectId = activeProjectIdRef.current;
+      const previousGallery = gallery;
       setGallery(prev => prev.filter(g => g.id !== id));
-      api.deleteProjectAsset(projectId, item.assetId).catch(() => {});
+      try {
+        await api.deleteProjectAsset(projectId, item.assetId);
+      } catch (err) {
+        setGallery(previousGallery);
+        throw err;
+      }
       return;
     }
     const matchingTask = item.taskId
       ? tasks.find(task => taskRemoteIds(task).includes(item.taskId!))
       : undefined;
     if (matchingTask) {
-      deleteTask(matchingTask.id);
+      await deleteTask(matchingTask.id);
       return;
     }
+    const previousGallery = gallery;
     setGallery(prev => (item.taskId
       ? prev.filter(g => g.taskId !== item.taskId)
       : prev.filter(g => g.id !== id)));
     if (item.taskId) {
-      api.deleteGenerationTask(item.taskId).catch(() => {});
+      try {
+        await api.deleteGenerationTask(item.taskId);
+      } catch (err) {
+        setGallery(previousGallery);
+        throw err;
+      }
     }
   }, [deleteTask, gallery, tasks]);
 
@@ -1134,22 +1184,19 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           });
           patchSubtask(sub.id, { remoteTaskId: created.id });
           const completed = await pollGenerationTask(created.id, signal);
-          const items: GalleryItem[] = parseMarkdownImages(completed.result_content || '').map(img => ({
-            id: uid(),
-            taskId: created.id,
-            url: img.url,
-            alt: img.alt,
+          const items = galleryItemsFromCompletedTask(completed, {
             prompt: sub.prompt,
             model,
             mode: 'batch' as ImageMode,
-            size,
-            createdAt: taskAssetCreatedAt(completed),
+          }).map(item => ({
+            ...item,
             sourceUrl: sources[0],
           }));
-          if (items.length > 0) {
-            setGallery(prev => [...items, ...prev]);
-            void persistActiveProjectAssets(items);
+          if (items.length === 0) {
+            throw new Error('任务已完成，但没有返回可展示图片');
           }
+          setGallery(prev => [...items, ...prev]);
+          void persistActiveProjectAssets(items);
           patchSubtask(sub.id, { status: 'completed' });
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Generation failed';
