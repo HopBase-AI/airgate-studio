@@ -152,14 +152,13 @@ func (p *StudioPlugin) handleGetGenerationTask(w http.ResponseWriter, r *http.Re
 	}
 
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
-	task, err := hostGetTask(r.Context(), p.host, "", userID, taskID)
+	task, err := hostGetTaskFromPlugins(r.Context(), p.host, generationExecutorPluginIDs(), userID, taskID)
 	if err != nil {
+		if isHostTaskNotFound(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询任务失败: " + err.Error()})
-		return
-	}
-	// 只暴露生成任务执行插件的任务，避免同用户其他插件的任务泄漏进创作中心。
-	if !isGenerationExecutor(task.PluginID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
 
@@ -175,17 +174,7 @@ func (p *StudioPlugin) handleDeleteGenerationTask(w http.ResponseWriter, r *http
 	}
 
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
-	task, err := hostGetTask(r.Context(), p.host, "", userID, taskID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询任务失败: " + err.Error()})
-		return
-	}
-	// 与查询同一条红线：不允许经 studio 删除其他插件的任务。
-	if !isGenerationExecutor(task.PluginID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
-		return
-	}
-	if err := hostDeleteTask(r.Context(), p.host, task.PluginID, userID, taskID); err != nil {
+	if err := hostDeleteTaskFromPlugins(r.Context(), p.host, generationExecutorPluginIDs(), userID, taskID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "删除任务失败: " + err.Error()})
 		return
 	}

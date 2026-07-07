@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -96,6 +98,36 @@ func hostGetTask(ctx context.Context, host sdk.Host, pluginID string, userID, ta
 	return hostTaskFromPayload(firstValue(resp, "task", "data", "result", ""))
 }
 
+func hostGetTaskFromPlugins(ctx context.Context, host sdk.Host, pluginIDs []string, userID, taskID int64) (*hostTask, error) {
+	var notFoundErr error
+	for _, pluginID := range pluginIDs {
+		task, err := hostGetTask(ctx, host, pluginID, userID, taskID)
+		if err == nil {
+			return task, nil
+		}
+		if isHostTaskNotFound(err) {
+			notFoundErr = err
+			continue
+		}
+		return nil, err
+	}
+	if notFoundErr != nil {
+		return nil, notFoundErr
+	}
+	return nil, fmt.Errorf("task not found")
+}
+
+func isHostTaskNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if status.Code(err) == codes.NotFound {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(strings.ToLower(msg), "task not found") || strings.Contains(strings.ToLower(msg), "notfound")
+}
+
 type hostTaskListResponse struct {
 	Tasks []*hostTask
 	Total int
@@ -142,6 +174,20 @@ func hostDeleteTask(ctx context.Context, host sdk.Host, pluginID string, userID,
 	}
 	_, err := hostInvoke(ctx, host, hostMethodTasksDelete, payload)
 	return err
+}
+
+func hostDeleteTaskFromPlugins(ctx context.Context, host sdk.Host, pluginIDs []string, userID, taskID int64) error {
+	for _, pluginID := range pluginIDs {
+		err := hostDeleteTask(ctx, host, pluginID, userID, taskID)
+		if err == nil {
+			return nil
+		}
+		if isHostTaskNotFound(err) {
+			continue
+		}
+		return err
+	}
+	return nil
 }
 
 func hostListPlatforms(ctx context.Context, host sdk.Host) ([]interface{}, error) {
