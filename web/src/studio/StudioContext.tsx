@@ -151,6 +151,33 @@ function generationTaskError(task: GenerationTask, fallback = 'Image generation 
   return task.error_message || fallback;
 }
 
+function hasTerminalRemoteError(task: GenerationTask): boolean {
+  const message = stringsTrim(task.error_message);
+  if (!message) return false;
+  if (isRemoteTaskFailed(task.status)) return true;
+  if (!isRemoteTaskActive(task.status)) return true;
+  return isTerminalGenerationErrorMessage(message);
+}
+
+function stringsTrim(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isTerminalGenerationErrorMessage(message: string): boolean {
+  return [
+    /\bmodel\b.*\bnot\s*found\b/i,
+    /\bnot\s*found\b.*\bmodel\b/i,
+    /\bunsupported\s+model\b/i,
+    /\bnot\s+supported\s+model\b/i,
+    /\bmodel\b.*\bnot\s+support/i,
+    /\binvalid\s+request\b/i,
+    /\bbad\s+request\b/i,
+    /\bno\s+available\s+channel\b/i,
+    /模型.*(不存在|不支持|不可用)/i,
+    /不支持.*模型/i,
+  ].some(pattern => pattern.test(message));
+}
+
 function errorMessageFromUnknown(err: unknown, fallback = 'Generation failed'): string {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === 'string' && err.trim()) return err;
@@ -344,6 +371,9 @@ async function pollGenerationTask(
       if (isRemoteTaskFailed(task.status)) {
         throw new Error(generationTaskError(task));
       }
+      if (hasTerminalRemoteError(task)) {
+        throw new Error(generationTaskError(task));
+      }
       if (!isRemoteTaskActive(task.status)) {
         throw new Error(generationTaskError(task, `Image generation stopped with status: ${task.status}`));
       }
@@ -363,6 +393,9 @@ async function waitForGenerationTask(
   onPoll?.(task);
   if (task.status === 'completed') return task;
   if (isRemoteTaskFailed(task.status)) {
+    throw new Error(generationTaskError(task));
+  }
+  if (hasTerminalRemoteError(task)) {
     throw new Error(generationTaskError(task));
   }
   if (!isRemoteTaskActive(task.status)) {
@@ -652,8 +685,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       galleryOffsetRef.current = completedTasks.length;
       setHasMore(completedTasks.length < completedTotal);
 
-      const failed = visibleRecentTasks.filter(t => isRemoteTaskFailed(t.status));
-      const inFlight = visibleRecentTasks.filter(t => isRemoteTaskActive(t.status));
+      const failed = visibleRecentTasks.filter(t => isRemoteTaskFailed(t.status) || hasTerminalRemoteError(t));
+      const inFlight = visibleRecentTasks.filter(t => isRemoteTaskActive(t.status) && !hasTerminalRemoteError(t));
 
       const recoveredTasks: StudioGenerationTask[] = [
         ...failed.map(t => ({
@@ -871,7 +904,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
               ? mergeTaskPatch(gt, { status: 'completed', result: items }, [remote.id])
               : gt));
-          } else if (isRemoteTaskFailed(remote.status)) {
+          } else if (isRemoteTaskFailed(remote.status) || hasTerminalRemoteError(remote)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
               ? mergeTaskPatch(gt, { status: 'failed', error: generationTaskError(remote, 'Task failed') }, [remote.id])
               : gt));
@@ -987,14 +1020,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         const patchRemoteIds = uniqueNumbers(patch.remoteTaskIds || []);
         setTasks(prev => prev.map(t => (
           t.id === taskId || taskMatchesRemoteIds(t, patchRemoteIds)
-            ? {
-              ...t,
-              ...patch,
-              remoteTaskIds: uniqueNumbers([
-                ...taskRemoteIds(t),
-                ...patchRemoteIds,
-              ]),
-            }
+            ? mergeTaskPatch(t, patch, patchRemoteIds)
             : t
         )));
       };

@@ -305,12 +305,13 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
 
   // ── 批量聚合卡 ──────────────────────────────────────────────────────────
   if (isBatch) {
-    const batchProcessing = processingCount > 0;
+    const batchFailed = task.status === 'failed' || failedCount > 0;
+    const batchProcessing = task.status !== 'failed' && processingCount > 0;
     return (
       <div style={taskCardStyles.card}>
         {batchProcessing ? (
           <div style={taskCardStyles.spinner} />
-        ) : failedCount > 0 ? (
+        ) : batchFailed ? (
           <div style={taskCardStyles.failedIcon}>!</div>
         ) : (
           <div style={{ ...taskCardStyles.failedIcon, border: `2px solid ${cssVar('borderSubtle')}`, color: cssVar('textSecondary') }}>✓</div>
@@ -320,6 +321,8 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
             ? t('playground.studio_batch_progress', { defaultValue: '批量生成 {{done}}/{{total}}', done: doneCount, total })
             : failedCount > 0
               ? t('playground.studio_batch_partial', { defaultValue: '成功 {{done}} · 失败 {{failed}}', done: doneCount, failed: failedCount })
+              : task.status === 'failed'
+                ? t('playground.studio_task_failed', { defaultValue: '生成失败' })
               : t('playground.studio_batch_done', { defaultValue: '批量完成 {{total}} 张', total })}
         </div>
         {/* 子任务状态点：直观看每张的成功/失败/进行中 */}
@@ -354,16 +357,21 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
             {copied ? '✓ 已复制' : task.prompt}
           </div>
         )}
-        {!batchProcessing && failedCount > 0 && (
+        {!batchProcessing && task.status === 'failed' && task.error && (
+          <div style={taskCardStyles.errorText}>{task.error}</div>
+        )}
+        {!batchProcessing && batchFailed && (
           <div style={taskCardStyles.failedActions}>
-            <button
-              type="button"
-              style={taskCardStyles.retryBtn}
-              className="studio-gallery-action"
-              onClick={() => retryBatchFailures(task.id)}
-            >
-              {t('playground.studio_retry_failed', { defaultValue: '重试失败的 {{count}} 张', count: failedCount })}
-            </button>
+            {failedCount > 0 && (
+              <button
+                type="button"
+                style={taskCardStyles.retryBtn}
+                className="studio-gallery-action"
+                onClick={() => retryBatchFailures(task.id)}
+              >
+                {t('playground.studio_retry_failed', { defaultValue: '重试失败的 {{count}} 张', count: failedCount })}
+              </button>
+            )}
             <button
               type="button"
               style={taskCardStyles.deleteBtn}
