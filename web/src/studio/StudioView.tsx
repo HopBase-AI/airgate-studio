@@ -1238,7 +1238,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               onChange={setSelectedModelId}
               placeholder={imageGroupsLoaded ? '暂无可用图片模型' : '加载模型...'}
               compact
-              minDropdownWidth={260}
+              minDropdownWidth={420}
               disabled={!hasSelectableModel}
             />
           </div>

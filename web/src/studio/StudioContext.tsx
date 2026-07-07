@@ -130,6 +130,20 @@ function generationTaskError(task: GenerationTask, fallback = 'Image generation 
   return task.error_message || fallback;
 }
 
+function isNotFoundError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return /\bnot\s*found\b/i.test(msg) || /\bNotFound\b/.test(msg) || /\b404\b/.test(msg) || msg.includes('不存在');
+}
+
+async function deleteGenerationTaskIfPresent(taskId: number): Promise<void> {
+  try {
+    await api.deleteGenerationTask(taskId);
+  } catch (err) {
+    if (isNotFoundError(err)) return;
+    throw err;
+  }
+}
+
 function galleryItemsFromCompletedTask(
   task: GenerationTask,
   fallback: Pick<GalleryItem, 'prompt' | 'model' | 'mode'>,
@@ -1040,7 +1054,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setGallery(prev => prev.filter(item => !item.taskId || !remoteIds.includes(item.taskId)));
     }
     try {
-      await Promise.all(remoteIds.map(remoteId => api.deleteGenerationTask(remoteId)));
+      await Promise.all(remoteIds.map(remoteId => deleteGenerationTaskIfPresent(remoteId)));
     } catch (err) {
       setTasks(previousTasks);
       setGallery(previousGallery);
@@ -1079,7 +1093,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       : prev.filter(g => g.id !== id)));
     if (item.taskId) {
       try {
-        await api.deleteGenerationTask(item.taskId);
+        await deleteGenerationTaskIfPresent(item.taskId);
       } catch (err) {
         setGallery(previousGallery);
         throw err;

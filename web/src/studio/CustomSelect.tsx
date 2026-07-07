@@ -76,9 +76,8 @@ const optionStyle: CSSProperties = {
   font: 'inherit',
   transition: 'background 0.12s',
   boxSizing: 'border-box',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
+  overflowWrap: 'anywhere',
+  whiteSpace: 'normal',
 };
 
 const optionCompactStyle: CSSProperties = {
