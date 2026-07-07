@@ -121,6 +121,7 @@ func TestValidateImageModelSize(t *testing.T) {
 		{name: "banana lite 1k", model: "gemini-3.1-flash-lite-image", size: "1024x1536"},
 		{name: "banana lite rejects 2k", model: "gemini-3.1-flash-lite-image", size: "2048x2048", wantErr: true},
 		{name: "banana 2 rejects 4k", model: "gemini-3.1-flash-image", size: "3840x2160", wantErr: true},
+		{name: "banana 2 chat variant rejects 4k", model: "gemini-3.1-flash-image-c", size: "3840x2160", wantErr: true},
 		{name: "unknown model passes through", model: "custom-image-model", size: "2048x2048"},
 		{name: "empty size passes through", model: "gemini-3.1-flash-lite-image", size: ""},
 	}

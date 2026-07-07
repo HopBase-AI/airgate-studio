@@ -1166,7 +1166,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
             updateTask({ remoteTaskIds: [created.id] });
             const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, (t) => {
-              if (isRemoteTaskFailed(t.status)) {
+              if (isRemoteTaskFailed(t.status) || hasTerminalRemoteError(t)) {
                 updateTask({ status: 'failed', error: generationTaskError(t, 'Task failed'), progress: t.progress, remoteTaskIds: [t.id] });
                 return;
               }
