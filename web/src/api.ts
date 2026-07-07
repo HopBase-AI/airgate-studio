@@ -206,8 +206,9 @@ export const api = {
   },
 
   // 当前用户在指定平台下可选的图像生成计费分组（最便宜优先）。
-  listImageGroups(platform: string): Promise<ImageGroup[]> {
+  listImageGroups(platform: string, model?: string): Promise<ImageGroup[]> {
     const qs = new URLSearchParams({ platform });
+    if (model) qs.set('model', model);
     return request<{ groups: ImageGroup[] }>('GET', `/image-groups?${qs}`).then(r => r.groups || []);
   },
 

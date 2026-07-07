@@ -35,7 +35,7 @@ func TestHostListImageGroups(t *testing.T) {
 		map[string]interface{}{"id": 5, "name": "高清", "platform": "gemini", "rate_multiplier": 2.0, "effective_rate": 1.8, "note": "nano-banana"},
 	}}
 
-	groups, err := hostListImageGroups(context.Background(), host, 7, "gemini")
+	groups, err := hostListImageGroups(context.Background(), host, 7, "gemini", "gemini-3-pro-image")
 	if err != nil {
 		t.Fatalf("hostListImageGroups: %v", err)
 	}
@@ -51,11 +51,11 @@ func TestHostListImageGroups(t *testing.T) {
 	if payload["eligible_only"] != true || payload["needs_image"] != true {
 		t.Fatalf("payload = %v", payload)
 	}
-	if payload["user_id"] != int64(7) || payload["platform"] != "gemini" {
+	if payload["user_id"] != int64(7) || payload["platform"] != "gemini" || payload["model"] != "gemini-3-pro-image" {
 		t.Fatalf("payload = %v", payload)
 	}
 
-	if _, err := hostListImageGroups(context.Background(), host, 7, "  "); err == nil {
+	if _, err := hostListImageGroups(context.Background(), host, 7, "  ", "gemini-3-pro-image"); err == nil {
 		t.Fatal("expected error for empty platform")
 	}
 }
@@ -76,7 +76,7 @@ func TestValidateGenerationGroup(t *testing.T) {
 func TestValidateGenerationAccessRequiresAvailablePlatformGroup(t *testing.T) {
 	host := &groupTestHost{groups: []interface{}{}}
 
-	err := validateGenerationAccess(context.Background(), host, 7, 0, "gemini")
+	err := validateGenerationAccess(context.Background(), host, 7, 0, "gemini", "gemini-3-pro-image")
 	if err == nil {
 		t.Fatal("expected no available gemini group to be rejected")
 	}

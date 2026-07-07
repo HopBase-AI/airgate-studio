@@ -85,6 +85,8 @@ export function ImageToImagePanel() {
     setSelectedModelId,
     imageSize,
     setImageSize,
+    imageGroupsLoaded,
+    hasImageGroupsForModel,
     isGenerating,
     generate,
   } = useStudio();
@@ -94,15 +96,19 @@ export function ImageToImagePanel() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const editModelOptions = imageGroupsLoaded
+    ? EDIT_MODEL_REGISTRY.filter(model => hasImageGroupsForModel(model))
+    : EDIT_MODEL_REGISTRY;
+
   // 当前模型不支持图生图（如 gemini/imagen 系）时自动切到首个支持编辑的模型，
   // 避免"可选但必失败"。
   useEffect(() => {
-    if (!EDIT_MODEL_REGISTRY.some(m => m.id === selectedModelId) && EDIT_MODEL_REGISTRY.length > 0) {
-      setSelectedModelId(EDIT_MODEL_REGISTRY[0].id);
+    if (!editModelOptions.some(m => m.id === selectedModelId) && editModelOptions.length > 0) {
+      setSelectedModelId(editModelOptions[0].id);
     }
-  }, [selectedModelId, setSelectedModelId]);
+  }, [editModelOptions, selectedModelId, setSelectedModelId]);
 
-  const canGenerate = prompt.trim().length > 0 && sourceImage !== null;
+  const canGenerate = prompt.trim().length > 0 && sourceImage !== null && editModelOptions.length > 0;
 
   const handleFile = async (file: File) => {
     if (!file.type.startsWith('image/')) return;
@@ -201,12 +207,12 @@ export function ImageToImagePanel() {
         <label style={ss.formLabel}>
           {t('playground.studio_model', { defaultValue: '模型' })}
         </label>
-        {EDIT_MODEL_REGISTRY.length === 1 ? (
+        {editModelOptions.length === 1 ? (
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
         ) : (
           <CustomSelect
             value={selectedModelId}
-            options={EDIT_MODEL_REGISTRY.map(m => ({ value: m.id, label: m.name }))}
+            options={editModelOptions.map(m => ({ value: m.id, label: m.name }))}
             onChange={setSelectedModelId}
           />
         )}

@@ -40,14 +40,19 @@ export function TextToImagePanel() {
     setSelectedModelId,
     imageSize,
     setImageSize,
+    imageGroupsLoaded,
+    hasImageGroupsForModel,
     isGenerating,
     generate,
   } = useStudio();
 
   const [prompt, setPrompt] = useState('');
   const [count, setCount] = useState(1);
+  const modelOptions = imageGroupsLoaded
+    ? MODEL_REGISTRY.filter(model => hasImageGroupsForModel(model))
+    : MODEL_REGISTRY;
 
-  const canGenerate = prompt.trim().length > 0;
+  const canGenerate = prompt.trim().length > 0 && modelOptions.length > 0;
 
   const handleGenerate = () => {
     const trimmed = prompt.trim();
@@ -80,12 +85,12 @@ export function TextToImagePanel() {
         <label style={ss.formLabel}>
           {t('playground.studio_model', { defaultValue: '模型' })}
         </label>
-        {MODEL_REGISTRY.length === 1 ? (
+        {modelOptions.length === 1 ? (
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
         ) : (
           <CustomSelect
             value={selectedModelId}
-            options={MODEL_REGISTRY.map(m => ({ value: m.id, label: m.name }))}
+            options={modelOptions.map(m => ({ value: m.id, label: m.name }))}
             onChange={setSelectedModelId}
           />
         )}

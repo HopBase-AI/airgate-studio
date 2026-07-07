@@ -119,7 +119,7 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 
 	// 先校验该平台确实有当前用户可用的图片分组；显式传 group_id 时再校验该分组。
 	// core 的 gateway.forward 侧还有专属分组授权兜底，这里用于给前端明确错误。
-	if err := validateGenerationAccess(r.Context(), p.host, userID, req.GroupID, req.Platform); err != nil {
+	if err := validateGenerationAccess(r.Context(), p.host, userID, req.GroupID, req.Platform, req.Model); err != nil {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
 	}
@@ -237,7 +237,8 @@ func (p *StudioPlugin) handleListImageGroups(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	userID := parseUserIDInt64(r)
-	groups, err := hostListImageGroups(r.Context(), p.host, userID, platform)
+	model := r.URL.Query().Get("model")
+	groups, err := hostListImageGroups(r.Context(), p.host, userID, platform, model)
 	if err != nil {
 		p.logger.Error("list_image_groups_failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询可用分组失败"})

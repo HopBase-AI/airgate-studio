@@ -19,7 +19,6 @@ const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_ATTEMPTS = 300;
 const POLL_TRANSIENT_ERROR_ATTEMPTS = 2;
 const MODEL_STORE_KEY = 'studio.selectedModelId';
-const IMAGE_MODEL_PLATFORMS = Array.from(new Set(MODEL_REGISTRY.map(model => model.platform)));
 const EMPTY_IMAGE_GROUPS: ImageGroup[] = [];
 
 // activeProjectId 哨兵：0 = 「全部」视图（读 host tasks 的历史聚合，含老用户旧图），
@@ -98,6 +97,17 @@ function taskRemoteIds(task: StudioGenerationTask | undefined): number[] {
     recoveredId,
     ...(task.result || []).map(item => item.taskId),
   ]);
+}
+
+function taskMatchesRemoteIds(task: StudioGenerationTask, remoteIds: number[]): boolean {
+  if (remoteIds.length === 0) return false;
+  const ids = taskRemoteIds(task);
+  return ids.some(id => remoteIds.includes(id));
+}
+
+function tasksShareRemoteIdentity(a: StudioGenerationTask, b: StudioGenerationTask): boolean {
+  if (a.id === b.id) return true;
+  return taskMatchesRemoteIds(a, taskRemoteIds(b));
 }
 
 function resolveGenerationMode(currentMode: ImageMode, options?: GenerateOptions): ImageMode {
@@ -224,6 +234,10 @@ function supportedSizeForModel(model: ModelConfig, size: string): string {
   return model.sizes.some(s => s.value === size) ? size : model.defaultSize;
 }
 
+function imageGroupCacheKey(platform: string, modelId: string): string {
+  return `${platform}:${modelId}`;
+}
+
 async function pollGenerationTask(
   taskId: number,
   signal: AbortSignal,
@@ -258,6 +272,23 @@ async function pollGenerationTask(
   throw new Error('Image generation timed out after waiting too long');
 }
 
+async function waitForGenerationTask(
+  task: GenerationTask,
+  signal: AbortSignal,
+  maxAttempts = POLL_MAX_ATTEMPTS,
+  onPoll?: (task: GenerationTask) => void,
+): Promise<GenerationTask> {
+  onPoll?.(task);
+  if (task.status === 'completed') return task;
+  if (isRemoteTaskFailed(task.status)) {
+    throw new Error(generationTaskError(task));
+  }
+  if (!isRemoteTaskActive(task.status)) {
+    throw new Error(generationTaskError(task, `Image generation stopped with status: ${task.status}`));
+  }
+  return pollGenerationTask(task.id, signal, maxAttempts, onPoll);
+}
+
 // ── Context type ──────────────────────────────────────────────────────────────
 
 export interface StudioContextValue {
@@ -284,6 +315,7 @@ export interface StudioContextValue {
   // core 自动选最便宜分组，与不传 group_id 的历史行为一致）。
   imageGroups: ImageGroup[];
   availableImagePlatforms: string[];
+  hasImageGroupsForModel: (model: ModelConfig) => boolean;
   imageGroupsLoaded: boolean;
   selectedGroupId: number | null;
   setSelectedGroupId: (id: number) => void;
@@ -414,30 +446,37 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // 请求不带 group_id，由 core 自动选组（兼容历史行为）。
 
   const GROUP_STORE_PREFIX = 'studio.imageGroup.';
-  const [imageGroupsByPlatform, setImageGroupsByPlatform] = useState<Record<string, ImageGroup[]>>({});
+  const [imageGroupsByModel, setImageGroupsByModel] = useState<Record<string, ImageGroup[]>>({});
   const [imageGroupsLoaded, setImageGroupsLoaded] = useState(false);
   const [selectedGroupId, setSelectedGroupIdRaw] = useState<number | null>(null);
-  const imageGroups = imageGroupsByPlatform[selectedPlatform] ?? EMPTY_IMAGE_GROUPS;
+  const imageGroups = imageGroupsByModel[imageGroupCacheKey(selectedPlatform, selectedModelId)] ?? EMPTY_IMAGE_GROUPS;
   const availableImagePlatforms = useMemo(
-    () => IMAGE_MODEL_PLATFORMS.filter(platform => (imageGroupsByPlatform[platform]?.length ?? 0) > 0),
-    [imageGroupsByPlatform],
+    () => Array.from(new Set(
+      MODEL_REGISTRY
+        .filter(model => (imageGroupsByModel[imageGroupCacheKey(model.platform, model.id)]?.length ?? 0) > 0)
+        .map(model => model.platform),
+    )),
+    [imageGroupsByModel],
   );
+  const hasImageGroupsForModel = useCallback((model: ModelConfig) => (
+    (imageGroupsByModel[imageGroupCacheKey(model.platform, model.id)]?.length ?? 0) > 0
+  ), [imageGroupsByModel]);
 
   useEffect(() => {
     let active = true;
     setImageGroupsLoaded(false);
-    void Promise.all(IMAGE_MODEL_PLATFORMS.map(async (platform) => {
+    void Promise.all(MODEL_REGISTRY.map(async (model) => {
       try {
-        const groups = await api.listImageGroups(platform);
-        return [platform, groups] as const;
+        const groups = await api.listImageGroups(model.platform, model.id);
+        return [imageGroupCacheKey(model.platform, model.id), groups] as const;
       } catch {
-        return [platform, [] as ImageGroup[]] as const;
+        return [imageGroupCacheKey(model.platform, model.id), [] as ImageGroup[]] as const;
       }
     })).then((entries) => {
       if (!active) return;
       const next: Record<string, ImageGroup[]> = {};
-      for (const [platform, groups] of entries) next[platform] = groups;
-      setImageGroupsByPlatform(next);
+      for (const [key, groups] of entries) next[key] = groups;
+      setImageGroupsByModel(next);
       setImageGroupsLoaded(true);
     });
     return () => { active = false; };
@@ -448,25 +487,25 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     if (!imageGroupsLoaded || imageGroups.length === 0) return;
     let preferred: number | null = null;
     try {
-      const raw = window.localStorage.getItem(GROUP_STORE_PREFIX + selectedPlatform);
+      const raw = window.localStorage.getItem(GROUP_STORE_PREFIX + selectedPlatform + ':' + selectedModelId);
       if (raw) preferred = Number.parseInt(raw, 10);
     } catch { /* ignore */ }
     const match = imageGroups.find(g => g.id === preferred);
     setSelectedGroupIdRaw((match ?? imageGroups[0]).id);
-  }, [imageGroups, imageGroupsLoaded, selectedPlatform]);
+  }, [imageGroups, imageGroupsLoaded, selectedModelId, selectedPlatform]);
 
   useEffect(() => {
     if (!imageGroupsLoaded || imageGroups.length > 0) return;
-    const fallback = MODEL_REGISTRY.find(model => (imageGroupsByPlatform[model.platform]?.length ?? 0) > 0);
+    const fallback = MODEL_REGISTRY.find(model => (imageGroupsByModel[imageGroupCacheKey(model.platform, model.id)]?.length ?? 0) > 0);
     if (fallback && fallback.id !== selectedModelId) setSelectedModelId(fallback.id);
-  }, [imageGroups, imageGroupsByPlatform, imageGroupsLoaded, selectedModelId, setSelectedModelId]);
+  }, [imageGroups, imageGroupsByModel, imageGroupsLoaded, selectedModelId, setSelectedModelId]);
 
   const setSelectedGroupId = useCallback((id: number) => {
     setSelectedGroupIdRaw(id);
     try {
-      window.localStorage.setItem(GROUP_STORE_PREFIX + selectedPlatform, String(id));
+      window.localStorage.setItem(GROUP_STORE_PREFIX + selectedPlatform + ':' + selectedModelId, String(id));
     } catch { /* ignore */ }
-  }, [selectedPlatform]);
+  }, [selectedModelId, selectedPlatform]);
 
   // ── Initialization ────────────────────────────────────────────────────────
 
@@ -529,7 +568,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const failed = recentTasks.filter(t => t.status === 'failed');
       const inFlight = recentTasks.filter(t => isRemoteTaskActive(t.status));
 
-      setTasks([
+      const recoveredTasks: StudioGenerationTask[] = [
         ...failed.map(t => ({
           id: `r-${t.id}`,
           prompt: t.prompt,
@@ -551,7 +590,26 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           size: t.size,
           remoteTaskIds: [t.id],
         })),
-      ]);
+      ];
+      setTasks(prev => {
+        const merged = recoveredTasks.map(remote => {
+          const local = prev.find(item => tasksShareRemoteIdentity(item, remote));
+          if (!local) return remote;
+          return {
+            ...local,
+            ...remote,
+            id: local.id,
+            remoteTaskIds: uniqueNumbers([
+              ...taskRemoteIds(local),
+              ...taskRemoteIds(remote),
+            ]),
+          };
+        });
+        const localOnly = prev.filter(local =>
+          !recoveredTasks.some(remote => tasksShareRemoteIdentity(local, remote)),
+        );
+        return [...merged, ...localOnly];
+      });
       if (inFlight.length === 0) return;
 
       setIsGenerating(true);
@@ -743,7 +801,17 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               ? { ...gt, status: 'failed', error: generationTaskError(remote, `任务停止：${remote.status}`) }
               : gt));
           }
-        } catch { /* single task check is non-fatal */ }
+        } catch (err) {
+          if (err instanceof ApiRequestError) {
+            if (err.status === 404) {
+              setTasks(prev => prev.filter(gt => gt.id !== uiTask.id));
+              return;
+            }
+            setTasks(prev => prev.map(gt => gt.id === uiTask.id
+              ? { ...gt, status: 'failed', error: err.message || 'Task status check failed' }
+              : gt));
+          }
+        }
       });
       await Promise.all(checks);
     };
@@ -796,7 +864,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if ((imageGroupsByPlatform[selectedPlatform]?.length ?? 0) === 0) {
+      if (imageGroups.length === 0) {
         const platformLabel = selectedPlatform === 'gemini'
           ? 'Gemini'
           : selectedPlatform === 'openai'
@@ -833,7 +901,19 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setIsGenerating(true);
 
       const updateTask = (patch: Partial<StudioGenerationTask>) => {
-        setTasks(prev => prev.map(t => (t.id === taskId ? { ...t, ...patch } : t)));
+        const patchRemoteIds = uniqueNumbers(patch.remoteTaskIds || []);
+        setTasks(prev => prev.map(t => (
+          t.id === taskId || taskMatchesRemoteIds(t, patchRemoteIds)
+            ? {
+              ...t,
+              ...patch,
+              remoteTaskIds: uniqueNumbers([
+                ...taskRemoteIds(t),
+                ...patchRemoteIds,
+              ]),
+            }
+            : t
+        )));
       };
 
       const runTask = async () => {
@@ -867,8 +947,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
             // patchSubtask 局部更新单个子任务状态（实时反映到聚合卡）。
             const patchSubtask = (subId: string, patch: Partial<BatchSubtask>) => {
+              const subRemoteId = patch.remoteTaskId;
               setTasks(prev => prev.map(t => {
-                if (t.id !== taskId || !t.subtasks) return t;
+                if (t.id !== taskId && (!subRemoteId || !taskMatchesRemoteIds(t, [subRemoteId]))) return t;
+                if (!t.subtasks) return t;
                 return { ...t, subtasks: t.subtasks.map(s => (s.id === subId ? { ...s, ...patch } : s)) };
               }));
             };
@@ -889,7 +971,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               remoteTaskIds.push(created.id);
               patchSubtask(sub.id, { remoteTaskId: created.id });
               updateTask({ remoteTaskIds: [...remoteTaskIds] });
-              const completed = await pollGenerationTask(created.id, signal);
+              const completed = await waitForGenerationTask(created, signal);
               const items = galleryItemsFromCompletedTask(completed, {
                 prompt: sub.prompt,
                 model: selectedModelId,
@@ -974,9 +1056,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             const created = await api.createGenerationTask(taskData);
             if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
             updateTask({ remoteTaskIds: [created.id] });
-            const completed = await pollGenerationTask(created.id, signal, POLL_MAX_ATTEMPTS, (t) => {
+            const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, (t) => {
               if (t.status === 'failed') {
-                updateTask({ status: 'failed', error: t.error_message || 'Task failed', progress: t.progress });
+                updateTask({ status: 'failed', error: generationTaskError(t, 'Task failed'), progress: t.progress, remoteTaskIds: [t.id] });
                 return;
               }
               if (typeof t.progress === 'number') updateTask({ progress: t.progress });
@@ -1030,7 +1112,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     [
       imageMode,
       imageSize,
-      imageGroupsByPlatform,
+      imageGroups,
       imageGroupsLoaded,
       referenceImages,
       selectedPlatform,
@@ -1198,7 +1280,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               : undefined,
           });
           patchSubtask(sub.id, { remoteTaskId: created.id });
-          const completed = await pollGenerationTask(created.id, signal);
+          const completed = await waitForGenerationTask(created, signal);
           const items = galleryItemsFromCompletedTask(completed, {
             prompt: sub.prompt,
             model,
@@ -1276,6 +1358,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setImageSize,
     imageGroups,
     availableImagePlatforms,
+    hasImageGroupsForModel,
     imageGroupsLoaded,
     selectedGroupId,
     setSelectedGroupId,

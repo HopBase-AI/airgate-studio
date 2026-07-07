@@ -21,18 +21,22 @@ type imageGroup struct {
 	Note           string  `json:"note,omitempty"`
 }
 
-// hostListImageGroups 列出用户在指定平台下可用于图像生成的分组。
-func hostListImageGroups(ctx context.Context, host sdk.Host, userID int64, platform string) ([]imageGroup, error) {
+// hostListImageGroups 列出用户在指定平台/模型下可用于图像生成的分组。
+func hostListImageGroups(ctx context.Context, host sdk.Host, userID int64, platform, model string) ([]imageGroup, error) {
 	platform = strings.TrimSpace(platform)
 	if platform == "" {
 		return nil, fmt.Errorf("platform 不能为空")
 	}
-	resp, err := hostInvoke(ctx, host, hostMethodGroupsList, map[string]interface{}{
+	payload := map[string]interface{}{
 		"eligible_only": true,
 		"user_id":       userID,
 		"platform":      platform,
 		"needs_image":   true,
-	})
+	}
+	if strings.TrimSpace(model) != "" {
+		payload["model"] = strings.TrimSpace(model)
+	}
+	resp, err := hostInvoke(ctx, host, hostMethodGroupsList, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -51,13 +55,13 @@ func hostListImageGroups(ctx context.Context, host sdk.Host, userID int64, platf
 // core 的 gateway.forward 侧另有专属分组授权兜底，这里做前置校验只为给
 // 前端返回明确的错误信息。
 func validateGenerationGroup(ctx context.Context, host sdk.Host, userID, groupID int64, platform string) error {
-	return validateGenerationAccess(ctx, host, userID, groupID, platform)
+	return validateGenerationAccess(ctx, host, userID, groupID, platform, "")
 }
 
 // validateGenerationAccess 校验指定平台至少有一个当前用户可用的图片分组；
 // 如传了 group_id，则进一步确认该分组在可用列表内。
-func validateGenerationAccess(ctx context.Context, host sdk.Host, userID, groupID int64, platform string) error {
-	groups, err := hostListImageGroups(ctx, host, userID, platform)
+func validateGenerationAccess(ctx context.Context, host sdk.Host, userID, groupID int64, platform, model string) error {
+	groups, err := hostListImageGroups(ctx, host, userID, platform, model)
 	if err != nil {
 		return fmt.Errorf("查询可用分组失败: %w", err)
 	}

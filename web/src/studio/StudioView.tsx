@@ -923,7 +923,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     setImageMode,
     currentModel,
     selectedModelId, setSelectedModelId,
-    availableImagePlatforms, imageGroupsLoaded,
+    hasImageGroupsForModel, imageGroupsLoaded,
     imageSize, setImageSize,
     generate,
     referenceImages, setReferenceImages,
@@ -971,9 +971,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const baseModelOptions = hasSource ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY;
   const modelOptions = useMemo(() => {
     if (!imageGroupsLoaded) return baseModelOptions;
-    const filtered = baseModelOptions.filter(model => availableImagePlatforms.includes(model.platform));
+    const filtered = baseModelOptions.filter(model => hasImageGroupsForModel(model));
     return filtered;
-  }, [availableImagePlatforms, baseModelOptions, imageGroupsLoaded]);
+  }, [baseModelOptions, hasImageGroupsForModel, imageGroupsLoaded]);
   const hasSelectableModel = !imageGroupsLoaded || modelOptions.length > 0;
   const canSend = prompt.trim().length > 0 && hasSelectableModel;
 

@@ -128,6 +128,8 @@ export function BatchPanel() {
     setSelectedModelId,
     imageSize,
     setImageSize,
+    imageGroupsLoaded,
+    hasImageGroupsForModel,
     isGenerating,
     generate,
   } = useStudio();
@@ -140,19 +142,20 @@ export function BatchPanel() {
 
   // 多图片模式走 img2img（image.edit），只有支持编辑的模型可选；
   // 切进该模式时若当前模型不支持则自动换成首个支持编辑的模型。
-  const availableModels = mode === 'multi_image' ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY;
+  const availableModels = (mode === 'multi_image' ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY)
+    .filter(model => !imageGroupsLoaded || hasImageGroupsForModel(model));
   useEffect(() => {
-    if (mode === 'multi_image'
-      && !EDIT_MODEL_REGISTRY.some(m => m.id === selectedModelId)
-      && EDIT_MODEL_REGISTRY.length > 0) {
-      setSelectedModelId(EDIT_MODEL_REGISTRY[0].id);
+    if (!availableModels.some(m => m.id === selectedModelId) && availableModels.length > 0) {
+      setSelectedModelId(availableModels[0].id);
     }
-  }, [mode, selectedModelId, setSelectedModelId]);
+  }, [availableModels, selectedModelId, setSelectedModelId]);
 
   const promptLines = multiPrompts.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
   const canGenerate = (
-    mode === 'multi_prompt' ? promptLines.length > 0 : (images.length > 0 && imagePrompt.trim().length > 0)
+    availableModels.length > 0 && (
+      mode === 'multi_prompt' ? promptLines.length > 0 : (images.length > 0 && imagePrompt.trim().length > 0)
+    )
   );
 
   const addImages = useCallback((files: FileList | null) => {
