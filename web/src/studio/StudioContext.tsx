@@ -148,34 +148,24 @@ function isLocalTaskActive(status: StudioGenerationTask['status'] | undefined): 
 }
 
 function generationTaskError(task: GenerationTask, fallback = 'Image generation task failed'): string {
-  return task.error_message || fallback;
+  return stringsTrim(task.error_message) || fallback;
+}
+
+function failedTaskPatchFromRemote(task: GenerationTask, fallback = 'Task failed'): Partial<StudioGenerationTask> {
+  return {
+    status: 'failed',
+    error: generationTaskError(task, fallback),
+    progress: task.progress,
+    remoteTaskIds: [task.id],
+  };
 }
 
 function hasTerminalRemoteError(task: GenerationTask): boolean {
-  const message = stringsTrim(task.error_message);
-  if (!message) return false;
-  if (isRemoteTaskFailed(task.status)) return true;
-  if (!isRemoteTaskActive(task.status)) return true;
-  return isTerminalGenerationErrorMessage(message);
+  return stringsTrim(task.error_message) !== '';
 }
 
 function stringsTrim(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function isTerminalGenerationErrorMessage(message: string): boolean {
-  return [
-    /\bmodel\b.*\bnot\s*found\b/i,
-    /\bnot\s*found\b.*\bmodel\b/i,
-    /\bunsupported\s+model\b/i,
-    /\bnot\s+supported\s+model\b/i,
-    /\bmodel\b.*\bnot\s+support/i,
-    /\binvalid\s+request\b/i,
-    /\bbad\s+request\b/i,
-    /\bno\s+available\s+channel\b/i,
-    /模型.*(不存在|不支持|不可用)/i,
-    /不支持.*模型/i,
-  ].some(pattern => pattern.test(message));
 }
 
 function errorMessageFromUnknown(err: unknown, fallback = 'Generation failed'): string {
@@ -906,7 +896,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               : gt));
           } else if (isRemoteTaskFailed(remote.status) || hasTerminalRemoteError(remote)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? mergeTaskPatch(gt, { status: 'failed', error: generationTaskError(remote, 'Task failed') }, [remote.id])
+              ? mergeTaskPatch(gt, failedTaskPatchFromRemote(remote, 'Task failed'), [remote.id])
               : gt));
           } else if (isRemoteTaskActive(remote.status)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
@@ -1167,11 +1157,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask({ remoteTaskIds: [created.id] });
             const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, (t) => {
               if (isRemoteTaskFailed(t.status) || hasTerminalRemoteError(t)) {
-                updateTask({ status: 'failed', error: generationTaskError(t, 'Task failed'), progress: t.progress, remoteTaskIds: [t.id] });
+                updateTask(failedTaskPatchFromRemote(t, 'Task failed'));
                 return;
               }
-              if (typeof t.progress === 'number') updateTask({ progress: t.progress });
+              if (typeof t.progress === 'number') updateTask({ progress: t.progress, remoteTaskIds: [t.id] });
             });
+            if (isRemoteTaskFailed(completed.status) || hasTerminalRemoteError(completed)) {
+              updateTask(failedTaskPatchFromRemote(completed, 'Task failed'));
+              return;
+            }
             const images = parseMarkdownImages(completed.result_content || '');
             if (images.length === 0) {
               updateTask({ status: 'failed', error: '任务已完成，但没有返回可展示图片', remoteTaskIds: [created.id] });
