@@ -84,7 +84,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   },
   {
     id: 'gemini-2.5-flash-image',
-    name: 'Gemini 2.5 Flash Image (Banana)',
+    name: 'Nano Banana',
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,
@@ -92,7 +92,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   },
   {
     id: 'gemini-3-pro-image',
-    name: 'Gemini 3 Pro Image (Banana Pro)',
+    name: 'Banana Pro',
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_ALL_SIZES,
@@ -100,7 +100,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   },
   {
     id: 'gemini-3-pro-image-preview',
-    name: 'Gemini 3 Pro Image Preview (Banana Pro)',
+    name: 'Banana Pro Preview',
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_ALL_SIZES,
@@ -108,7 +108,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   },
   {
     id: 'gemini-3.1-flash-image',
-    name: 'Gemini 3.1 Flash Image (Banana 2)',
+    name: 'Banana 2',
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_UP_TO_2K_SIZES,
@@ -116,7 +116,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   },
   {
     id: 'gemini-3.1-flash-image-preview',
-    name: 'Gemini 3.1 Flash Image Preview (Banana 2)',
+    name: 'Banana 2 Preview',
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_UP_TO_2K_SIZES,
@@ -124,7 +124,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   },
   {
     id: 'gemini-3.1-flash-lite-image',
-    name: 'Gemini 3.1 Flash Lite Image (Banana 2 Lite)',
+    name: 'Banana 2 Lite',
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,

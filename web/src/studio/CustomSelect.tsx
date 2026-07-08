@@ -192,6 +192,7 @@ export function CustomSelect({
   }, [calcPos, open]);
 
   const selected = uniqueOptions.find(o => o.value === value);
+  const selectedLabel = selected?.label || placeholder || value;
   const renderedDropdown = open
     ? createPortal(
         <div
@@ -234,6 +235,7 @@ export function CustomSelect({
         type="button"
         onClick={handleToggle}
         disabled={disabled}
+        title={selectedLabel}
         style={{
           ...triggerStyle,
           ...(compact ? triggerCompactStyle : {}),
@@ -243,7 +245,7 @@ export function CustomSelect({
         className="studio-select-trigger"
       >
         <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {selected?.label || placeholder || value}
+          {selectedLabel}
         </span>
         <svg
           width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
