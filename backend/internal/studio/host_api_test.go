@@ -1,8 +1,12 @@
 package studio
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
@@ -122,5 +126,58 @@ func TestHostDeleteTaskFromPluginsTreatsAllNotFoundAsDeleted(t *testing.T) {
 	}
 	if host.calls[0].Method != hostMethodTasksDelete || host.calls[0].PluginID != "gateway-openai" {
 		t.Fatalf("call = %+v", host.calls[0])
+	}
+}
+
+// assetBytesTestHost 复刻 assets.get_bytes 的真实编组：core 把 []byte 放进 payload，
+// 经 JSON 编组到达插件侧时 data 必然是 base64 字符串。直接手填 map 会掩盖双重编码 bug。
+type assetBytesTestHost struct {
+	data        []byte
+	contentType string
+}
+
+func (h *assetBytesTestHost) Invoke(_ context.Context, req sdk.HostInvokeRequest) (*sdk.HostInvokeResponse, error) {
+	if req.Method != hostMethodAssetsGetBytes {
+		return nil, errors.New("unexpected method " + req.Method)
+	}
+	encoded, err := json.Marshal(map[string]interface{}{
+		"data":         h.data,
+		"content_type": h.contentType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return nil, err
+	}
+	return &sdk.HostInvokeResponse{Status: "ok", Payload: payload}, nil
+}
+
+func (h *assetBytesTestHost) InvokeStream(context.Context, sdk.HostStreamRequest) (sdk.HostStream, error) {
+	return nil, errors.New("not supported")
+}
+
+// 回归（对齐 playground 2026-07-10 线上事故）：data URL 载荷必须解回与 core 侧一致的原始字节。
+func TestHostGetAssetDataURLDecodesWireBase64(t *testing.T) {
+	t.Parallel()
+
+	original := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, 0x02, 0x03}
+	host := &assetBytesTestHost{data: original, contentType: "image/png"}
+
+	dataURL, err := hostGetAssetDataURL(context.Background(), host, "generated/1/demo.png")
+	if err != nil {
+		t.Fatalf("hostGetAssetDataURL() error = %v", err)
+	}
+	const prefix = "data:image/png;base64,"
+	if !strings.HasPrefix(dataURL, prefix) {
+		t.Fatalf("data URL 前缀 = %.40s", dataURL)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(dataURL, prefix))
+	if err != nil {
+		t.Fatalf("base64 解码失败: %v", err)
+	}
+	if !bytes.Equal(decoded, original) {
+		t.Fatalf("data URL 载荷与原始字节不一致：len=%d want %d（若变长说明双重 base64 编码）", len(decoded), len(original))
 	}
 }

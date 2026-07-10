@@ -318,7 +318,7 @@ func hostGetAssetDataURL(ctx context.Context, host sdk.Host, objectKey string) (
 	if err != nil {
 		return "", err
 	}
-	data := bytesFromPayload(firstValue(resp, "data"))
+	data := binaryFromPayload(firstValue(resp, "data"))
 	if len(data) == 0 {
 		return "", fmt.Errorf("asset 字节为空")
 	}
@@ -337,6 +337,27 @@ func bytesFromPayload(value interface{}) []byte {
 		return v
 	case string:
 		if decoded, err := base64.StdEncoding.DecodeString(v); err == nil && looksLikeJSON(decoded) {
+			return decoded
+		}
+		return []byte(v)
+	default:
+		body, _ := json.Marshal(v)
+		return body
+	}
+}
+
+// binaryFromPayload 解码按契约必为二进制的载荷字段（如 assets.get_bytes 的 data）。
+// core 把 []byte 写进 payload 后经 JSON 编组，到达插件侧必然是 base64 字符串，须无条件解码。
+// 不能复用 bytesFromPayload：其 looksLikeJSON 门槛会把图片等二进制的 base64 文本原样返回，
+// 再编码进 data URL 即双重编码（playground 同缺陷曾致线上会话永久失败，2026-07-10）。
+func binaryFromPayload(value interface{}) []byte {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case []byte:
+		return v
+	case string:
+		if decoded, err := base64.StdEncoding.DecodeString(v); err == nil {
 			return decoded
 		}
 		return []byte(v)
