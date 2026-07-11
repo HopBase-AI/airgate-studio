@@ -43,7 +43,7 @@ func buildPluginInfo() sdk.PluginInfo {
 		FrontendPages: []sdk.FrontendPage{
 			{
 				Path:     "/studio",
-				Title:    "创作中心",
+				Title:    "playground.workflow_title",
 				Icon:     "palette",
 				Audience: "all",
 			},
