@@ -188,41 +188,41 @@ export function BatchPanel() {
   };
 
   const btnLabel = isGenerating
-    ? t('playground.studio_generating', { defaultValue: '生成中...' })
+    ? t('playground.studio_generating')
     : mode === 'multi_prompt'
-      ? `${t('playground.studio_batch_generate', { defaultValue: '批量生成' })} ${promptLines.length} ${t('playground.studio_batch_unit', { defaultValue: '张' })}`
-      : `${t('playground.studio_batch_process', { defaultValue: '批量处理' })} ${images.length} ${t('playground.studio_batch_images', { defaultValue: '张图片' })}`;
+      ? `${t('playground.studio_batch_generate')} ${promptLines.length} ${t('playground.studio_batch_unit')}`
+      : `${t('playground.studio_batch_process')} ${images.length} ${t('playground.studio_batch_images')}`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={local.tabRow}>
         <button type="button" style={mode === 'multi_prompt' ? local.tabActive : local.tab} onClick={() => setMode('multi_prompt')}>
-          {t('playground.studio_batch_multi_prompt', { defaultValue: '多提示词' })}
+          {t('playground.studio_batch_multi_prompt')}
         </button>
         <button type="button" style={mode === 'multi_image' ? local.tabActive : local.tab} onClick={() => setMode('multi_image')}>
-          {t('playground.studio_batch_multi_image', { defaultValue: '多图片' })}
+          {t('playground.studio_batch_multi_image')}
         </button>
       </div>
 
       {mode === 'multi_prompt' ? (
         <div style={ss.formRow}>
-          <label style={ss.formLabel}>{t('playground.studio_batch_prompts', { defaultValue: '批量提示词' })}</label>
+          <label style={ss.formLabel}>{t('playground.studio_batch_prompts')}</label>
           <textarea
             style={{ ...ss.formTextarea, minHeight: 96 }}
             className="studio-textarea"
             value={multiPrompts}
             onChange={e => setMultiPrompts(e.target.value)}
-            placeholder={t('playground.studio_batch_placeholder', { defaultValue: '每行一个提示词...' })}
+            placeholder={t('playground.studio_batch_placeholder')}
             rows={5}
           />
           <div style={ss.formHint}>
-            {promptLines.length > 0 ? `共 ${promptLines.length} 个提示词` : t('playground.studio_batch_empty', { defaultValue: '尚未输入提示词' })}
+            {promptLines.length > 0 ? `共 ${promptLines.length} 个提示词` : t('playground.studio_batch_empty')}
           </div>
         </div>
       ) : (
         <>
           <div style={ss.formRow}>
-            <label style={ss.formLabel}>{t('playground.studio_batch_upload', { defaultValue: '上传图片' })}</label>
+            <label style={ss.formLabel}>{t('playground.studio_batch_upload')}</label>
             <div
               style={local.uploadArea}
               className="studio-upload-area"
@@ -233,7 +233,7 @@ export function BatchPanel() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity={0.4}>
                 <path d="M12 5v14M5 12h14" />
               </svg>
-              {t('playground.studio_batch_add_images', { defaultValue: '点击或拖拽添加图片' })}
+              {t('playground.studio_batch_add_images')}
             </div>
             <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => addImages(e.target.files)} />
           </div>
@@ -250,13 +250,13 @@ export function BatchPanel() {
           )}
 
           <div style={ss.formRow}>
-            <label style={ss.formLabel}>{t('playground.studio_batch_shared_prompt', { defaultValue: '统一提示词' })}</label>
+            <label style={ss.formLabel}>{t('playground.studio_batch_shared_prompt')}</label>
             <textarea
               style={{ ...ss.formTextarea, minHeight: 72 }}
               className="studio-textarea"
               value={imagePrompt}
               onChange={e => setImagePrompt(e.target.value)}
-              placeholder={t('playground.studio_batch_shared_placeholder', { defaultValue: '对所有图片应用相同的描述...' })}
+              placeholder={t('playground.studio_batch_shared_placeholder')}
               rows={3}
             />
           </div>
@@ -264,7 +264,7 @@ export function BatchPanel() {
       )}
 
       <div style={ss.formRow}>
-        <label style={ss.formLabel}>{t('playground.studio_model', { defaultValue: '模型' })}</label>
+        <label style={ss.formLabel}>{t('playground.studio_model')}</label>
         {availableModels.length === 1 ? (
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
         ) : (
@@ -277,7 +277,7 @@ export function BatchPanel() {
       </div>
       <GroupSelector />
       <div style={ss.formRow}>
-        <label style={ss.formLabel}>{t('playground.studio_size', { defaultValue: '尺寸' })}</label>
+        <label style={ss.formLabel}>{t('playground.studio_size')}</label>
         <SizeSelector
           value={imageSize}
           sizes={currentModel.sizes}

@@ -21,7 +21,7 @@ export function GroupSelector() {
   return (
     <div style={ss.formRow}>
       <label style={ss.formLabel}>
-        {t('playground.studio_group', { defaultValue: '通道' })}
+        {t('playground.studio_group')}
       </label>
       <CustomSelect
         value={selectedGroupId != null ? String(selectedGroupId) : ''}

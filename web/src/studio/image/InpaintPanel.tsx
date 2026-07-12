@@ -326,7 +326,7 @@ export function InpaintPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_source_image', { defaultValue: '参考图片' })}
+          {t('playground.studio_source_image')}
         </label>
 
         {sourceImage ? (
@@ -349,21 +349,21 @@ export function InpaintPanel() {
                 style={local.actionBtn}
                 onClick={() => setSelection(null)}
               >
-                {t('playground.studio_clear_selection', { defaultValue: '清除选区' })}
+                {t('playground.studio_clear_selection')}
               </button>
               <button
                 type="button"
                 style={local.actionBtn}
                 onClick={() => { setSourceImage(null); setSelection(null); }}
               >
-                {t('playground.studio_remove_image', { defaultValue: '移除图片' })}
+                {t('playground.studio_remove_image')}
               </button>
             </div>
 
             <div style={local.selectionHint}>
               {selection
-                ? t('playground.studio_selection_set', { defaultValue: '已选定修改区域，拖拽可重新选择' })
-                : t('playground.studio_selection_hint', { defaultValue: '在图片上拖拽选择要修改的区域' })}
+                ? t('playground.studio_selection_set')
+                : t('playground.studio_selection_hint')}
             </div>
           </>
         ) : (
@@ -384,7 +384,7 @@ export function InpaintPanel() {
               <path d="M21 15l-5-5L5 21" />
             </svg>
             <span>
-              {t('playground.studio_upload_hint', { defaultValue: '点击上传或拖拽图片到此处' })}
+              {t('playground.studio_upload_hint')}
             </span>
           </div>
         )}
@@ -400,21 +400,21 @@ export function InpaintPanel() {
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_prompt', { defaultValue: '提示词' })}
+          {t('playground.studio_prompt')}
         </label>
         <textarea
           style={ss.formTextarea}
           className="studio-textarea"
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          placeholder={t('playground.studio_inpaint_placeholder', { defaultValue: '描述要修改的区域...' })}
+          placeholder={t('playground.studio_inpaint_placeholder')}
           rows={3}
         />
       </div>
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_model', { defaultValue: '模型' })}
+          {t('playground.studio_model')}
         </label>
         {editModelOptions.length === 1 ? (
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
@@ -431,7 +431,7 @@ export function InpaintPanel() {
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_size', { defaultValue: '尺寸' })}
+          {t('playground.studio_size')}
         </label>
         <SizeSelector
           value={imageSize}
@@ -448,8 +448,8 @@ export function InpaintPanel() {
         onClick={handleGenerate}
       >
         {isGenerating
-          ? t('playground.studio_generating', { defaultValue: '生成中...' })
-          : t('playground.studio_generate', { defaultValue: '生成' })}
+          ? t('playground.studio_generating')
+          : t('playground.studio_generate')}
       </button>
     </div>
   );

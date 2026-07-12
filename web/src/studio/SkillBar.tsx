@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
 import { SKILL_REGISTRY, STYLE_PRESETS, BG_PRESETS, type SkillConfig } from './skillConfig';
 
@@ -90,7 +91,7 @@ export interface SkillBarProps {
   // 正在执行的技能 id（loading 态），null 表示空闲
   busySkillId: string | null;
   // 触发一个技能。preset 仅对 style/bg 有值。
-  onTrigger: (skill: SkillConfig, preset?: { id: string; label: string; prompt: string }) => void;
+  onTrigger: (skill: SkillConfig, preset?: { id: string; labelKey: string; prompt: string }) => void;
   placement?: 'top' | 'bottom';
 }
 
@@ -100,6 +101,7 @@ export interface SkillBarProps {
  * 不在此处产生隐藏的最终操作。style / bg 点开二级预设菜单。
  */
 export function SkillBar({ hasImage, busySkillId, onTrigger, placement = 'top' }: SkillBarProps) {
+  const { t } = useTranslation();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const skills = SKILL_REGISTRY.filter(skill => (
@@ -128,7 +130,7 @@ export function SkillBar({ hasImage, busySkillId, onTrigger, placement = 'top' }
     onTrigger(skill);
   };
 
-  const handlePreset = (skill: SkillConfig, preset: { id: string; label: string; prompt: string }) => {
+  const handlePreset = (skill: SkillConfig, preset: { id: string; labelKey: string; prompt: string }) => {
     setOpenMenu(null);
     onTrigger(skill, preset);
   };
@@ -154,12 +156,12 @@ export function SkillBar({ hasImage, busySkillId, onTrigger, placement = 'top' }
                 ...(dim ? { opacity: 0.78 } : {}),
                 ...(openMenu === skill.id ? { borderColor: cssVar('primary'), color: cssVar('text') } : {}),
               }}
-              title={dim ? `${skill.hint}（需要先选择参考图）` : skill.hint}
+              title={dim ? `${t(skill.hintKey)} (${t('playground.studio_skill_requires_reference')})` : t(skill.hintKey)}
               onClick={() => handlePillClick(skill)}
               disabled={busy}
             >
               {busy ? <span style={s.spinner} /> : <span style={s.pillIcon}>{skill.icon}</span>}
-              {skill.name}
+              {t(skill.nameKey)}
               {hasMenu && (
                 <svg style={s.caret} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M6 9l6 6 6-6" />
@@ -176,7 +178,7 @@ export function SkillBar({ hasImage, busySkillId, onTrigger, placement = 'top' }
                     style={s.presetItem}
                     onClick={() => handlePreset(skill, preset)}
                   >
-                    {preset.label}
+                    {t(preset.labelKey)}
                   </button>
                 ))}
               </div>

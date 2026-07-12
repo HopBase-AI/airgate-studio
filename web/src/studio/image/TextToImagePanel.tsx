@@ -69,21 +69,21 @@ export function TextToImagePanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_prompt', { defaultValue: '提示词' })}
+          {t('playground.studio_prompt')}
         </label>
         <textarea
           style={ss.formTextarea}
           className="studio-textarea"
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          placeholder={t('playground.studio_prompt_placeholder', { defaultValue: '描述你想生成的图片...' })}
+          placeholder={t('playground.studio_prompt_placeholder')}
           rows={4}
         />
       </div>
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_model', { defaultValue: '模型' })}
+          {t('playground.studio_model')}
         </label>
         {modelOptions.length === 1 ? (
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
@@ -100,7 +100,7 @@ export function TextToImagePanel() {
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_size', { defaultValue: '尺寸' })}
+          {t('playground.studio_size')}
         </label>
         <SizeSelector
           value={imageSize}
@@ -111,7 +111,7 @@ export function TextToImagePanel() {
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_count', { defaultValue: '数量' })}
+          {t('playground.studio_count')}
         </label>
         <div style={ss.formCountGroup}>
           {COUNT_OPTIONS.map(n => (
@@ -136,8 +136,8 @@ export function TextToImagePanel() {
         onClick={handleGenerate}
       >
         {isGenerating
-          ? t('playground.studio_generating', { defaultValue: '生成中...' })
-          : t('playground.studio_generate', { defaultValue: '生成' })}
+          ? t('playground.studio_generating')
+          : t('playground.studio_generate')}
       </button>
     </div>
   );

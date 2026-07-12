@@ -151,6 +151,7 @@ function MaskEditor({ src, selection: initialSelection, onConfirm, onClose, onDe
   onDelete?: () => void;
   maskingEnabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [sel, setSel] = useState<NormalizedRect | null>(initialSelection);
@@ -262,13 +263,13 @@ function MaskEditor({ src, selection: initialSelection, onConfirm, onClose, onDe
   return (
     <div style={me.overlay} onClick={onClose}>
       {maskingEnabled && (
-        <div style={me.hint}>在图片上拖拽框选要局部修改的区域，不框选则为整图变换</div>
+        <div style={me.hint}>{t('playground.edit_image_modal_hint')}</div>
       )}
       <div style={me.zoomBar} onClick={e => e.stopPropagation()}>
-        <button type="button" style={me.zoomBtn} onClick={() => zoomImage(-0.25)} aria-label="缩小">−</button>
+        <button type="button" style={me.zoomBtn} onClick={() => zoomImage(-0.25)} aria-label={t('playground.studio_zoom_out')}>−</button>
         <span style={me.zoomLabel}>{Math.round(zoom * 100)}%</span>
-        <button type="button" style={me.zoomBtn} onClick={() => zoomImage(0.25)} aria-label="放大">+</button>
-        <button type="button" style={me.zoomBtn} onClick={() => setZoom(1)} aria-label="适配屏幕">适配</button>
+        <button type="button" style={me.zoomBtn} onClick={() => zoomImage(0.25)} aria-label={t('playground.studio_zoom_in')}>+</button>
+        <button type="button" style={me.zoomBtn} onClick={() => setZoom(1)} aria-label={t('playground.studio_fit_screen')}>{t('playground.studio_fit')}</button>
       </div>
       <div
         style={{
@@ -297,14 +298,14 @@ function MaskEditor({ src, selection: initialSelection, onConfirm, onClose, onDe
       </div>
       <div style={me.actions} onClick={e => e.stopPropagation()}>
         {onDelete && (
-          <button type="button" style={me.btnDanger} onClick={onDelete}>删除图片</button>
+          <button type="button" style={me.btnDanger} onClick={onDelete}>{t('playground.studio_remove_image')}</button>
         )}
         {maskingEnabled && sel && (
-          <button type="button" style={me.btn} onClick={() => setSel(null)}>清除选区</button>
+          <button type="button" style={me.btn} onClick={() => setSel(null)}>{t('playground.studio_clear_selection')}</button>
         )}
-        <button type="button" style={me.btn} onClick={onClose}>{maskingEnabled ? '取消' : '关闭'}</button>
+        <button type="button" style={me.btn} onClick={onClose}>{maskingEnabled ? t('playground.cancel') : t('playground.studio_close')}</button>
         {maskingEnabled && (
-          <button type="button" style={me.btnPrimary} onClick={() => onConfirm(sel)}>确定</button>
+          <button type="button" style={me.btnPrimary} onClick={() => onConfirm(sel)}>{t('common.confirm')}</button>
         )}
       </div>
     </div>
@@ -327,38 +328,77 @@ interface Inspiration {
 }
 
 const INSPIRATIONS: Inspiration[] = [
-  { category: '电商', title: '微缩护肤品广告', image: '/plugins/airgate-studio/assets/inspirations/skincare-diorama.jpg', prompt: 'A hyper-realistic miniature diorama product advertisement featuring an oversized luxury skincare pump bottle placed on a circular platform. Tiny figurine construction workers in yellow coveralls and white hard hats swarm around the bottle — climbing scaffolding, painting with rollers, operating a tower crane, working near industrial tanks. Warm beige, cream, gold, mustard yellow palette. Studio photography, soft diffused lighting, clean beige background. Tilt-shift miniature aesthetic, ultra-detailed, commercial product photography, 8K resolution, photorealistic CGI render.' },
-  { category: '电商', title: '汉堡广告分镜', image: '/plugins/airgate-studio/assets/inspirations/burger-storyboard.jpg', prompt: 'Create a cinematic hero image of a gourmet cheeseburger on a dark stone surface with glossy brioche bun, melted cheese, crisp lettuce, tomato, grilled patty, sauce, realistic texture, appetizing steam, warm side light, shallow depth of field, premium food commercial style.' },
-  { category: '广告', title: '奢华手表广告', image: '/plugins/airgate-studio/assets/inspirations/luxury-watch.jpg', prompt: 'A dramatic luxury product advertising image for a motorsport-inspired chronograph wristwatch in a dark studio. Stainless steel chronograph watch at a three-quarter angle, black dial, red-accent subdials, tachymeter bezel. Black leather strap with bold red stitching. Deep black background with cinematic red and white horizontal light streaks suggesting speed. Glossy wet ground plane with reflective texture. Ultra-polished commercial product photography, luxury watch campaign.' },
-  { category: '广告', title: '巧克力品牌广告', image: '/plugins/airgate-studio/assets/inspirations/chocolate-brand.jpg', prompt: 'Create a premium square product advertisement for a fictional luxury chocolate brand. High-end editorial campaign combining luxury food photography, refined packaging design, and cinematic lighting. Matte black wrapper, subtle gold foil, elegant serif typography, realistic product rendering. Chocolate bar as hero centerpiece with subtle reflections, shallow depth of field, luxury minimalism.' },
-  { category: '广告', title: '汉堡英雄海报', image: '/plugins/airgate-studio/assets/inspirations/burger-hero.jpg', prompt: 'A cinematic 9:16 vertical composition featuring a gourmet burger. A towering burger with a charcoal brioche bun, thick Wagyu beef patty with visible sear marks, melting aged gruyère dripping like lava, crispy maple-glazed bacon. Dark moody lighting with warm amber spotlight. The burger in a "deconstructed gravity" moment — top bun slightly hovering. Ultra-bold distressed sans-serif typeface "DEFY GRAVITY". 4K resolution, macro photography, neon-noir color grading.' },
-  { category: '广告', title: '抹茶燕麦广告', image: '/plugins/airgate-studio/assets/inspirations/matcha-granola.jpg', prompt: 'Ultra-realistic premium food advertisement poster for a healthy breakfast granola brand, centered matte pouch packaging labeled "Matcha Oat Granola", green monochrome aesthetic, flat lay composition, soft studio lighting, vibrant matcha green background, surrounded by kiwi slices, almonds, oats, chia seeds, matcha powder bowl, granola bowls. Clean modern typography headline "SUPERFOOD MORNING BOWL". Luxury organic branding, 8K detail.' },
-  { category: '人像', title: '水彩时装素描', image: '/plugins/airgate-studio/assets/inspirations/watercolor-fashion.jpg', prompt: 'Transform the uploaded photo into a full-body watercolor fashion illustration in the style of an elegant runway design sketch. Preserve the original outfit, pose, silhouette, colors, fabrics. Use elongated fashion-sketch proportions, loose expressive ink lines, delicate pencil contour, transparent watercolor washes, soft shadows, painterly texture, minimalist editorial mood. White background, clean composition, full body centered.' },
-  { category: '人像', title: '复古报刊亭', image: '/plugins/airgate-studio/assets/inspirations/retro-newsstand.jpg', prompt: 'A cinematic fashion editorial scene of 8 diverse young adults gathered around a vintage urban newsstand kiosk with a bold "NEWSSTAND" sign. Gritty indoor street environment with worn concrete floors, dark industrial walls. Newspapers fly dynamically through the air with natural motion blur. Styled in coordinated 90s-inspired retro streetwear. Shot from slightly elevated angle, wide 35mm lens, soft cinematic lighting, high-end magazine aesthetic, 4K quality.' },
-  { category: '人像', title: '咖啡厅约会', image: '/plugins/airgate-studio/assets/inspirations/cafe-date.jpg', prompt: 'Ultra-realistic cozy Japanese-Korean cafe photography featuring a cute young couple sitting together naturally in a trendy aesthetic cafe. Table beautifully filled with pancakes, strawberry cakes, macarons, croissants, iced coffees, matcha lattes. Cute scrapbook-style doodles and handwritten notes — tiny hearts, stars, sparkles, ribbons. Shallow depth of field, cinematic composition, ultra realistic food textures, 8K.' },
-  { category: '人像', title: '雨中金色街拍', image: '/plugins/airgate-studio/assets/inspirations/rainy-street.jpg', prompt: 'Ultra-realistic cinematic street photography of a young man standing alone on a rainy urban sidewalk during golden hour sunset. Wearing oversized black hoodie, loose dark blue cargo jeans, clean white sneakers. Moody introspective vibe. Wide-angle composition with dramatic depth. Reflective rain-soaked street surface glowing with warm sunset light. Historic Gothic architecture visible. Shot on Sony A7R IV, 35mm lens, f/1.8, HDR photography, cinematic color grading, 8K ultra resolution.' },
-  { category: '海报', title: '孔雀花艺装饰画', image: '/plugins/airgate-studio/assets/inspirations/peacock-art.jpg', prompt: 'Symmetrical design featuring two elegant blue peacocks with detailed feather patterns, surrounded by blue floral elements, intricate vintage botanical ornament, soft beige background, classical floral decor style with rich navy and sky blue details, decorative art illustration.' },
-  { category: '海报', title: '3D 液体艺术', image: '/plugins/airgate-studio/assets/inspirations/3d-liquid.jpg', prompt: 'A mesmerizing explosively colorful vertical poster featuring giant 3D liquid fluid sculpture forms. Enormous glossy morphing blob shapes — massive melting form in hot magenta pink flowing downward, intersecting with a giant swirling wave of electric cobalt blue, a third liquid mass in neon lime green curling upward. All three collide at center in a spectacular splash explosion with hundreds of flying colorful droplets frozen mid-air. Clean bright white background. Bold rounded white typography "LET IT FLOW".' },
-  { category: '海报', title: '创意拼贴', image: '/plugins/airgate-studio/assets/inspirations/collage-art.jpg', prompt: 'Transform the attached image into a collage artwork. Make it appear as if hand-torn from newspapers, magazines, and flyers and pasted. Every single expression completed using large torn pieces of paper. Represent in detail the torn edges, wrinkles, overlaps, and glue marks. Use relatively large pieces of paper placed randomly at different angles and directions. Create it to look like an actual collage roughly hand-pasted by a person.' },
-  { category: '海报', title: '等距线稿旅行海报', image: '/plugins/airgate-studio/assets/inspirations/isometric-travel.jpg', prompt: 'Design a vertical retro mid-century travel poster showcasing a city landmark. Stick to a tight 3-color scheme: cream-toned paper background, black technical line drawing, plus one accent color. Aesthetic: minimalist isometric top-down aerial perspective with very fine cross-hatching and silkscreen print grain. Zero gradients allowed. Large bold sans-serif city name at top.' },
-  { category: '海报', title: '微缩旅行世界', image: '/plugins/airgate-studio/assets/inspirations/miniature-travel.jpg', prompt: 'A cinematic hyper-detailed miniature travel diorama resting inside an open human palm. A realistic passport and official travel visa card stand upright in the center of a tiny landscape, surrounded by miniature travelers with luggage, scattered suitcases, local vegetation, iconic cultural elements. Famous skyline and landmarks rise softly with atmospheric depth. A commercial airplane flies overhead in bright blue sky. Ultra-realistic textures, shallow depth of field, warm sunlight, macro photography style, tilt-shift miniature effect.' },
-  { category: '海报', title: '暗黑西部亡命徒', image: '/plugins/airgate-studio/assets/inspirations/dark-western.jpg', prompt: 'Dark cinematic western outlaw poster, vertical 2:3 composition. A mysterious masked cowboy with a black horse standing at a desert border. Wide-brim cowboy hat, patterned face cloth, dark leather jacket with multi-layer leather gear, bullet belt, revolver holster. Stormy desert background with lightning, dark clouds, canyon walls. Vintage parchment texture, ink splatters, wanted poster information, character profile, compass graphic, stamp seal. Ultra-detailed leather and metal textures, 8K.' },
-  { category: '海报', title: '动物百科信息图', image: '/plugins/airgate-studio/assets/inspirations/wildlife-infographic.jpg', prompt: 'A premium cinematic wildlife infographic poster centered around a visually unique animal species. Ultra-detailed photorealistic fur, realistic eyes, moisture textures, cinematic shadows, powerful eye contact. Dense layered infographic storytelling: anatomy callouts, adaptation systems, prey and diet visuals, ecosystem overlays, conservation status, geographic range maps. Asymmetric editorial composition, premium typography, holographic UI elements. Cinematic documentary realism meets futuristic infographic design. 8K, museum-quality composition.' },
-  { category: '角色', title: '机甲少女', image: '/plugins/airgate-studio/assets/inspirations/mecha-girl.jpg', prompt: 'A mecha girl mid-teens, pale skin smudged with soot and salt spray, sharp amber eyes with glowing HUD reticles, waist-length ash-white hair tied in a high ponytail whipping in the sea wind, matte gunmetal exoskeleton armor plating her shoulders forearms and shins, exposed hydraulic pistons at the joints, chest rig with glowing cyan coolant lines, massive rail cannon resting on her right shoulder. Standing on rusted steel platform jutting out over dark water. Vast derelict sea-city at dusk, colossal megastructures rising from the ocean. Cinematic anime key visual, 16:9.' },
-  { category: '角色', title: 'GTA 风格花市', image: '/plugins/airgate-studio/assets/inspirations/gta-market.jpg', prompt: 'GTA 6 style artwork set in a vibrant Bangalore flower market in India. Bold stylized characters, dramatic poses, vivid colors, urban street energy mixed with traditional Indian market atmosphere. Game cover art composition, cinematic lighting, detailed environment.' },
-  { category: '角色', title: '动漫街头潮牌', image: '/plugins/airgate-studio/assets/inspirations/anime-streetwear.jpg', prompt: 'Stylized anime streetwear brand poster of a fast-food mascot character, full-body dynamic pose, highly detailed manga illustration, modern urban fashion outfit inspired by restaurant brand colors, oversized hoodie, tactical straps, sneakers, chains, branded accessories, holding signature food item. Bold graphic typography, editorial magazine layout, Japanese text elements, grunge textures, paint splashes. Collectible poster aesthetic, cyber street fashion meets commercial advertising, vibrant red/orange/black/white palette.' },
-  { category: '电商', scenario: '商品主图', kind: 'prompt', title: '白底平台主图', description: '适合 Listing 首图，干净真实，方便后期裁切。', tags: ['白底图', 'Listing', '主图'], prompt: 'Create a clean e-commerce product listing image for [PRODUCT]. Center the product on a pure white background, accurate proportions, true-to-life materials, soft shadow directly under the product, crisp edges, no props, no text, no logo changes, commercial packshot photography, high-resolution, ready for marketplace listing.' },
-  { category: '电商', scenario: '场景图', kind: 'prompt', title: '生活方式场景图', description: '把商品放到真实使用场景，适合详情页和店铺首页。', tags: ['Lifestyle', '详情页', '场景图'], prompt: 'Create a premium lifestyle product photo for [PRODUCT] used by [TARGET CUSTOMER] in a realistic [SCENE]. Keep the product clearly visible as the hero, natural hand placement if relevant, warm daylight, believable scale, editorial composition, shallow depth of field, aspirational but not stock-like, no text, no extra logos.' },
-  { category: '电商', scenario: 'A+详情', kind: 'prompt', title: 'A+详情页模块', description: '用于商品卖点解释图，留出后期排版空间。', tags: ['A+内容', '详情页', '卖点'], prompt: 'Design an Amazon A+ content visual for [PRODUCT] highlighting [BENEFIT]. Use a clean premium layout, product on one side, contextual background related to [USE CASE], subtle callout spaces without rendering text, organized negative space for copy placement, accurate product shape and material, commercial studio lighting.' },
-  { category: '电商', scenario: '卖点图', kind: 'prompt', title: '卖点信息图底图', description: '生成可后期加字的卖点图，不让模型直接画文字。', tags: ['卖点图', '信息图', '详情页'], prompt: 'Create a clean product benefit infographic background for [PRODUCT]. Show the product large and sharp, include 3-4 empty visual callout zones with subtle lines or icon placeholders but no readable text, use brand color accents [BRAND COLORS], bright commercial lighting, high clarity, suitable for adding Chinese copy later.' },
-  { category: '电商', scenario: '效果对比', kind: 'prompt', title: '前后对比图', description: '适合清洁、护肤、收纳、修复等结果类商品。', tags: ['对比图', '效果展示'], prompt: 'Create a split-screen before-and-after product result image for [PRODUCT]. Left side shows the problem state [BEFORE STATE], right side shows the improved state [AFTER STATE]. Keep lighting and perspective consistent, realistic transformation, clean divider space for labels added later, no text, no exaggerated impossible claims.' },
-  { category: '电商', scenario: '套装陈列', kind: 'prompt', title: '套装 Flatlay', description: '适合礼盒、套装、配件组合和内容物展示。', tags: ['Flatlay', '套装', '礼盒'], prompt: 'Create a top-down flatlay product bundle photo for [PRODUCT SET]. Arrange all items neatly with balanced spacing, premium textured background, soft natural shadows, coherent color palette, realistic packaging, clear view of every component, no text, commercial catalog photography.' },
-  { category: '电商', scenario: '社媒广告', kind: 'prompt', title: '9:16 社媒广告底图', description: '适合小红书、TikTok、Reels 的竖版广告图。', tags: ['小红书', 'TikTok', '社媒广告'], prompt: 'Create a 9:16 vertical social ad visual for [PRODUCT]. Product must be the first focal point, energetic composition, one strong use-case moment, space at top and bottom for copy overlays, modern direct-to-consumer brand aesthetic, bright but natural lighting, no generated text, no fake UI.' },
-  { category: '电商', scenario: 'UGC素材', kind: 'prompt', title: 'UGC 手持实拍感', description: '适合达人种草图、买家秀和真实使用反馈素材。', tags: ['UGC', '种草', '买家秀'], prompt: 'Create a realistic UGC-style handheld photo of [PRODUCT] being used by [TARGET CUSTOMER]. Casual but polished framing, natural indoor light, slight phone-camera realism, authentic environment, product label readable only if supplied, no over-retouching, no text overlay, trustworthy review-photo mood.' },
-  { category: '服饰', scenario: '商品主图', kind: 'prompt', title: '服装幽灵模特图', description: '适合服装主图，展示版型和面料细节。', tags: ['服饰', '主图', 'Ghost mannequin'], prompt: 'Create a ghost mannequin e-commerce photo for [GARMENT]. Show the garment floating naturally with correct structure and fit, front view, clean light gray or white studio background, accurate fabric texture, realistic folds, no human body visible, no text, premium fashion catalog lighting.' },
-  { category: '服饰', scenario: '模特图', kind: 'prompt', title: 'Lookbook 模特图', description: '适合服装品牌调性展示和店铺首页素材。', tags: ['Lookbook', '模特', '服饰'], prompt: 'Create an editorial lookbook image for [GARMENT] worn by [MODEL DESCRIPTION] in [SCENE]. Preserve garment details, natural pose, full-body composition, premium fashion photography, soft directional light, clean background, realistic fabric movement, no text or logos beyond the garment.' },
-  { category: '广告', scenario: '节日营销', kind: 'prompt', title: '节日营销KV', description: '适合大促、礼赠、节日活动首图。', tags: ['大促', '节日', 'KV'], prompt: 'Create a premium seasonal campaign key visual for [PRODUCT] during [FESTIVAL OR SHOPPING EVENT]. Product centered as hero, festive but restrained props, brand color palette [BRAND COLORS], elegant commercial lighting, space for promotional copy, no generated text, high-end e-commerce campaign style.' },
+  { id: 'local-skincare-diorama', category: 'ecommerce', title: 'skincare_diorama', image: '/plugins/airgate-studio/assets/inspirations/skincare-diorama.jpg', prompt: 'A hyper-realistic miniature diorama product advertisement featuring an oversized luxury skincare pump bottle placed on a circular platform. Tiny figurine construction workers in yellow coveralls and white hard hats swarm around the bottle — climbing scaffolding, painting with rollers, operating a tower crane, working near industrial tanks. Warm beige, cream, gold, mustard yellow palette. Studio photography, soft diffused lighting, clean beige background. Tilt-shift miniature aesthetic, ultra-detailed, commercial product photography, 8K resolution, photorealistic CGI render.' },
+  { id: 'local-burger-storyboard', category: 'ecommerce', title: 'burger_storyboard', image: '/plugins/airgate-studio/assets/inspirations/burger-storyboard.jpg', prompt: 'Create a cinematic hero image of a gourmet cheeseburger on a dark stone surface with glossy brioche bun, melted cheese, crisp lettuce, tomato, grilled patty, sauce, realistic texture, appetizing steam, warm side light, shallow depth of field, premium food commercial style.' },
+  { id: 'local-luxury-watch', category: 'advertising', title: 'luxury_watch', image: '/plugins/airgate-studio/assets/inspirations/luxury-watch.jpg', prompt: 'A dramatic luxury product advertising image for a motorsport-inspired chronograph wristwatch in a dark studio. Stainless steel chronograph watch at a three-quarter angle, black dial, red-accent subdials, tachymeter bezel. Black leather strap with bold red stitching. Deep black background with cinematic red and white horizontal light streaks suggesting speed. Glossy wet ground plane with reflective texture. Ultra-polished commercial product photography, luxury watch campaign.' },
+  { id: 'local-chocolate-brand', category: 'advertising', title: 'chocolate_brand', image: '/plugins/airgate-studio/assets/inspirations/chocolate-brand.jpg', prompt: 'Create a premium square product advertisement for a fictional luxury chocolate brand. High-end editorial campaign combining luxury food photography, refined packaging design, and cinematic lighting. Matte black wrapper, subtle gold foil, elegant serif typography, realistic product rendering. Chocolate bar as hero centerpiece with subtle reflections, shallow depth of field, luxury minimalism.' },
+  { id: 'local-burger-hero', category: 'advertising', title: 'burger_hero', image: '/plugins/airgate-studio/assets/inspirations/burger-hero.jpg', prompt: 'A cinematic 9:16 vertical composition featuring a gourmet burger. A towering burger with a charcoal brioche bun, thick Wagyu beef patty with visible sear marks, melting aged gruyère dripping like lava, crispy maple-glazed bacon. Dark moody lighting with warm amber spotlight. The burger in a "deconstructed gravity" moment — top bun slightly hovering. Ultra-bold distressed sans-serif typeface "DEFY GRAVITY". 4K resolution, macro photography, neon-noir color grading.' },
+  { id: 'local-matcha-granola', category: 'advertising', title: 'matcha_granola', image: '/plugins/airgate-studio/assets/inspirations/matcha-granola.jpg', prompt: 'Ultra-realistic premium food advertisement poster for a healthy breakfast granola brand, centered matte pouch packaging labeled "Matcha Oat Granola", green monochrome aesthetic, flat lay composition, soft studio lighting, vibrant matcha green background, surrounded by kiwi slices, almonds, oats, chia seeds, matcha powder bowl, granola bowls. Clean modern typography headline "SUPERFOOD MORNING BOWL". Luxury organic branding, 8K detail.' },
+  { id: 'local-watercolor-fashion', category: 'portrait', title: 'watercolor_fashion', image: '/plugins/airgate-studio/assets/inspirations/watercolor-fashion.jpg', prompt: 'Transform the uploaded photo into a full-body watercolor fashion illustration in the style of an elegant runway design sketch. Preserve the original outfit, pose, silhouette, colors, fabrics. Use elongated fashion-sketch proportions, loose expressive ink lines, delicate pencil contour, transparent watercolor washes, soft shadows, painterly texture, minimalist editorial mood. White background, clean composition, full body centered.' },
+  { id: 'local-retro-newsstand', category: 'portrait', title: 'retro_newsstand', image: '/plugins/airgate-studio/assets/inspirations/retro-newsstand.jpg', prompt: 'A cinematic fashion editorial scene of 8 diverse young adults gathered around a vintage urban newsstand kiosk with a bold "NEWSSTAND" sign. Gritty indoor street environment with worn concrete floors, dark industrial walls. Newspapers fly dynamically through the air with natural motion blur. Styled in coordinated 90s-inspired retro streetwear. Shot from slightly elevated angle, wide 35mm lens, soft cinematic lighting, high-end magazine aesthetic, 4K quality.' },
+  { id: 'local-cafe-date', category: 'portrait', title: 'cafe_date', image: '/plugins/airgate-studio/assets/inspirations/cafe-date.jpg', prompt: 'Ultra-realistic cozy Japanese-Korean cafe photography featuring a cute young couple sitting together naturally in a trendy aesthetic cafe. Table beautifully filled with pancakes, strawberry cakes, macarons, croissants, iced coffees, matcha lattes. Cute scrapbook-style doodles and handwritten notes — tiny hearts, stars, sparkles, ribbons. Shallow depth of field, cinematic composition, ultra realistic food textures, 8K.' },
+  { id: 'local-rainy-street', category: 'portrait', title: 'rainy_street', image: '/plugins/airgate-studio/assets/inspirations/rainy-street.jpg', prompt: 'Ultra-realistic cinematic street photography of a young man standing alone on a rainy urban sidewalk during golden hour sunset. Wearing oversized black hoodie, loose dark blue cargo jeans, clean white sneakers. Moody introspective vibe. Wide-angle composition with dramatic depth. Reflective rain-soaked street surface glowing with warm sunset light. Historic Gothic architecture visible. Shot on Sony A7R IV, 35mm lens, f/1.8, HDR photography, cinematic color grading, 8K ultra resolution.' },
+  { id: 'local-peacock-art', category: 'poster', title: 'peacock_art', image: '/plugins/airgate-studio/assets/inspirations/peacock-art.jpg', prompt: 'Symmetrical design featuring two elegant blue peacocks with detailed feather patterns, surrounded by blue floral elements, intricate vintage botanical ornament, soft beige background, classical floral decor style with rich navy and sky blue details, decorative art illustration.' },
+  { id: 'local-liquid-3d', category: 'poster', title: 'liquid_3d', image: '/plugins/airgate-studio/assets/inspirations/3d-liquid.jpg', prompt: 'A mesmerizing explosively colorful vertical poster featuring giant 3D liquid fluid sculpture forms. Enormous glossy morphing blob shapes — massive melting form in hot magenta pink flowing downward, intersecting with a giant swirling wave of electric cobalt blue, a third liquid mass in neon lime green curling upward. All three collide at center in a spectacular splash explosion with hundreds of flying colorful droplets frozen mid-air. Clean bright white background. Bold rounded white typography "LET IT FLOW".' },
+  { id: 'local-creative-collage', category: 'poster', title: 'creative_collage', image: '/plugins/airgate-studio/assets/inspirations/collage-art.jpg', prompt: 'Transform the attached image into a collage artwork. Make it appear as if hand-torn from newspapers, magazines, and flyers and pasted. Every single expression completed using large torn pieces of paper. Represent in detail the torn edges, wrinkles, overlaps, and glue marks. Use relatively large pieces of paper placed randomly at different angles and directions. Create it to look like an actual collage roughly hand-pasted by a person.' },
+  { id: 'local-isometric-travel', category: 'poster', title: 'isometric_travel', image: '/plugins/airgate-studio/assets/inspirations/isometric-travel.jpg', prompt: 'Design a vertical retro mid-century travel poster showcasing a city landmark. Stick to a tight 3-color scheme: cream-toned paper background, black technical line drawing, plus one accent color. Aesthetic: minimalist isometric top-down aerial perspective with very fine cross-hatching and silkscreen print grain. Zero gradients allowed. Large bold sans-serif city name at top.' },
+  { id: 'local-miniature-travel', category: 'poster', title: 'miniature_travel', image: '/plugins/airgate-studio/assets/inspirations/miniature-travel.jpg', prompt: 'A cinematic hyper-detailed miniature travel diorama resting inside an open human palm. A realistic passport and official travel visa card stand upright in the center of a tiny landscape, surrounded by miniature travelers with luggage, scattered suitcases, local vegetation, iconic cultural elements. Famous skyline and landmarks rise softly with atmospheric depth. A commercial airplane flies overhead in bright blue sky. Ultra-realistic textures, shallow depth of field, warm sunlight, macro photography style, tilt-shift miniature effect.' },
+  { id: 'local-dark-western', category: 'poster', title: 'dark_western', image: '/plugins/airgate-studio/assets/inspirations/dark-western.jpg', prompt: 'Dark cinematic western outlaw poster, vertical 2:3 composition. A mysterious masked cowboy with a black horse standing at a desert border. Wide-brim cowboy hat, patterned face cloth, dark leather jacket with multi-layer leather gear, bullet belt, revolver holster. Stormy desert background with lightning, dark clouds, canyon walls. Vintage parchment texture, ink splatters, wanted poster information, character profile, compass graphic, stamp seal. Ultra-detailed leather and metal textures, 8K.' },
+  { id: 'local-wildlife-infographic', category: 'poster', title: 'wildlife_infographic', image: '/plugins/airgate-studio/assets/inspirations/wildlife-infographic.jpg', prompt: 'A premium cinematic wildlife infographic poster centered around a visually unique animal species. Ultra-detailed photorealistic fur, realistic eyes, moisture textures, cinematic shadows, powerful eye contact. Dense layered infographic storytelling: anatomy callouts, adaptation systems, prey and diet visuals, ecosystem overlays, conservation status, geographic range maps. Asymmetric editorial composition, premium typography, holographic UI elements. Cinematic documentary realism meets futuristic infographic design. 8K, museum-quality composition.' },
+  { id: 'local-mecha-girl', category: 'character', title: 'mecha_girl', image: '/plugins/airgate-studio/assets/inspirations/mecha-girl.jpg', prompt: 'A mecha girl mid-teens, pale skin smudged with soot and salt spray, sharp amber eyes with glowing HUD reticles, waist-length ash-white hair tied in a high ponytail whipping in the sea wind, matte gunmetal exoskeleton armor plating her shoulders forearms and shins, exposed hydraulic pistons at the joints, chest rig with glowing cyan coolant lines, massive rail cannon resting on her right shoulder. Standing on rusted steel platform jutting out over dark water. Vast derelict sea-city at dusk, colossal megastructures rising from the ocean. Cinematic anime key visual, 16:9.' },
+  { id: 'local-gta-market', category: 'character', title: 'gta_market', image: '/plugins/airgate-studio/assets/inspirations/gta-market.jpg', prompt: 'GTA 6 style artwork set in a vibrant Bangalore flower market in India. Bold stylized characters, dramatic poses, vivid colors, urban street energy mixed with traditional Indian market atmosphere. Game cover art composition, cinematic lighting, detailed environment.' },
+  { id: 'local-anime-streetwear', category: 'character', title: 'anime_streetwear', image: '/plugins/airgate-studio/assets/inspirations/anime-streetwear.jpg', prompt: 'Stylized anime streetwear brand poster of a fast-food mascot character, full-body dynamic pose, highly detailed manga illustration, modern urban fashion outfit inspired by restaurant brand colors, oversized hoodie, tactical straps, sneakers, chains, branded accessories, holding signature food item. Bold graphic typography, editorial magazine layout, Japanese text elements, grunge textures, paint splashes. Collectible poster aesthetic, cyber street fashion meets commercial advertising, vibrant red/orange/black/white palette.' },
+  { id: 'local-white-background-listing', category: 'ecommerce', scenario: 'product_hero', kind: 'prompt', title: 'white_background_listing', description: 'white_background_listing', tags: ['white_bg', 'listing', 'product_hero'], prompt: 'Create a clean e-commerce product listing image for [PRODUCT]. Center the product on a pure white background, accurate proportions, true-to-life materials, soft shadow directly under the product, crisp edges, no props, no text, no logo changes, commercial packshot photography, high-resolution, ready for marketplace listing.' },
+  { id: 'local-lifestyle-product-scene', category: 'ecommerce', scenario: 'lifestyle', kind: 'prompt', title: 'lifestyle_product_scene', description: 'lifestyle_product_scene', tags: ['lifestyle', 'detail_page', 'scene'], prompt: 'Create a premium lifestyle product photo for [PRODUCT] used by [TARGET CUSTOMER] in a realistic [SCENE]. Keep the product clearly visible as the hero, natural hand placement if relevant, warm daylight, believable scale, editorial composition, shallow depth of field, aspirational but not stock-like, no text, no extra logos.' },
+  { id: 'local-a-plus-detail-module', category: 'ecommerce', scenario: 'detail_page', kind: 'prompt', title: 'a_plus_detail_module', description: 'a_plus_detail_module', tags: ['a_plus', 'detail_page', 'benefits'], prompt: 'Design an Amazon A+ content visual for [PRODUCT] highlighting [BENEFIT]. Use a clean premium layout, product on one side, contextual background related to [USE CASE], subtle callout spaces without rendering text, organized negative space for copy placement, accurate product shape and material, commercial studio lighting.' },
+  { id: 'local-benefit-infographic-background', category: 'ecommerce', scenario: 'benefit_graphic', kind: 'prompt', title: 'benefit_infographic_background', description: 'benefit_infographic_background', tags: ['benefit_graphic', 'infographic', 'detail_page'], prompt: 'Create a clean product benefit infographic background for [PRODUCT]. Show the product large and sharp, include 3-4 empty visual callout zones with subtle lines or icon placeholders but no readable text, use brand color accents [BRAND COLORS], bright commercial lighting, high clarity, suitable for adding Chinese copy later.' },
+  { id: 'local-before-after-comparison', category: 'ecommerce', scenario: 'comparison', kind: 'prompt', title: 'before_after_comparison', description: 'before_after_comparison', tags: ['comparison', 'result_preview'], prompt: 'Create a split-screen before-and-after product result image for [PRODUCT]. Left side shows the problem state [BEFORE STATE], right side shows the improved state [AFTER STATE]. Keep lighting and perspective consistent, realistic transformation, clean divider space for labels added later, no text, no exaggerated impossible claims.' },
+  { id: 'local-bundle-flatlay', category: 'ecommerce', scenario: 'bundle', kind: 'prompt', title: 'bundle_flatlay', description: 'bundle_flatlay', tags: ['flatlay', 'bundle', 'gift_box'], prompt: 'Create a top-down flatlay product bundle photo for [PRODUCT SET]. Arrange all items neatly with balanced spacing, premium textured background, soft natural shadows, coherent color palette, realistic packaging, clear view of every component, no text, commercial catalog photography.' },
+  { id: 'local-social-ad-background', category: 'ecommerce', scenario: 'social_ad', kind: 'prompt', title: 'social_ad_background', description: 'social_ad_background', tags: ['xiaohongshu', 'tiktok', 'social_ad'], prompt: 'Create a 9:16 vertical social ad visual for [PRODUCT]. Product must be the first focal point, energetic composition, one strong use-case moment, space at top and bottom for copy overlays, modern direct-to-consumer brand aesthetic, bright but natural lighting, no generated text, no fake UI.' },
+  { id: 'local-ugc-handheld', category: 'ecommerce', scenario: 'ugc', kind: 'prompt', title: 'ugc_handheld', description: 'ugc_handheld', tags: ['ugc', 'product_seeding', 'buyer_show'], prompt: 'Create a realistic UGC-style handheld photo of [PRODUCT] being used by [TARGET CUSTOMER]. Casual but polished framing, natural indoor light, slight phone-camera realism, authentic environment, product label readable only if supplied, no over-retouching, no text overlay, trustworthy review-photo mood.' },
+  { id: 'local-ghost-mannequin', category: 'fashion', scenario: 'product_hero', kind: 'prompt', title: 'ghost_mannequin', description: 'ghost_mannequin', tags: ['fashion', 'product_hero', 'ghost_mannequin'], prompt: 'Create a ghost mannequin e-commerce photo for [GARMENT]. Show the garment floating naturally with correct structure and fit, front view, clean light gray or white studio background, accurate fabric texture, realistic folds, no human body visible, no text, premium fashion catalog lighting.' },
+  { id: 'local-lookbook-model', category: 'fashion', scenario: 'model', kind: 'prompt', title: 'lookbook_model', description: 'lookbook_model', tags: ['lookbook', 'model', 'fashion'], prompt: 'Create an editorial lookbook image for [GARMENT] worn by [MODEL DESCRIPTION] in [SCENE]. Preserve garment details, natural pose, full-body composition, premium fashion photography, soft directional light, clean background, realistic fabric movement, no text or logos beyond the garment.' },
+  { id: 'local-holiday-campaign-kv', category: 'advertising', scenario: 'holiday', kind: 'prompt', title: 'holiday_campaign_kv', description: 'holiday_campaign_kv', tags: ['promotion', 'festival', 'kv'], prompt: 'Create a premium seasonal campaign key visual for [PRODUCT] during [FESTIVAL OR SHOPPING EVENT]. Product centered as hero, festive but restrained props, brand color palette [BRAND COLORS], elegant commercial lighting, space for promotional copy, no generated text, high-end e-commerce campaign style.' },
 ];
+
+// The Studio API serves the same built-in catalogue with durable IDs. Map its
+// metadata to the local translation keys while keeping API-managed prompts and
+// image URLs untouched.
+const BUILT_IN_INSPIRATION_KEYS: Record<string, string> = {
+  'ecommerce-skincare-diorama': 'skincare_diorama',
+  'ecommerce-burger-storyboard': 'burger_storyboard',
+  'ecommerce-white-background-packshot': 'white_background_listing',
+  'ecommerce-lifestyle-hero': 'lifestyle_product_scene',
+  'ecommerce-amazon-a-plus-module': 'a_plus_detail_module',
+  'ecommerce-benefit-infographic': 'benefit_infographic_background',
+  'ecommerce-before-after': 'before_after_comparison',
+  'ecommerce-flatlay-bundle': 'bundle_flatlay',
+  'ecommerce-social-ad-vertical': 'social_ad_background',
+  'ecommerce-ugc-handheld': 'ugc_handheld',
+  'fashion-watercolor-sketch': 'watercolor_fashion',
+  'fashion-ghost-mannequin': 'ghost_mannequin',
+  'fashion-model-lookbook': 'lookbook_model',
+  'ad-luxury-watch': 'luxury_watch',
+  'ad-chocolate-premium': 'chocolate_brand',
+  'ad-burger-hero': 'burger_hero',
+  'ad-matcha-granola': 'matcha_granola',
+  'ad-festival-campaign': 'holiday_campaign_kv',
+  'poster-peacock-floral': 'peacock_art',
+  'poster-liquid-3d': 'liquid_3d',
+  'poster-collage-art': 'creative_collage',
+  'poster-isometric-travel': 'isometric_travel',
+  'poster-miniature-travel': 'miniature_travel',
+  'poster-dark-western': 'dark_western',
+  'poster-wildlife-infographic': 'wildlife_infographic',
+  'portrait-retro-newsstand': 'retro_newsstand',
+  'portrait-cafe-date': 'cafe_date',
+  'portrait-rainy-street': 'rainy_street',
+  'character-mecha-girl': 'mecha_girl',
+  'character-gta-market': 'gta_market',
+  'character-anime-streetwear': 'anime_streetwear',
+};
+
+const BUILT_IN_INSPIRATION_METADATA = new Map(INSPIRATIONS.map(item => [item.title, item]));
 
 // ── InspirationSidebar ─────────────────────────────────────────────────────────
 
@@ -661,7 +701,7 @@ function ConsoleBackLink() {
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
       </svg>
-      <span>{t('playground.studio_console', { defaultValue: '控制台' })}</span>
+      <span>{t('playground.studio_console')}</span>
     </a>
   );
 }
@@ -729,6 +769,7 @@ function itemMatchesQuery(item: Inspiration, query: string): boolean {
 }
 
 function useInspirationCatalog() {
+  const { t, i18n } = useTranslation();
   const [catalog, setCatalog] = useState<InspirationCatalog>(fallbackInspirationCatalog);
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'fallback'>('loading');
 
@@ -748,14 +789,34 @@ function useInspirationCatalog() {
     return () => { alive = false; };
   }, []);
 
+  const items = useMemo(() => catalog.items.map(item => {
+    // Built-in catalog metadata is translated client-side. API-managed items remain
+    // server-provided so the catalog can evolve independently of this extension.
+    const builtInKey = item.id.startsWith('local-')
+      ? item.title
+      : BUILT_IN_INSPIRATION_KEYS[item.id];
+    const metadata = builtInKey ? BUILT_IN_INSPIRATION_METADATA.get(builtInKey) : undefined;
+    if (!metadata || !builtInKey) return normalizeCatalogItem(item);
+    const titleKey = `playground.studio_inspiration_item_${builtInKey}`;
+    return {
+      ...normalizeCatalogItem(item),
+      category: t(`playground.studio_inspiration_category_${metadata.category}`),
+      scenario: metadata.scenario ? t(`playground.studio_inspiration_scenario_${metadata.scenario}`) : undefined,
+      title: t(`${titleKey}_title`),
+      description: metadata.description ? t(`${titleKey}_description`) : undefined,
+      tags: metadata.tags?.map(tag => t(`playground.studio_inspiration_tag_${tag}`)),
+    };
+  }), [catalog.items, i18n.language, t]);
+
   return {
     catalog,
     loadState,
-    items: catalog.items.map(normalizeCatalogItem),
+    items,
   };
 }
 
 function InspirationCard({ item, onSelect }: { item: Inspiration; onSelect: (prompt: string) => void }) {
+  const { t } = useTranslation();
   const tags = item.tags?.slice(0, 3) ?? [];
   const isPromptOnly = !item.image || item.kind === 'prompt';
   if (isPromptOnly) {
@@ -769,7 +830,7 @@ function InspirationCard({ item, onSelect }: { item: Inspiration; onSelect: (pro
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <span style={tpl.cardScenario}>{item.scenario || item.category}</span>
-          <span style={tpl.useBtn}>使用</span>
+          <span style={tpl.useBtn}>{t('playground.studio_use')}</span>
         </div>
         <div style={{ ...tpl.cardLabel, whiteSpace: 'normal' }}>{item.title}</div>
         {item.description && <div style={tpl.cardDesc}>{item.description}</div>}
@@ -792,7 +853,7 @@ function InspirationCard({ item, onSelect }: { item: Inspiration; onSelect: (pro
       <img src={item.image} alt={item.title} style={tpl.thumb} loading="lazy" />
       <div style={tpl.cardBottom}>
         <span style={tpl.cardLabel}>{item.title}</span>
-        <span style={tpl.useBtn}>使用</span>
+        <span style={tpl.useBtn}>{t('playground.studio_use')}</span>
       </div>
     </button>
   );
@@ -839,13 +900,14 @@ function InspirationDrawer({ onSelect, onClose }: { onSelect: (prompt: string) =
   const { items: allItems, loadState } = useInspirationCatalog();
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<'all' | 'image' | 'prompt'>('all');
-  const [category, setCategory] = useState('全部');
+  const allLabel = t('playground.studio_all');
+  const [category, setCategory] = useState(allLabel);
 
-  const categories = ['全部', ...new Set(allItems.map(item => item.category))];
+  const categories = [allLabel, ...new Set(allItems.map(item => item.category))];
   const visibleItems = allItems.filter(item => {
     const itemKind = item.image && item.kind !== 'prompt' ? 'image' : 'prompt';
     if (kind !== 'all' && itemKind !== kind) return false;
-    if (category !== '全部' && item.category !== category) return false;
+    if (category !== allLabel && item.category !== category) return false;
     return itemMatchesQuery(item, query);
   });
 
@@ -854,8 +916,8 @@ function InspirationDrawer({ onSelect, onClose }: { onSelect: (prompt: string) =
       <div className="studio-inspiration-drawer-backdrop" onClick={onClose} />
       <div className="studio-inspiration-drawer">
         <div style={tpl.drawerHeader}>
-          <span style={tpl.drawerTitle}>{t('playground.studio_inspiration_gallery', { defaultValue: '灵感画廊' })}</span>
-          <button type="button" style={tpl.collapseBtn} className="studio-console-link" onClick={onClose} title={t('playground.studio_close', { defaultValue: '关闭' })}>
+          <span style={tpl.drawerTitle}>{t('playground.studio_inspiration_gallery')}</span>
+          <button type="button" style={tpl.collapseBtn} className="studio-console-link" onClick={onClose} title={t('playground.studio_close')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6L6 18" /><path d="M6 6l12 12" />
             </svg>
@@ -866,7 +928,7 @@ function InspirationDrawer({ onSelect, onClose }: { onSelect: (prompt: string) =
             value={query}
             onChange={e => setQuery(e.target.value)}
             style={tpl.searchInput}
-            placeholder="搜索商品主图、详情页、UGC、海报..."
+            placeholder={t('playground.studio_inspiration_search_placeholder')}
           />
           <div style={tpl.filterRow} className="studio-inspiration-filters">
             {(['all', 'image', 'prompt'] as const).map(nextKind => (
@@ -876,7 +938,7 @@ function InspirationDrawer({ onSelect, onClose }: { onSelect: (prompt: string) =
                 style={kind === nextKind ? { ...tpl.filterBtn, ...tpl.filterBtnActive } : tpl.filterBtn}
                 onClick={() => setKind(nextKind)}
               >
-                {nextKind === 'all' ? '全部' : nextKind === 'image' ? '案例图' : '业务提示词'}
+                {nextKind === 'all' ? t('playground.studio_all') : nextKind === 'image' ? t('playground.studio_inspiration_examples') : t('playground.studio_inspiration_prompts')}
               </button>
             ))}
           </div>
@@ -894,17 +956,17 @@ function InspirationDrawer({ onSelect, onClose }: { onSelect: (prompt: string) =
           </div>
           <div style={tpl.sourceNote}>
             {loadState === 'loading'
-              ? '正在加载灵感资源库...'
+              ? t('playground.studio_inspiration_loading')
               : loadState === 'fallback'
-              ? '使用内置灵感库'
-              : `${visibleItems.length} / ${allItems.length} 个灵感素材`}
+              ? t('playground.studio_inspiration_builtin')
+              : t('playground.studio_inspiration_count', { visible: visibleItems.length, total: allItems.length })}
           </div>
         </div>
         <div style={tpl.drawerBody} className="studio-gallery">
           {visibleItems.length > 0 ? (
             <InspirationGrid items={visibleItems} onSelect={(p) => { onSelect(p); onClose(); }} />
           ) : (
-            <div style={tpl.emptyState}>没有匹配的灵感素材，换个关键词或分类试试。</div>
+            <div style={tpl.emptyState}>{t('playground.studio_inspiration_empty')}</div>
           )}
         </div>
       </div>
@@ -1095,12 +1157,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     setSelection(null);
   };
 
-  const placeholder = hasSource
-    ? (isSingleSource && selection ? '描述要修改的区域...' : '描述你想要的变化...')
-    : '描述你想生成的图片...';
-
   const modeHint = hasSource
-    ? (isSingleSource && selection ? '局部绘图' : '图生图')
+    ? (isSingleSource && selection ? t('playground.studio_mode_inpaint') : t('playground.studio_mode_img2img'))
     : null;
 
   return (
@@ -1125,8 +1183,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                 style={c.thumbOpenBtn}
                 onClick={() => setEditorIndex(i)}
                 onKeyDown={e => handleSourceThumbKeyDown(e, i)}
-                aria-label={t('playground.studio_source_image_keyboard_hint', { defaultValue: '参考图，按回车打开，按 Delete 删除' })}
-                title={t('playground.studio_source_image_keyboard_hint', { defaultValue: '参考图，按回车打开，按 Delete 删除' })}
+                aria-label={t('playground.studio_source_image_keyboard_hint')}
+                title={t('playground.studio_source_image_keyboard_hint')}
               >
                 <img
                   src={src}
@@ -1142,7 +1200,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                       width: `max(${selection.width * 100}%, 10px)`,
                       height: `max(${selection.height * 100}%, 10px)`,
                     }}
-                    title="已选区"
+                    title={t('playground.studio_source_image_selected')}
                   />
                 )}
               </button>
@@ -1163,8 +1221,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                   }
                   e.stopPropagation();
                 }}
-                aria-label={t('playground.studio_remove_source_image', { defaultValue: '移除参考图' })}
-                title={t('playground.studio_remove_source_image', { defaultValue: '移除参考图' })}
+                aria-label={t('playground.studio_remove_source_image')}
+                title={t('playground.studio_remove_source_image')}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M18 6 6 18" />
@@ -1175,12 +1233,12 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           ))}
           {allSources.length > 1 && (
             <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={clearAllSources}>
-              {t('playground.studio_clear_all', { defaultValue: '清除全部' })}
+              {t('playground.studio_clear_all')}
             </button>
           )}
           {isSingleSource && selection && (
             <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={() => setSelection(null)}>
-              {t('playground.studio_clear_selection', { defaultValue: '清除选区' })}
+              {t('playground.studio_clear_selection')}
             </button>
           )}
           {modeHint && <span style={c.modeHint}>{modeHint}</span>}
@@ -1211,7 +1269,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           style={c.promptUploadBtn}
           className="studio-gallery-action"
           onClick={() => fileInputRef.current?.click()}
-          title={t('playground.studio_add_reference', { defaultValue: '添加参考图' })}
+          title={t('playground.studio_add_reference')}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
@@ -1223,7 +1281,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={t('playground.studio_quick_placeholder', { defaultValue: placeholder })}
+          placeholder={hasSource
+            ? (isSingleSource && selection ? t('playground.studio_inpaint_placeholder') : t('playground.studio_img2img_placeholder'))
+            : t('playground.studio_quick_placeholder')}
           rows={5}
         />
       </div>
@@ -1236,7 +1296,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               value={selectedModelId}
               options={modelOptions.map(m => ({ value: m.id, label: m.name }))}
               onChange={setSelectedModelId}
-              placeholder={imageGroupsLoaded ? '暂无可用图片模型' : '加载模型...'}
+              placeholder={imageGroupsLoaded ? t('playground.studio_no_image_model_available') : t('playground.studio_image_models_loading')}
               compact
               minDropdownWidth={420}
               disabled={!hasSelectableModel}
@@ -1251,15 +1311,15 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               style={{ ...c.imgUploadBtn, width: 'auto', gap: 4, padding: '0 9px' }}
               className="studio-gallery-action"
               onClick={onOpenInspiration}
-              title={t('playground.studio_inspiration_gallery', { defaultValue: '灵感画廊' })}
+              title={t('playground.studio_inspiration_gallery')}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z" />
               </svg>
-              <span style={{ fontSize: 11, fontWeight: 500 }}>{t('playground.studio_inspiration_gallery', { defaultValue: '灵感' })}</span>
+              <span style={{ fontSize: 11, fontWeight: 500 }}>{t('playground.studio_inspiration_gallery')}</span>
             </button>
           )}
-          <span style={{ fontSize: 10, color: cssVar('textTertiary'), marginLeft: 2, flexShrink: 0, whiteSpace: 'nowrap' }}>数量</span>
+          <span style={{ fontSize: 10, color: cssVar('textTertiary'), marginLeft: 2, flexShrink: 0, whiteSpace: 'nowrap' }}>{t('playground.studio_quantity')}</span>
           <div style={c.countGroup}>
             {COUNT_OPTIONS.map(n => (
               <button
@@ -1738,6 +1798,7 @@ const mobileTabStyle: Record<string, CSSProperties> = {
 };
 
 function StudioLayout() {
+  const { t } = useTranslation();
   const { gallery, tasks, projectsEnabled, initialLoadComplete } = useStudio();
   const promptRef = useRef<{ set: (v: string) => void } | null>(null);
   const [mobileTab, setMobileTab] = useState<'projects' | 'create'>('create');
@@ -1760,8 +1821,8 @@ function StudioLayout() {
 
   const mobileTabs = projectsEnabled ? (
     <div style={mobileTabStyle.bar} className="studio-mobile-tabs">
-      <button type="button" style={mobileTab === 'projects' ? mobileTabStyle.tabActive : mobileTabStyle.tab} onClick={() => setMobileTab('projects')}>{'项目'}</button>
-      <button type="button" style={mobileTab === 'create' ? mobileTabStyle.tabActive : mobileTabStyle.tab} onClick={() => setMobileTab('create')}>{'创作'}</button>
+      <button type="button" style={mobileTab === 'projects' ? mobileTabStyle.tabActive : mobileTabStyle.tab} onClick={() => setMobileTab('projects')}>{t('playground.studio_mobile_projects')}</button>
+      <button type="button" style={mobileTab === 'create' ? mobileTabStyle.tabActive : mobileTabStyle.tab} onClick={() => setMobileTab('create')}>{t('playground.studio_mobile_create')}</button>
     </div>
   ) : null;
 
@@ -1782,7 +1843,7 @@ function StudioLayout() {
         {projectPanel}
         <div className="studio-panel-create" style={createPanelBase}>
           {floatingControls}
-          <div style={landing.loadingGallery} aria-busy="true" aria-label="加载作品">
+          <div style={landing.loadingGallery} aria-busy="true" aria-label={t('playground.studio_loading_works')}>
             {Array.from({ length: 12 }).map((_, index) => (
               <div
                 key={index}
@@ -1818,15 +1879,15 @@ function StudioLayout() {
                   <path d="M21 15l-5-5L5 21" />
                 </svg>
               </div>
-              <div style={landing.title}>{'创作工作坊'}</div>
-              <div style={landing.subtitle}>{'输入提示词，或从下方灵感开始'}</div>
+              <div style={landing.title}>{t('playground.studio_workshop')}</div>
+              <div style={landing.subtitle}>{t('playground.studio_quick_placeholder')}</div>
               <div style={{ width: '100%', maxWidth: 720, marginTop: 18 }}>
                 <ComposerBar promptRef={promptRef} onOpenInspiration={() => setInspirationOpen(true)} />
               </div>
             </div>
             {/* 空状态把灵感网格铺在主区，回收原本浪费的空白 */}
             <div style={landing.inspireSection}>
-              <div style={landing.inspireHeading}>{'灵感画廊'}</div>
+              <div style={landing.inspireHeading}>{t('playground.studio_inspiration_gallery')}</div>
               <InspirationHomeGrid onSelect={handleTemplate} gridStyle={landing.inspireGrid} />
             </div>
           </div>

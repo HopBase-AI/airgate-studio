@@ -65,14 +65,13 @@ const s: Record<string, CSSProperties> = {
 interface TabDef {
   mode: ImageMode;
   labelKey: string;
-  defaultLabel: string;
 }
 
 const TABS: TabDef[] = [
-  { mode: 'text2img', labelKey: 'playground.studio_mode_text2img', defaultLabel: '文生图' },
-  { mode: 'img2img',  labelKey: 'playground.studio_mode_img2img',  defaultLabel: '图生图' },
-  { mode: 'inpaint',  labelKey: 'playground.studio_mode_inpaint',  defaultLabel: '局部绘图' },
-  { mode: 'batch',    labelKey: 'playground.studio_mode_batch',     defaultLabel: '批量' },
+  { mode: 'text2img', labelKey: 'playground.studio_mode_text2img' },
+  { mode: 'img2img',  labelKey: 'playground.studio_mode_img2img' },
+  { mode: 'inpaint',  labelKey: 'playground.studio_mode_inpaint' },
+  { mode: 'batch',    labelKey: 'playground.studio_mode_batch' },
 ];
 
 // ── ImageModule ─────────────────────────────────────────────────────────────
@@ -92,7 +91,7 @@ export function ImageModule() {
             className="studio-mode-tab"
             onClick={() => setImageMode(tab.mode)}
           >
-            {t(tab.labelKey, { defaultValue: tab.defaultLabel })}
+            {t(tab.labelKey)}
           </button>
         ))}
       </div>

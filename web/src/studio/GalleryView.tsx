@@ -64,17 +64,19 @@ function formatCreatedAt(value: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function formatRemainingTime(ms: number): string {
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+function formatRemainingTime(t: Translate, ms: number): string {
   const safeMs = Math.max(0, ms);
   const days = Math.floor(safeMs / MS_PER_DAY);
-  if (days >= 1) return `${days} 天`;
+  if (days >= 1) return t('playground.studio_time_days', { count: days });
   const hours = Math.ceil(safeMs / (60 * 60 * 1000));
-  if (hours >= 1) return `${hours} 小时`;
+  if (hours >= 1) return t('playground.studio_time_hours', { count: hours });
   const minutes = Math.max(1, Math.ceil(safeMs / 60000));
-  return `${minutes} 分钟`;
+  return t('playground.studio_time_minutes', { count: minutes });
 }
 
-function getExpiryNotice(createdAt: string, retentionDays: number | null): { tone: 'warning' | 'danger'; remainingLabel: string } | null {
+function getExpiryNotice(t: Translate, createdAt: string, retentionDays: number | null): { tone: 'warning' | 'danger'; remainingLabel: string } | null {
   if (!retentionDays || retentionDays <= 0) return null;
   const createdAtMs = Date.parse(createdAt);
   if (!Number.isFinite(createdAtMs)) return null;
@@ -84,7 +86,7 @@ function getExpiryNotice(createdAt: string, retentionDays: number | null): { ton
     return { tone: 'danger', remainingLabel: '' };
   }
   if (remainingMs <= MS_PER_DAY) {
-    return { tone: 'warning', remainingLabel: formatRemainingTime(remainingMs) };
+    return { tone: 'warning', remainingLabel: formatRemainingTime(t, remainingMs) };
   }
   return null;
 }
@@ -284,10 +286,10 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
   const total = subtasks.length;
 
   const statusLabel = task.status === 'queued'
-    ? t('playground.studio_task_queued', { defaultValue: '队列中...' })
+    ? t('playground.studio_task_queued')
     : task.status === 'failed'
-      ? t('playground.studio_task_failed', { defaultValue: '生成失败' })
-      : t('playground.studio_task_processing', { defaultValue: '生成中...' });
+      ? t('playground.studio_task_failed')
+      : t('playground.studio_task_processing');
 
   const handleRetry = () => {
     if (!task.prompt) return;
@@ -299,7 +301,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
   };
 
   const handleDelete = async () => {
-    if (!await confirm(t('playground.studio_confirm_delete_task', { defaultValue: '确定要删除这个任务吗？' }))) return;
+    if (!await confirm(t('playground.studio_confirm_delete_task'))) return;
     await deleteTask(task.id).catch(() => {});
   };
 
@@ -318,12 +320,12 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
         )}
         <div style={taskCardStyles.statusLabel}>
           {batchProcessing
-            ? t('playground.studio_batch_progress', { defaultValue: '批量生成 {{done}}/{{total}}', done: doneCount, total })
+            ? t('playground.studio_batch_progress', { done: doneCount, total })
             : failedCount > 0
-              ? t('playground.studio_batch_partial', { defaultValue: '成功 {{done}} · 失败 {{failed}}', done: doneCount, failed: failedCount })
+              ? t('playground.studio_batch_partial', { done: doneCount, failed: failedCount })
               : task.status === 'failed'
-                ? t('playground.studio_task_failed', { defaultValue: '生成失败' })
-              : t('playground.studio_batch_done', { defaultValue: '批量完成 {{total}} 张', total })}
+                ? t('playground.studio_task_failed')
+              : t('playground.studio_batch_done', { total })}
         </div>
         {/* 子任务状态点：直观看每张的成功/失败/进行中 */}
         <div style={batchCardStyles.dotRow}>
@@ -339,7 +341,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
                     : 'transparent',
                 borderColor: s.status === 'processing' ? cssVar('textTertiary') : 'transparent',
               }}
-              title={s.status === 'failed' ? (s.error || '失败') : s.status === 'completed' ? '成功' : '生成中'}
+              title={s.status === 'failed' ? (s.error || t('playground.studio_task_failed')) : s.status === 'completed' ? t('playground.studio_task_success') : t('playground.studio_task_processing')}
             />
           ))}
         </div>
@@ -352,9 +354,9 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
               transition: 'color 0.2s',
             }}
             onClick={copy}
-            title={copied ? '已复制到剪贴板' : '点击复制提示词'}
+            title={copied ? t('playground.studio_prompt_copied') : t('playground.studio_prompt_copy')}
           >
-            {copied ? '✓ 已复制' : task.prompt}
+            {copied ? t('playground.studio_prompt_copied_label') : task.prompt}
           </div>
         )}
         {!batchProcessing && task.status === 'failed' && task.error && (
@@ -369,7 +371,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
                 className="studio-gallery-action"
                 onClick={() => retryBatchFailures(task.id)}
               >
-                {t('playground.studio_retry_failed', { defaultValue: '重试失败的 {{count}} 张', count: failedCount })}
+                {t('playground.studio_retry_failed', { count: failedCount })}
               </button>
             )}
             <button
@@ -378,7 +380,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
               className="studio-gallery-action"
               onClick={handleDelete}
             >
-              {t('playground.studio_delete', { defaultValue: '删除' })}
+              {t('playground.studio_delete')}
             </button>
           </div>
         )}
@@ -408,8 +410,8 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
           </div>
           <div style={{ fontSize: 10, color: cssVar('textTertiary'), fontFamily: cssVar('fontMono') }}>
             {task.status === 'queued' && queuePos > 0
-              ? t('playground.studio_queue_position', { defaultValue: '队列中 · 第 {{pos}} 位', pos: queuePos })
-              : t('playground.studio_eta', { defaultValue: '已用 {{elapsed}}s · 约 {{eta}}s', elapsed, eta: etaSeconds })}
+              ? t('playground.studio_queue_position', { pos: queuePos })
+              : t('playground.studio_eta', { elapsed, eta: etaSeconds })}
             {typeof task.progress === 'number' && task.progress > 0 ? ` · ${Math.round(task.progress)}%` : ''}
           </div>
         </>
@@ -426,9 +428,9 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
             transition: 'color 0.2s',
           }}
           onClick={copy}
-          title={copied ? '已复制到剪贴板' : '点击复制提示词'}
+          title={copied ? t('playground.studio_prompt_copied') : t('playground.studio_prompt_copy')}
         >
-          {copied ? '✓ 已复制' : task.prompt}
+          {copied ? t('playground.studio_prompt_copied_label') : task.prompt}
         </div>
       )}
       {task.status === 'failed' && (
@@ -439,7 +441,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
             className="studio-gallery-action"
             onClick={handleRetry}
           >
-            {t('playground.studio_retry', { defaultValue: '重试' })}
+            {t('playground.studio_retry')}
           </button>
           <button
             type="button"
@@ -447,7 +449,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
             className="studio-gallery-action"
             onClick={handleDelete}
           >
-            {t('playground.studio_delete', { defaultValue: '删除' })}
+            {t('playground.studio_delete')}
           </button>
         </div>
       )}
@@ -471,7 +473,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
   const { copied, copy } = useCopyOnClick(item.prompt);
   const aspectRatio = parseAspectRatio(item.size);
   const createdAtLabel = formatCreatedAt(item.createdAt);
-  const expiryNotice = getExpiryNotice(item.createdAt, generatedAssetRetentionDays);
+  const expiryNotice = getExpiryNotice(t, item.createdAt, generatedAssetRetentionDays);
   const estimatedHeight = aspectRatio
     ? Math.round(GALLERY_COL_WIDTH / aspectRatio) + GALLERY_OVERLAY_HEIGHT
     : 0;
@@ -484,7 +486,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
 
   const handleRegenerate = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!await confirm(t('playground.studio_confirm_regenerate', { defaultValue: '确定要重新生成吗？将消耗一次生成额度。' }))) return;
+    if (!await confirm(t('playground.studio_confirm_regenerate'))) return;
     regenerate(item);
   };
 
@@ -495,7 +497,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!await confirm(t('playground.studio_confirm_delete', { defaultValue: '确定要删除这张图片吗？' }))) return;
+    if (!await confirm(t('playground.studio_confirm_delete'))) return;
     await deleteGalleryItem(item.id).catch(() => {});
   };
 
@@ -544,7 +546,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
             <span style={ss.galleryCardMetaItem}>{item.size}</span>
           )}
               <span style={ss.galleryCardMetaItem}>
-                {t('playground.studio_created_at', { defaultValue: '创建于' })}
+                {t('playground.studio_created_at')}
                 {' '}
                 {createdAtLabel}
               </span>
@@ -556,8 +558,8 @@ function GalleryCard({ item, index }: GalleryCardProps) {
               }}
               >
                 {expiryNotice.tone === 'danger'
-                ? t('playground.studio_asset_expired', { defaultValue: '已过期，请立即保存' })
-                : t('playground.studio_asset_expiring', { defaultValue: '还有 {{time}} 过期，请尽快保存', time: expiryNotice.remainingLabel })}
+                ? t('playground.studio_asset_expired')
+                : t('playground.studio_asset_expiring', { time: expiryNotice.remainingLabel })}
               </span>
           )}
         </div>
@@ -573,9 +575,9 @@ function GalleryCard({ item, index }: GalleryCardProps) {
                 transition: 'color 0.2s',
               }}
               onClick={copy}
-              title={copied ? '已复制到剪贴板' : '点击复制提示词'}
+              title={copied ? t('playground.studio_prompt_copied') : t('playground.studio_prompt_copy')}
             >
-              {copied ? '✓ 已复制' : item.prompt}
+              {copied ? t('playground.studio_prompt_copied_label') : item.prompt}
             </div>
           )}
         </div>
@@ -585,7 +587,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
             style={ss.galleryCardActionBtn}
             className="studio-gallery-action"
             onClick={handleDownload}
-            title={t('playground.studio_download', { defaultValue: '下载' })}
+            title={t('playground.studio_download')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -598,7 +600,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
             style={ss.galleryCardActionBtn}
             className="studio-gallery-action"
             onClick={handleRegenerate}
-            title={t('playground.studio_regenerate', { defaultValue: '重试' })}
+            title={t('playground.studio_regenerate')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M1 4v6h6" />
@@ -610,7 +612,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
             style={ss.galleryCardActionBtn}
             className="studio-gallery-action"
             onClick={handleUseAsReference}
-            title={t('playground.studio_use_as_reference', { defaultValue: '参考图' })}
+            title={t('playground.studio_use_as_reference')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M16 3h5v5" />
@@ -624,7 +626,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
             style={ss.galleryCardActionBtn}
             className="studio-gallery-action"
             onClick={(e) => { e.stopPropagation(); requestEdit(item.url); }}
-            title={t('playground.studio_edit_this', { defaultValue: '编辑这张' })}
+            title={t('playground.studio_edit_this')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 20h9" />
@@ -636,7 +638,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
             style={ss.galleryCardActionBtn}
             className="studio-gallery-action"
             onClick={handleDelete}
-            title={t('playground.studio_delete', { defaultValue: '删除' })}
+            title={t('playground.studio_delete')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 6h18" />
@@ -653,6 +655,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
 // ── PreviewOverlay ──────────────────────────────────────────────────────────
 
 function PreviewOverlay() {
+  const { t } = useTranslation();
   const { previewItem, setPreviewItem } = useStudio();
   const [hiResReady, setHiResReady] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -757,10 +760,10 @@ function PreviewOverlay() {
   return (
     <div style={ss.previewOverlay} onClick={() => setPreviewItem(null)}>
       <div style={ss.previewToolbar} onClick={e => e.stopPropagation()}>
-        <button type="button" style={ss.previewZoomBtn} onClick={() => zoomImage(-0.25)} aria-label="缩小">−</button>
+        <button type="button" style={ss.previewZoomBtn} onClick={() => zoomImage(-0.25)} aria-label={t('playground.studio_zoom_out')}>−</button>
         <span style={ss.previewZoomLabel}>{Math.round(zoom * 100)}%</span>
-        <button type="button" style={ss.previewZoomBtn} onClick={() => zoomImage(0.25)} aria-label="放大">+</button>
-        <button type="button" style={ss.previewZoomBtn} onClick={resetView} aria-label="适配屏幕">适配</button>
+        <button type="button" style={ss.previewZoomBtn} onClick={() => zoomImage(0.25)} aria-label={t('playground.studio_zoom_in')}>+</button>
+        <button type="button" style={ss.previewZoomBtn} onClick={resetView} aria-label={t('playground.studio_fit_screen')}>{t('playground.studio_fit')}</button>
       </div>
       <button
         type="button"
@@ -878,20 +881,20 @@ function EmptyState() {
           <path d="M21 15l-5-5L5 21" />
         </svg>
       </div>
-      <div style={emptyStyles.title}>{t('playground.studio_gallery_empty', { defaultValue: '还没有生成的图片' })}</div>
+      <div style={emptyStyles.title}>{t('playground.studio_gallery_empty')}</div>
       <div style={emptyStyles.hint}>
-        {t('playground.studio_gallery_empty_hint', { defaultValue: '在下方输入框输入提示词，开始创作' })}
+        {t('playground.studio_gallery_empty_hint')}
       </div>
       <div style={emptyStyles.shortcutRow}>
         <div style={emptyStyles.shortcutItem}>
           <span style={emptyStyles.kbd}>Enter</span>
-          <span>{t('playground.studio_shortcut_send', { defaultValue: '发送' })}</span>
+          <span>{t('playground.studio_shortcut_send')}</span>
         </div>
         <div style={emptyStyles.shortcutItem}>
           <span style={emptyStyles.kbd}>Shift</span>
           <span>+</span>
           <span style={emptyStyles.kbd}>Enter</span>
-          <span>{t('playground.studio_shortcut_newline', { defaultValue: '换行' })}</span>
+          <span>{t('playground.studio_shortcut_newline')}</span>
         </div>
       </div>
     </div>
@@ -901,6 +904,7 @@ function EmptyState() {
 // ── GalleryView ─────────────────────────────────────────────────────────────
 
 export function GalleryView() {
+  const { t } = useTranslation();
   const { gallery, tasks, previewItem, hasMore, loadingMore, loadMore } = useStudio();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -943,7 +947,7 @@ export function GalleryView() {
         </div>
       )}
       {loadingMore && (
-        <div style={{ textAlign: 'center', padding: '16px 0', color: cssVar('textTertiary'), fontSize: 12 }}>加载中...</div>
+        <div style={{ textAlign: 'center', padding: '16px 0', color: cssVar('textTertiary'), fontSize: 12 }}>{t('playground.studio_loading')}</div>
       )}
     </div>
   );

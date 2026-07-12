@@ -174,6 +174,7 @@ function IconArrowLeft() {
 }
 
 function ThemeToggleButton({ style }: { style?: CSSProperties }) {
+  const { t } = useTranslation();
   const [theme, setThemeState] = useState<ThemeName>(() => getStoredTheme());
 
   useEffect(() => {
@@ -201,8 +202,8 @@ function ThemeToggleButton({ style }: { style?: CSSProperties }) {
       style={{ ...s.themeBtn, ...style }}
       className="studio-console-link"
       onClick={toggleTheme}
-      title={theme === 'dark' ? '浅色模式' : '深色模式'}
-      aria-label="切换主题"
+      title={theme === 'dark' ? t('playground.studio_theme_light') : t('playground.studio_theme_dark')}
+      aria-label={t('playground.studio_toggle_theme')}
     >
       {theme === 'dark' ? (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -239,7 +240,7 @@ export function ProjectSidebar() {
   };
 
   const handleDelete = async (id: number, name: string) => {
-    const ok = window.confirm(t('playground.studio_project_delete_confirm', { defaultValue: `删除项目「${name}」？项目内的图片记录会一并移除（原图不受影响）。`, name }));
+    const ok = window.confirm(t('playground.studio_project_delete_confirm', { name }));
     if (!ok) return;
     try { await deleteProject(id); } catch { /* ignore */ }
   };
@@ -247,12 +248,12 @@ export function ProjectSidebar() {
   return (
     <div style={s.sidebar} className="studio-project-sidebar">
       <div style={s.header}>
-        <span style={s.title}>{t('playground.studio_projects', { defaultValue: '项目' })}</span>
+        <span style={s.title}>{t('playground.studio_projects')}</span>
         <button
           type="button"
           style={s.addBtn}
           className="studio-console-link"
-          title={t('playground.studio_project_new', { defaultValue: '新建项目' })}
+          title={t('playground.studio_project_new')}
           onClick={() => void createProject()}
         >
           <IconPlus />
@@ -266,7 +267,7 @@ export function ProjectSidebar() {
           onClick={() => selectProject(0)}
         >
           <IconGallery />
-          <span style={s.itemName}>{t('playground.studio_all_works', { defaultValue: '全部作品' })}</span>
+          <span style={s.itemName}>{t('playground.studio_all_works')}</span>
         </div>
 
         {projects.map(p => {
@@ -300,7 +301,7 @@ export function ProjectSidebar() {
                       <button
                         type="button"
                         style={s.itemAction}
-                        title={t('playground.studio_project_rename', { defaultValue: '重命名' })}
+                        title={t('playground.studio_project_rename')}
                         onClick={e => { e.stopPropagation(); startRename(p.id, p.name); }}
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -310,7 +311,7 @@ export function ProjectSidebar() {
                       <button
                         type="button"
                         style={s.itemAction}
-                        title={t('playground.studio_project_delete', { defaultValue: '删除' })}
+                        title={t('playground.studio_project_delete')}
                         onClick={e => { e.stopPropagation(); void handleDelete(p.id, p.name); }}
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -330,10 +331,10 @@ export function ProjectSidebar() {
           href="/"
           style={s.consoleLink}
           className="studio-console-link"
-          title={t('playground.studio_back_console', { defaultValue: '返回控制台' })}
+          title={t('playground.studio_back_console')}
         >
           <IconArrowLeft />
-          <span style={s.itemName}>{t('playground.studio_back_console', { defaultValue: '返回控制台' })}</span>
+          <span style={s.itemName}>{t('playground.studio_back_console')}</span>
         </a>
         <ThemeToggleButton />
       </div>

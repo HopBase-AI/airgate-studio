@@ -142,7 +142,7 @@ export function ImageToImagePanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_source_image', { defaultValue: '参考图片' })}
+          {t('playground.studio_source_image')}
         </label>
 
         {sourceImage ? (
@@ -152,7 +152,7 @@ export function ImageToImagePanel() {
               type="button"
               style={local.removeBtn}
               onClick={() => setSourceImage(null)}
-              title={t('playground.studio_remove_image', { defaultValue: '移除图片' })}
+              title={t('playground.studio_remove_image')}
             >
               ×
             </button>
@@ -175,7 +175,7 @@ export function ImageToImagePanel() {
               <path d="M21 15l-5-5L5 21" />
             </svg>
             <span>
-              {t('playground.studio_upload_hint', { defaultValue: '点击上传或拖拽图片到此处' })}
+              {t('playground.studio_upload_hint')}
             </span>
           </div>
         )}
@@ -191,21 +191,21 @@ export function ImageToImagePanel() {
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_prompt', { defaultValue: '提示词' })}
+          {t('playground.studio_prompt')}
         </label>
         <textarea
           style={ss.formTextarea}
           className="studio-textarea"
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          placeholder={t('playground.studio_img2img_placeholder', { defaultValue: '描述你想要的变化...' })}
+          placeholder={t('playground.studio_img2img_placeholder')}
           rows={3}
         />
       </div>
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_model', { defaultValue: '模型' })}
+          {t('playground.studio_model')}
         </label>
         {editModelOptions.length === 1 ? (
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
@@ -222,7 +222,7 @@ export function ImageToImagePanel() {
 
       <div style={ss.formRow}>
         <label style={ss.formLabel}>
-          {t('playground.studio_size', { defaultValue: '尺寸' })}
+          {t('playground.studio_size')}
         </label>
         <SizeSelector
           value={imageSize}
@@ -239,8 +239,8 @@ export function ImageToImagePanel() {
         onClick={() => { void generate(prompt, { mode: 'img2img', sourceImage: sourceImage ?? undefined }); }}
       >
         {isGenerating
-          ? t('playground.studio_generating', { defaultValue: '生成中...' })
-          : t('playground.studio_generate', { defaultValue: '生成' })}
+          ? t('playground.studio_generating')
+          : t('playground.studio_generate')}
       </button>
     </div>
   );

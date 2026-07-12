@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, ApiRequestError } from '../api';
 import type { GenerationTask, ImageGroup, Project, ProjectAsset } from '../api';
 import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType } from './types';
@@ -22,6 +23,18 @@ const MODEL_STORE_KEY = 'studio.selectedModelId';
 const DELETED_TASK_STORE_KEY = 'studio.deletedGenerationTaskIds';
 const DELETED_TASK_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const EMPTY_IMAGE_GROUPS: ImageGroup[] = [];
+
+interface PollErrorMessages {
+  failed: string;
+  stopped: (status: string) => string;
+  timeout: string;
+}
+
+const DEFAULT_POLL_ERROR_MESSAGES: PollErrorMessages = {
+  failed: 'Image generation task failed',
+  stopped: status => `Image generation stopped with status: ${status}`,
+  timeout: 'Image generation timed out after waiting too long',
+};
 
 // activeProjectId 哨兵：0 = 「全部」视图（读 host tasks 的历史聚合，含老用户旧图），
 // >=1 = 具体项目（读 studio_assets）。详见 StudioContext 的画廊加载逻辑。
@@ -293,18 +306,22 @@ async function delay(ms: number, signal: AbortSignal): Promise<void> {
 async function createMaskDataUrl(
   sourceUrl: string,
   region: { x: number; y: number; width: number; height: number },
+  errorMessages = {
+    sourceImage: 'Failed to load source image for mask',
+    canvas: 'Cannot create canvas context',
+  },
 ): Promise<string> {
   const img = new window.Image();
   img.src = sourceUrl;
   await new Promise<void>((res, rej) => {
     img.onload = () => res();
-    img.onerror = () => rej(new Error('Failed to load source image for mask'));
+    img.onerror = () => rej(new Error(errorMessages.sourceImage));
   });
   const canvas = document.createElement('canvas');
   canvas.width = img.naturalWidth;
   canvas.height = img.naturalHeight;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Cannot create canvas context');
+  if (!ctx) throw new Error(errorMessages.canvas);
   const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
   const x1 = clamp(Math.round(region.x * canvas.width), 0, canvas.width);
   const y1 = clamp(Math.round(region.y * canvas.height), 0, canvas.height);
@@ -342,6 +359,7 @@ async function pollGenerationTask(
   signal: AbortSignal,
   maxAttempts = POLL_MAX_ATTEMPTS,
   onPoll?: (task: GenerationTask) => void,
+  errorMessages = DEFAULT_POLL_ERROR_MESSAGES,
 ): Promise<GenerationTask> {
   let networkErrors = 0;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -359,19 +377,19 @@ async function pollGenerationTask(
       onPoll?.(task);
       if (task.status === 'completed') return task;
       if (isRemoteTaskFailed(task.status)) {
-        throw new Error(generationTaskError(task));
+        throw new Error(generationTaskError(task, errorMessages.failed));
       }
       if (hasTerminalRemoteError(task)) {
-        throw new Error(generationTaskError(task));
+        throw new Error(generationTaskError(task, errorMessages.failed));
       }
       if (!isRemoteTaskActive(task.status)) {
-        throw new Error(generationTaskError(task, `Image generation stopped with status: ${task.status}`));
+        throw new Error(generationTaskError(task, errorMessages.stopped(task.status)));
       }
     }
     const backoff = networkErrors > 0 ? Math.min(POLL_INTERVAL_MS * 2, 6000) : POLL_INTERVAL_MS;
     await delay(backoff, signal);
   }
-  throw new Error('Image generation timed out after waiting too long');
+  throw new Error(errorMessages.timeout);
 }
 
 async function waitForGenerationTask(
@@ -379,19 +397,20 @@ async function waitForGenerationTask(
   signal: AbortSignal,
   maxAttempts = POLL_MAX_ATTEMPTS,
   onPoll?: (task: GenerationTask) => void,
+  errorMessages = DEFAULT_POLL_ERROR_MESSAGES,
 ): Promise<GenerationTask> {
   onPoll?.(task);
   if (task.status === 'completed') return task;
   if (isRemoteTaskFailed(task.status)) {
-    throw new Error(generationTaskError(task));
+    throw new Error(generationTaskError(task, errorMessages.failed));
   }
   if (hasTerminalRemoteError(task)) {
-    throw new Error(generationTaskError(task));
+    throw new Error(generationTaskError(task, errorMessages.failed));
   }
   if (!isRemoteTaskActive(task.status)) {
-    throw new Error(generationTaskError(task, `Image generation stopped with status: ${task.status}`));
+    throw new Error(generationTaskError(task, errorMessages.stopped(task.status)));
   }
-  return pollGenerationTask(task.id, signal, maxAttempts, onPoll);
+  return pollGenerationTask(task.id, signal, maxAttempts, onPoll, errorMessages);
 }
 
 // ── Context type ──────────────────────────────────────────────────────────────
@@ -479,6 +498,12 @@ export function useStudio(): StudioContextValue {
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function StudioProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
+  const pollErrorMessages = useMemo<PollErrorMessages>(() => ({
+    failed: t('playground.studio_error_generation_failed'),
+    stopped: status => t('playground.studio_error_task_stopped', { status }),
+    timeout: t('playground.studio_error_generation_timeout'),
+  }), [t]);
   // Media type & mode
   const [mediaType, setMediaType] = useState<MediaType>('image');
   const [imageMode, setImageMode] = useState<ImageMode>('text2img');
@@ -684,7 +709,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           prompt: t.prompt,
           mode: operationToImageMode(t.operation ?? 'generate'),
           status: 'failed' as const,
-          error: t.error_message || 'Image generation task failed',
+          error: t.error_message || pollErrorMessages.failed,
           createdAt: t.created_at,
           model: t.model,
           size: t.size,
@@ -717,9 +742,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
       setIsGenerating(true);
       activeCountRef.current = inFlight.length;
+      const noResultImageError = t('playground.studio_error_no_result_image');
+      const recoveryFailedError = t('playground.studio_error_recovery_failed');
       for (const t of inFlight) {
         const taskUiId = `r-${t.id}`;
-        pollGenerationTask(t.id, signal)
+        pollGenerationTask(t.id, signal, POLL_MAX_ATTEMPTS, undefined, pollErrorMessages)
           .then(done => {
             if (signal.aborted) return;
             const items = galleryItemsFromCompletedTask(done, {
@@ -729,7 +756,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             });
             if (items.length === 0) {
               setTasks(prev => prev.map(gt => gt.id === taskUiId
-                ? mergeTaskPatch(gt, { status: 'failed', error: '任务已完成，但没有返回可展示图片' }, [done.id])
+                ? mergeTaskPatch(gt, { status: 'failed', error: noResultImageError }, [done.id])
                 : gt));
               return;
             }
@@ -740,7 +767,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           })
           .catch(err => {
             if (signal.aborted) return;
-            const msg = errorMessageFromUnknown(err, 'Recovery failed');
+            const msg = errorMessageFromUnknown(err, recoveryFailedError);
             setTasks(prev =>
               prev.map(gt =>
                 gt.id === taskUiId
@@ -761,7 +788,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     } catch {
       // task recovery is non-fatal
     }
-  }, []);
+  }, [pollErrorMessages, t]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
@@ -886,7 +913,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             });
             if (items.length === 0) {
               setTasks(prev => prev.map(gt => gt.id === uiTask.id
-                ? mergeTaskPatch(gt, { status: 'failed', error: '任务已完成，但没有返回可展示图片' }, [remote.id])
+                ? mergeTaskPatch(gt, { status: 'failed', error: t('playground.studio_error_no_result_image') }, [remote.id])
                 : gt));
               return;
             }
@@ -896,7 +923,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               : gt));
           } else if (isRemoteTaskFailed(remote.status) || hasTerminalRemoteError(remote)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? mergeTaskPatch(gt, failedTaskPatchFromRemote(remote, 'Task failed'), [remote.id])
+              ? mergeTaskPatch(gt, failedTaskPatchFromRemote(remote, pollErrorMessages.failed), [remote.id])
               : gt));
           } else if (isRemoteTaskActive(remote.status)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
@@ -904,7 +931,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               : gt));
           } else {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? mergeTaskPatch(gt, { status: 'failed', error: generationTaskError(remote, `任务停止：${remote.status}`) }, [remote.id])
+              ? mergeTaskPatch(gt, { status: 'failed', error: generationTaskError(remote, pollErrorMessages.stopped(remote.status)) }, [remote.id])
               : gt));
           }
         } catch (err) {
@@ -914,7 +941,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           }
           if (err instanceof ApiRequestError || isNotFoundError(err)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? mergeTaskPatch(gt, { status: 'failed', error: errorMessageFromUnknown(err, 'Task status check failed') }, [remoteId])
+              ? mergeTaskPatch(gt, { status: 'failed', error: errorMessageFromUnknown(err, t('playground.studio_error_status_check_failed')) }, [remoteId])
               : gt));
           }
         }
@@ -932,7 +959,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', onFocus);
       window.clearInterval(timer);
     };
-  }, [tasks]);
+  }, [pollErrorMessages, t, tasks]);
 
   // ── Generation ────────────────────────────────────────────────────────────
 
@@ -966,7 +993,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       };
 
       if (!imageGroupsLoaded) {
-        failLocalTask('正在加载可用图片分组，请稍后再试。');
+        failLocalTask(t('playground.studio_error_image_groups_loading'));
         return;
       }
 
@@ -976,7 +1003,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           : selectedPlatform === 'openai'
           ? 'OpenAI'
           : selectedPlatform;
-        failLocalTask(`当前没有可用的 ${platformLabel} 图片分组，请先在后台创建分组并绑定可用账号。`);
+        failLocalTask(t('playground.studio_error_no_image_group', { platform: platformLabel }));
         return;
       }
 
@@ -1070,7 +1097,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               remoteTaskIds.push(created.id);
               patchSubtask(sub.id, { remoteTaskId: created.id });
               updateTask({ remoteTaskIds: [...remoteTaskIds] });
-              const completed = await waitForGenerationTask(created, signal);
+              const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, undefined, pollErrorMessages);
               const items = galleryItemsFromCompletedTask(completed, {
                 prompt: sub.prompt,
                 model: selectedModelId,
@@ -1080,7 +1107,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 sourceUrl: batchSources[0],
               }));
               if (items.length === 0) {
-                throw new Error('任务已完成，但没有返回可展示图片');
+                throw new Error(t('playground.studio_error_no_result_image'));
               }
               // 成功一张立即进画廊 + 落项目（不等整组完成）。
               setGallery(prev => [...items, ...prev]);
@@ -1095,9 +1122,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                   return await runSubtask(sub);
                 } catch (err) {
                   if (signal.aborted) {
-                    patchSubtask(sub.id, { status: 'failed', error: 'Generation cancelled' });
+                    patchSubtask(sub.id, { status: 'failed', error: t('playground.studio_error_generation_cancelled') });
                   } else {
-                    const msg = err instanceof Error ? err.message : 'Generation failed';
+                    const msg = errorMessageFromUnknown(err, t('playground.studio_error_generation_failed'));
                     patchSubtask(sub.id, { status: 'failed', error: msg });
                   }
                   throw err;
@@ -1112,7 +1139,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               status: okCount === subtasks.length ? 'completed' : 'failed',
               result: allItems,
               remoteTaskIds: [...remoteTaskIds],
-              error: okCount === 0 ? '本批次全部生成失败' : undefined,
+              error: okCount === 0 ? t('playground.studio_error_batch_all_failed') : undefined,
             });
 
           } else {
@@ -1136,7 +1163,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 : options?.sourceImage
                 ? [options.sourceImage]
                 : referenceImages;
-              if (sources.length === 0 && mode === 'inpaint') throw new Error('Inpaint requires a source image');
+              if (sources.length === 0 && mode === 'inpaint') throw new Error(t('playground.studio_error_inpaint_source_required'));
               if (sources.length > 0) {
                 // 直接透传 source URL（data:、/assets-runtime/、http(s) 都行）。
                 // core 的 normalizeTaskInputAssets 只对 data:image/* 大图落盘，已经是
@@ -1149,7 +1176,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             if (mode === 'inpaint' && options?.maskRegion) {
               // Inpaint is single-source by API contract; use the first reference.
               const sourceUrl = options?.sourceImage ?? referenceImages[0] ?? '';
-              taskData.mask = { type: 'image', role: 'mask', url: await createMaskDataUrl(sourceUrl, options.maskRegion) };
+              taskData.mask = {
+                type: 'image',
+                role: 'mask',
+                url: await createMaskDataUrl(sourceUrl, options.maskRegion, {
+                  sourceImage: t('playground.studio_error_mask_source_load_failed'),
+                  canvas: t('playground.studio_error_mask_canvas_unavailable'),
+                }),
+              };
             }
 
             const created = await api.createGenerationTask(taskData);
@@ -1157,18 +1191,18 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask({ remoteTaskIds: [created.id] });
             const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, (t) => {
               if (isRemoteTaskFailed(t.status) || hasTerminalRemoteError(t)) {
-                updateTask(failedTaskPatchFromRemote(t, 'Task failed'));
+                updateTask(failedTaskPatchFromRemote(t, pollErrorMessages.failed));
                 return;
               }
               if (typeof t.progress === 'number') updateTask({ progress: t.progress, remoteTaskIds: [t.id] });
-            });
+            }, pollErrorMessages);
             if (isRemoteTaskFailed(completed.status) || hasTerminalRemoteError(completed)) {
-              updateTask(failedTaskPatchFromRemote(completed, 'Task failed'));
+              updateTask(failedTaskPatchFromRemote(completed, pollErrorMessages.failed));
               return;
             }
             const images = parseMarkdownImages(completed.result_content || '');
             if (images.length === 0) {
-              updateTask({ status: 'failed', error: '任务已完成，但没有返回可展示图片', remoteTaskIds: [created.id] });
+              updateTask({ status: 'failed', error: t('playground.studio_error_no_result_image'), remoteTaskIds: [created.id] });
               return;
             }
 
@@ -1196,9 +1230,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           }
         } catch (err) {
           if (signal.aborted) {
-            updateTask({ status: 'failed', error: 'Generation cancelled' });
+            updateTask({ status: 'failed', error: t('playground.studio_error_generation_cancelled') });
           } else {
-            const msg = err instanceof Error ? err.message : 'Generation failed';
+            const msg = errorMessageFromUnknown(err, t('playground.studio_error_generation_failed'));
             updateTask({ status: 'failed', error: msg });
           }
         } finally {
@@ -1222,6 +1256,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       selectedModelId,
       selectedGroupId,
       persistActiveProjectAssets,
+      pollErrorMessages,
+      t,
     ],
   );
 
@@ -1254,11 +1290,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       writeDeletedTaskRecords(previousDeletedTaskRecords);
       setTasks(previousTasks);
       setGallery(previousGallery);
-      const msg = errorMessageFromUnknown(err, '删除失败');
+      const msg = errorMessageFromUnknown(err, t('playground.studio_error_delete_failed'));
       setTasks(prev => prev.map(t => t.id === uiId ? { ...t, status: 'failed', error: msg } : t));
       throw err;
     }
-  }, [gallery, tasks]);
+  }, [gallery, t, tasks]);
 
   const deleteGalleryItem = useCallback(async (id: string): Promise<void> => {
     const item = gallery.find(g => g.id === id);
@@ -1393,7 +1429,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               : undefined,
           });
           patchSubtask(sub.id, { remoteTaskId: created.id });
-          const completed = await waitForGenerationTask(created, signal);
+          const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, undefined, pollErrorMessages);
           const items = galleryItemsFromCompletedTask(completed, {
             prompt: sub.prompt,
             model,
@@ -1403,21 +1439,22 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             sourceUrl: sources[0],
           }));
           if (items.length === 0) {
-            throw new Error('任务已完成，但没有返回可展示图片');
+            throw new Error(t('playground.studio_error_no_result_image'));
           }
           setGallery(prev => [...items, ...prev]);
           void persistActiveProjectAssets(items);
           patchSubtask(sub.id, { status: 'completed' });
         } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Generation failed';
-          patchSubtask(sub.id, { status: 'failed', error: signal.aborted ? 'Generation cancelled' : msg });
+          const msg = errorMessageFromUnknown(err, t('playground.studio_error_generation_failed'));
+          patchSubtask(sub.id, { status: 'failed', error: signal.aborted ? t('playground.studio_error_generation_cancelled') : msg });
         }
       }));
       // 重算整组状态
-      setTasks(prev => prev.map(t => {
-        if (t.id !== uiId || !t.subtasks) return t;
-        const stillFailed = t.subtasks.some(s => s.status === 'failed');
-        return { ...t, status: stillFailed ? 'failed' : 'completed', error: stillFailed ? '部分图片仍生成失败' : undefined };
+      const partialFailedMessage = t('playground.studio_error_batch_partial_failed');
+      setTasks(prev => prev.map(taskItem => {
+        if (taskItem.id !== uiId || !taskItem.subtasks) return taskItem;
+        const stillFailed = taskItem.subtasks.some(s => s.status === 'failed');
+        return { ...taskItem, status: stillFailed ? 'failed' : 'completed', error: stillFailed ? partialFailedMessage : undefined };
       }));
       activeCountRef.current -= 1;
       if (activeCountRef.current <= 0) {
@@ -1426,7 +1463,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       }
     };
     void runRetry();
-  }, [tasks, selectedModelId, selectedPlatform, persistActiveProjectAssets]);
+  }, [persistActiveProjectAssets, pollErrorMessages, selectedModelId, selectedPlatform, t, tasks]);
 
   // ── Project CRUD ──────────────────────────────────────────────────────────
 
