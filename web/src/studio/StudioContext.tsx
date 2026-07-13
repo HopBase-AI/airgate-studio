@@ -13,11 +13,14 @@ import { api, ApiRequestError } from '../api';
 import type { GenerationTask, ImageGroup, Project, ProjectAsset } from '../api';
 import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType } from './types';
 import { getModelConfig, getDefaultModel, MODEL_REGISTRY, type ModelConfig } from './modelConfig';
+import { VIDEO_MODEL_REGISTRY, videoModelById, useVideoStrings } from './video/videoConfig';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_ATTEMPTS = 300;
+// 视频远慢于图片（2-10 分钟常态，4K 更久）：放宽到 60 分钟。
+const VIDEO_POLL_MAX_ATTEMPTS = 1800;
 const POLL_TRANSIENT_ERROR_ATTEMPTS = 2;
 const MODEL_STORE_KEY = 'studio.selectedModelId';
 const DELETED_TASK_STORE_KEY = 'studio.deletedGenerationTaskIds';
@@ -456,6 +459,23 @@ export interface StudioContextValue {
   generate: (prompt: string, options?: GenerateOptions) => void;
   cancelGeneration: () => void;
 
+  // Video generation（Seedance；与图像互不影响的独立参数域）
+  videoModelId: string;
+  setVideoModelId: (id: string) => void;
+  videoDuration: number;
+  setVideoDuration: (seconds: number) => void;
+  videoResolution: string;
+  setVideoResolution: (resolution: string) => void;
+  videoRatio: string;
+  setVideoRatio: (ratio: string) => void;
+  videoAudio: boolean;
+  setVideoAudio: (enabled: boolean) => void;
+  videoGroups: ImageGroup[];
+  videoGroupsLoaded: boolean;
+  selectedVideoGroupId: number | null;
+  setSelectedVideoGroupId: (id: number) => void;
+  generateVideo: (prompt: string, options?: { sourceImages?: string[] }) => void;
+
   // Gallery
   gallery: GalleryItem[];
   hasMore: boolean;
@@ -507,6 +527,43 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // Media type & mode
   const [mediaType, setMediaType] = useState<MediaType>('image');
   const [imageMode, setImageMode] = useState<ImageMode>('text2img');
+
+  // ── Video（Seedance）参数域 ────────────────────────────────────────────────
+  const vs = useVideoStrings();
+  const [videoModelId, setVideoModelIdRaw] = useState(VIDEO_MODEL_REGISTRY[0].id);
+  const [videoDuration, setVideoDuration] = useState<number>(5);
+  const [videoResolution, setVideoResolution] = useState('720p');
+  const [videoRatio, setVideoRatio] = useState('16:9');
+  const [videoAudio, setVideoAudio] = useState(false);
+  const [videoGroups, setVideoGroups] = useState<ImageGroup[]>([]);
+  const [videoGroupsLoaded, setVideoGroupsLoaded] = useState(false);
+  const [selectedVideoGroupId, setSelectedVideoGroupId] = useState<number | null>(null);
+
+  // 换档时收敛分辨率到该档支持范围（fast/mini 无 1080p/4k）。
+  const setVideoModelId = useCallback((id: string) => {
+    setVideoModelIdRaw(id);
+    setVideoResolution(prev => (videoModelById(id).resolutions.includes(prev) ? prev : '720p'));
+  }, []);
+
+  // 切到视频或换模型时拉取可用分组（seedance 平台，不要求图片能力）。
+  useEffect(() => {
+    if (mediaType !== 'video') return;
+    let cancelled = false;
+    setVideoGroupsLoaded(false);
+    api.listImageGroups('seedance', videoModelId, 'video')
+      .then(groups => {
+        if (cancelled) return;
+        setVideoGroups(groups);
+        setVideoGroupsLoaded(true);
+        setSelectedVideoGroupId(prev => (prev != null && groups.some(g => g.id === prev)) ? prev : (groups[0]?.id ?? null));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setVideoGroups([]);
+        setVideoGroupsLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, [mediaType, videoModelId]);
 
   // Model selection (hardcoded registry)
   const [selectedModelId, setSelectedModelIdRaw] = useState(() => getInitialModel().id);
@@ -1261,6 +1318,134 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     ],
   );
 
+  // generateVideo 视频生成（Seedance）：单任务直达 task 系统，
+  // 轮询窗口放宽到 60 分钟；产物是网关签发的中继地址，不落 core 资产库。
+  const generateVideo = useCallback(
+    (prompt: string, options?: { sourceImages?: string[] }) => {
+      if (!prompt.trim()) return;
+      const model = videoModelId;
+      const taskId = uid();
+      const now = new Date().toISOString();
+      const groupId = selectedVideoGroupId ?? undefined;
+      const sources = options?.sourceImages ?? [];
+
+      const task: StudioGenerationTask = {
+        id: taskId,
+        prompt,
+        mode: 'video',
+        status: 'queued',
+        createdAt: now,
+        platform: 'seedance',
+        model,
+        groupId,
+        size: videoResolution,
+        remoteTaskIds: [],
+      };
+      setTasks(prev => [task, ...prev]);
+      activeCountRef.current += 1;
+      setIsGenerating(true);
+
+      const controller = new AbortController();
+      const signal = controller.signal;
+      const updateTask = (patch: Partial<StudioGenerationTask>) => {
+        const patchRemoteIds = uniqueNumbers(patch.remoteTaskIds || []);
+        setTasks(prev => prev.map(item => (
+          item.id === taskId || taskMatchesRemoteIds(item, patchRemoteIds)
+            ? mergeTaskPatch(item, patch, patchRemoteIds)
+            : item
+        )));
+      };
+
+      const runTask = async () => {
+        try {
+          updateTask({ status: 'processing' });
+          if (videoGroupsLoaded && videoGroups.length === 0) {
+            updateTask({ status: 'failed', error: vs('no_group') });
+            return;
+          }
+          const created = await api.createGenerationTask({
+            kind: 'video',
+            operation: 'generate',
+            platform: 'seedance',
+            model,
+            prompt,
+            group_id: groupId,
+            parameters: {
+              duration: videoDuration,
+              resolution: videoResolution,
+              ratio: videoRatio,
+              generate_audio: videoAudio,
+            },
+            inputs: sources.length > 0
+              ? sources.map(url => ({ type: 'image' as const, role: 'reference_image' as const, url }))
+              : undefined,
+          });
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+          updateTask({ remoteTaskIds: [created.id] });
+          const completed = await waitForGenerationTask(created, signal, VIDEO_POLL_MAX_ATTEMPTS, (remote) => {
+            if (isRemoteTaskFailed(remote.status) || hasTerminalRemoteError(remote)) {
+              updateTask(failedTaskPatchFromRemote(remote, pollErrorMessages.failed));
+              return;
+            }
+            if (typeof remote.progress === 'number') updateTask({ progress: remote.progress, remoteTaskIds: [remote.id] });
+          }, pollErrorMessages);
+          if (isRemoteTaskFailed(completed.status) || hasTerminalRemoteError(completed)) {
+            updateTask(failedTaskPatchFromRemote(completed, pollErrorMessages.failed));
+            return;
+          }
+          const videoUrl = completed.video_urls?.[0] || (completed.result_content || '').trim();
+          if (!videoUrl) {
+            updateTask({ status: 'failed', error: vs('no_result'), remoteTaskIds: [created.id] });
+            return;
+          }
+          const item: GalleryItem = {
+            id: uid(),
+            taskId: created.id,
+            url: videoUrl,
+            alt: prompt,
+            prompt,
+            model,
+            mode: 'video',
+            mediaType: 'video',
+            size: videoResolution,
+            createdAt: taskAssetCreatedAt(completed),
+            sourceUrl: sources[0],
+          };
+          setGallery(prev => [item, ...prev]);
+          updateTask({ status: 'completed', result: [item], remoteTaskIds: [created.id] });
+          void persistActiveProjectAssets([item]);
+        } catch (err) {
+          if (signal.aborted) {
+            updateTask({ status: 'failed', error: t('playground.studio_error_generation_cancelled') });
+          } else {
+            updateTask({ status: 'failed', error: errorMessageFromUnknown(err, pollErrorMessages.failed) });
+          }
+        } finally {
+          activeCountRef.current -= 1;
+          if (activeCountRef.current <= 0) {
+            activeCountRef.current = 0;
+            setIsGenerating(false);
+          }
+        }
+      };
+      void runTask();
+    },
+    [
+      videoModelId,
+      videoDuration,
+      videoResolution,
+      videoRatio,
+      videoAudio,
+      videoGroups,
+      videoGroupsLoaded,
+      selectedVideoGroupId,
+      persistActiveProjectAssets,
+      pollErrorMessages,
+      t,
+      vs,
+    ],
+  );
+
   // ── Gallery helpers ───────────────────────────────────────────────────────
 
   const deleteTask = useCallback(async (uiId: string): Promise<void> => {
@@ -1334,12 +1519,22 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [deleteTask, gallery, tasks]);
 
   const useAsReference = useCallback((item: GalleryItem) => {
+    // 视频不能作图像参考。
+    if (item.mediaType === 'video') return;
     // Dedupe-append rather than replace so multiple gallery items accumulate.
     setReferenceImages(prev => prev.includes(item.url) ? prev : [...prev, item.url]);
     setImageMode('img2img');
   }, []);
 
   const regenerate = useCallback((item: GalleryItem) => {
+    if (item.mediaType === 'video' || item.mode === 'video') {
+      setMediaType('video');
+      if (VIDEO_MODEL_REGISTRY.some(m => m.id === item.model)) setVideoModelId(item.model);
+      setTimeout(() => {
+        generateVideo(item.prompt, { sourceImages: item.sourceUrl ? [item.sourceUrl] : undefined });
+      }, 0);
+      return;
+    }
     const mode = item.mode === 'batch' ? 'text2img' : item.mode;
     const sourceImage = item.sourceUrl ?? (mode === 'img2img' || mode === 'inpaint' ? item.url : undefined);
     setSelectedModelId(item.model);
@@ -1354,10 +1549,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         sourceImage,
       });
     }, 0);
-  }, [generate, setSelectedModelId, setImageMode, setImageSize]);
+  }, [generate, generateVideo, setVideoModelId, setSelectedModelId, setImageMode, setImageSize]);
 
   // variations —— 「变体」：同 prompt 出 4 张（gpt-image-2 无固定 seed，自然各异），复用批量路径。
   const variations = useCallback((item: GalleryItem) => {
+    if (item.mediaType === 'video' || item.mode === 'video') {
+      regenerate(item);
+      return;
+    }
     const mode = item.mode === 'batch' ? 'text2img' : item.mode;
     const sourceImage = item.sourceUrl ?? (mode === 'img2img' || mode === 'inpaint' ? item.url : undefined);
     setSelectedModelId(item.model);
@@ -1367,7 +1566,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setTimeout(() => {
       generate(item.prompt, { mode: 'batch', count: 4, sourceImages: sourceImage ? [sourceImage] : undefined });
     }, 0);
-  }, [generate, setSelectedModelId, setImageMode, setImageSize]);
+  }, [generate, regenerate, setSelectedModelId, setImageMode, setImageSize]);
 
   // editRequest —— 「编辑这张」桥接：GalleryCard 调 requestEdit(url)，ComposerBar 监听后
   // 把该图载入主框并打开蒙版编辑器（局部重绘），用完 clearEditRequest 清空。
@@ -1500,6 +1699,21 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setMediaType,
     imageMode,
     setImageMode,
+    videoModelId,
+    setVideoModelId,
+    videoDuration,
+    setVideoDuration,
+    videoResolution,
+    setVideoResolution,
+    videoRatio,
+    setVideoRatio,
+    videoAudio,
+    setVideoAudio,
+    videoGroups,
+    videoGroupsLoaded,
+    selectedVideoGroupId,
+    setSelectedVideoGroupId,
+    generateVideo,
     currentModel,
     selectedModelId,
     setSelectedModelId,

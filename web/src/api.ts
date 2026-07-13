@@ -80,6 +80,7 @@ export interface GenerationTask {
   input_images?: string[];
   input_mask?: string;
   result_content?: string;
+  video_urls?: string[];
   error_message?: string;
   created_at: string;
   updated_at?: string;
@@ -205,10 +206,12 @@ export const api = {
     return request<{ models: ModelInfo[] }>('GET', `/models${suffix}`).then(r => r.models || []);
   },
 
-  // 当前用户在指定平台下可选的图像生成计费分组（最便宜优先）。
-  listImageGroups(platform: string, model?: string): Promise<ImageGroup[]> {
+  // 当前用户在指定平台下可选的生成计费分组（最便宜优先）。
+  // media='video' 时不要求图片能力（视频平台分组，如 seedance）。
+  listImageGroups(platform: string, model?: string, media?: 'image' | 'video'): Promise<ImageGroup[]> {
     const qs = new URLSearchParams({ platform });
     if (model) qs.set('model', model);
+    if (media) qs.set('media', media);
     return request<{ groups: ImageGroup[] }>('GET', `/image-groups?${qs}`).then(r => r.groups || []);
   },
 

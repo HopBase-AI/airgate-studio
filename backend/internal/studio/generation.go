@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -11,6 +12,8 @@ func generationExecutorPluginID(platform string) string {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
 	case "gemini":
 		return "gateway-gemini"
+	case "seedance":
+		return "gateway-seedance"
 	default:
 		return defaultExecutorPluginID
 	}
@@ -20,7 +23,7 @@ func generationExecutorPluginID(platform string) string {
 // 任务的 list/get/delete 都必须限定在这个集合内——tasks.* host 方法允许
 // 跨插件查询，不加限定会把同用户其他插件的任务泄漏进创作中心历史。
 func generationExecutorPluginIDs() []string {
-	return []string{defaultExecutorPluginID, "gateway-gemini"}
+	return []string{defaultExecutorPluginID, "gateway-gemini", "gateway-seedance"}
 }
 
 func isGenerationExecutor(pluginID string) bool {
@@ -34,12 +37,59 @@ func isGenerationExecutor(pluginID string) bool {
 
 // executorSupportsTaskType 校验执行插件是否支持该任务类型。
 // gateway-gemini 当前只实现了文生图（image.edit 会被插件直接 fail），
-// 在创建入口就拦下，给前端明确报错而不是排队后失败。
+// gateway-seedance 只做视频生成；在创建入口就拦下，给前端明确报错而不是排队后失败。
 func executorSupportsTaskType(executorID, taskType string) bool {
-	if executorID == "gateway-gemini" {
+	switch executorID {
+	case "gateway-gemini":
 		return taskType == "image.generate"
+	case "gateway-seedance":
+		return taskType == "video.generate"
+	default:
+		return true
 	}
-	return true
+}
+
+// videoModelResolutions Seedance 各档位允许的分辨率（与插件 registry 桶表一致）。
+// fast / mini 档只有 480p/720p。
+func videoModelResolutions(model string) map[string]struct{} {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if strings.Contains(m, "-fast-") || strings.Contains(m, "-mini-") {
+		return map[string]struct{}{"480p": {}, "720p": {}}
+	}
+	return map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}, "4k": {}}
+}
+
+// validateVideoModelParams 视频任务的参数预校验：分辨率按档位、时长限幅，
+// 在创建入口给前端明确错误，避免排队后才在上游失败。
+func validateVideoModelParams(model string, params map[string]interface{}) error {
+	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
+		normalized := strings.ToLower(strings.TrimSpace(res))
+		if _, allowed := videoModelResolutions(model)[normalized]; !allowed {
+			return fmt.Errorf("模型 %s 不支持分辨率 %s", model, res)
+		}
+	}
+	if v, ok := params["duration"]; ok {
+		if d, ok := toInt(v); ok && (d < 1 || d > 30) {
+			return fmt.Errorf("duration 需在 1-30 秒之间")
+		}
+	}
+	return nil
+}
+
+func toInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	default:
+		return 0, false
+	}
 }
 
 type createGenerationTaskRequest struct {
@@ -233,6 +283,9 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 	if task.Output != nil {
 		if content, ok := task.Output["content"].(string); ok && content != "" {
 			resp["result_content"] = content
+		}
+		if urls := stringSliceFromAny(task.Output["video_urls"]); len(urls) > 0 {
+			resp["video_urls"] = urls
 		}
 		if model, ok := task.Output["model"]; ok {
 			resp["model"] = model

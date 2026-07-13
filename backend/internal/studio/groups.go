@@ -23,6 +23,12 @@ type imageGroup struct {
 
 // hostListImageGroups 列出用户在指定平台/模型下可用于图像生成的分组。
 func hostListImageGroups(ctx context.Context, host sdk.Host, userID int64, platform, model string) ([]imageGroup, error) {
+	return hostListEligibleGroups(ctx, host, userID, platform, model, true)
+}
+
+// hostListEligibleGroups 按转发资格列分组；needsImage 决定是否要求图片能力
+// （视频平台如 seedance 传 false，避免被 image_enabled 类门禁误伤）。
+func hostListEligibleGroups(ctx context.Context, host sdk.Host, userID int64, platform, model string, needsImage bool) ([]imageGroup, error) {
 	platform = strings.TrimSpace(platform)
 	if platform == "" {
 		return nil, fmt.Errorf("platform 不能为空")
@@ -31,7 +37,7 @@ func hostListImageGroups(ctx context.Context, host sdk.Host, userID int64, platf
 		"eligible_only": true,
 		"user_id":       userID,
 		"platform":      platform,
-		"needs_image":   true,
+		"needs_image":   needsImage,
 	}
 	if strings.TrimSpace(model) != "" {
 		payload["model"] = strings.TrimSpace(model)
@@ -56,6 +62,26 @@ func hostListImageGroups(ctx context.Context, host sdk.Host, userID int64, platf
 // 前端返回明确的错误信息。
 func validateGenerationGroup(ctx context.Context, host sdk.Host, userID, groupID int64, platform string) error {
 	return validateGenerationAccess(ctx, host, userID, groupID, platform, "")
+}
+
+// validateVideoGenerationAccess 视频平台的分组资格校验（不要求图片能力）。
+func validateVideoGenerationAccess(ctx context.Context, host sdk.Host, userID, groupID int64, platform, model string) error {
+	groups, err := hostListEligibleGroups(ctx, host, userID, platform, model, false)
+	if err != nil {
+		return fmt.Errorf("查询可用分组失败: %w", err)
+	}
+	if len(groups) == 0 {
+		return fmt.Errorf("当前没有可用的视频生成分组，请先在后台创建 %s 分组并绑定可用账号", displayPlatformName(platform))
+	}
+	if groupID <= 0 {
+		return nil
+	}
+	for _, g := range groups {
+		if g.ID == groupID {
+			return nil
+		}
+	}
+	return fmt.Errorf("分组不可用或无权访问")
 }
 
 // validateGenerationAccess 校验指定平台至少有一个当前用户可用的图片分组；

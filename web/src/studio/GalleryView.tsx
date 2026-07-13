@@ -259,7 +259,7 @@ const batchCardStyles: Record<string, CSSProperties> = {
 
 function TaskCard({ task }: { task: StudioGenerationTask }) {
   const { t } = useTranslation();
-  const { deleteTask, generate, setSelectedModelId, setImageSize, setImageMode, retryBatchFailures, tasks } = useStudio();
+  const { deleteTask, generate, generateVideo, setSelectedModelId, setImageSize, setImageMode, setMediaType, retryBatchFailures, tasks } = useStudio();
   const { copied, copy } = useCopyOnClick(task.prompt);
 
   // 生成反馈：已用时计时（每秒）、队列位置、按尺寸档的 ETA 估算。
@@ -294,10 +294,16 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
   const handleRetry = () => {
     if (!task.prompt) return;
     void deleteTask(task.id).catch(() => {});
+    if (task.mode === 'video') {
+      setMediaType('video');
+      setTimeout(() => generateVideo(task.prompt), 0);
+      return;
+    }
+    const mode = task.mode;
     if (task.model) setSelectedModelId(task.model);
     if (task.size) setImageSize(task.size);
-    setImageMode(task.mode);
-    setTimeout(() => generate(task.prompt, { mode: task.mode }), 0);
+    setImageMode(mode);
+    setTimeout(() => generate(task.prompt, { mode }), 0);
   };
 
   const handleDelete = async () => {
@@ -529,17 +535,28 @@ function GalleryCard({ item, index }: GalleryCardProps) {
       }}
       className="studio-gallery-card"
     >
-      <img
-        src={item.url}
-        srcSet={buildThumbSrcSet(item.url)}
-        sizes="(max-width: 1023px) 50vw, 200px"
-        alt={item.alt || item.prompt}
-        style={aspectRatio !== undefined ? { ...ss.galleryCardImg, aspectRatio: String(aspectRatio) } : ss.galleryCardImg}
-        loading="lazy"
-        decoding="async"
-        fetchPriority="low"
-        onClick={handlePreview}
-      />
+      {item.mediaType === 'video' ? (
+        <video
+          src={item.url}
+          controls
+          playsInline
+          preload="metadata"
+          style={aspectRatio !== undefined ? { ...ss.galleryCardImg, aspectRatio: String(aspectRatio) } : ss.galleryCardImg}
+          onClick={handlePreview}
+        />
+      ) : (
+        <img
+          src={item.url}
+          srcSet={buildThumbSrcSet(item.url)}
+          sizes="(max-width: 1023px) 50vw, 200px"
+          alt={item.alt || item.prompt}
+          style={aspectRatio !== undefined ? { ...ss.galleryCardImg, aspectRatio: String(aspectRatio) } : ss.galleryCardImg}
+          loading="lazy"
+          decoding="async"
+          fetchPriority="low"
+          onClick={handlePreview}
+        />
+      )}
       <div style={ss.galleryCardOverlay}>
         <div style={ss.galleryCardMetaRow}>
           {item.size && (
@@ -607,32 +624,36 @@ function GalleryCard({ item, index }: GalleryCardProps) {
               <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
             </svg>
           </button>
-          <button
-            type="button"
-            style={ss.galleryCardActionBtn}
-            className="studio-gallery-action"
-            onClick={handleUseAsReference}
-            title={t('playground.studio_use_as_reference')}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M16 3h5v5" />
-              <path d="M21 3l-7 7" />
-              <path d="M8 21H3v-5" />
-              <path d="M3 21l7-7" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            style={ss.galleryCardActionBtn}
-            className="studio-gallery-action"
-            onClick={(e) => { e.stopPropagation(); requestEdit(item.url); }}
-            title={t('playground.studio_edit_this')}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-            </svg>
-          </button>
+          {item.mediaType !== 'video' && (
+            <button
+              type="button"
+              style={ss.galleryCardActionBtn}
+              className="studio-gallery-action"
+              onClick={handleUseAsReference}
+              title={t('playground.studio_use_as_reference')}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 3h5v5" />
+                <path d="M21 3l-7 7" />
+                <path d="M8 21H3v-5" />
+                <path d="M3 21l7-7" />
+              </svg>
+            </button>
+          )}
+          {item.mediaType !== 'video' && (
+            <button
+              type="button"
+              style={ss.galleryCardActionBtn}
+              className="studio-gallery-action"
+              onClick={(e) => { e.stopPropagation(); requestEdit(item.url); }}
+              title={t('playground.studio_edit_this')}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
             style={ss.galleryCardActionBtn}
@@ -756,6 +777,31 @@ function PreviewOverlay() {
   const displaySrc = useProgressive
     ? `${previewItem.url}${previewItem.url.includes('?') ? '&' : '?'}w=512`
     : previewItem.url;
+
+  // 视频预览：原生播放器，不套图像的缩放/平移手势。
+  if (previewItem.mediaType === 'video') {
+    return (
+      <div style={ss.previewOverlay} onClick={() => setPreviewItem(null)}>
+        <button
+          type="button"
+          style={ss.previewCloseBtn}
+          className="studio-preview-close"
+          onClick={() => setPreviewItem(null)}
+        >
+          ×
+        </button>
+        <div style={ss.previewStage} onClick={e => e.stopPropagation()}>
+          <video
+            src={previewItem.url}
+            controls
+            autoPlay
+            playsInline
+            style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 12, background: '#000' }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={ss.previewOverlay} onClick={() => setPreviewItem(null)}>

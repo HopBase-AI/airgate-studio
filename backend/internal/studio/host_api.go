@@ -65,13 +65,19 @@ type hostTask struct {
 }
 
 func hostCreateTask(ctx context.Context, host sdk.Host, pluginID, taskType string, userID int64, input map[string]interface{}, attributes map[string]interface{}) (*hostTask, error) {
+	maxAttempts := 3
+	// 视频生成远长于图片：单次 attempt 上限 10 分钟（core taskProcessTimeout），
+	// 插件段内轮询到点会主动让位重排队，放宽 attempts 让长任务能续跑完。
+	if strings.HasPrefix(taskType, "video.") {
+		maxAttempts = 8
+	}
 	payload := map[string]interface{}{
 		"plugin_id":    pluginID,
 		"task_type":    taskType,
 		"user_id":      userID,
 		"input":        input,
 		"priority":     0,
-		"max_attempts": 3,
+		"max_attempts": maxAttempts,
 	}
 	if len(attributes) > 0 {
 		payload["attributes"] = attributes

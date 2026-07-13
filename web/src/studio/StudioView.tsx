@@ -7,6 +7,7 @@ import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
 import { EDIT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
+import { VIDEO_MODEL_REGISTRY, VIDEO_DURATIONS, VIDEO_RATIOS, videoModelById, useVideoStrings } from './video/videoConfig';
 import { ProjectSidebar, ThemeToggleButton } from './ProjectSidebar';
 import { api, type InspirationCatalog, type InspirationItem } from '../api';
 
@@ -981,16 +982,28 @@ const COMPOSER_TEXTAREA_HEIGHT = 112;
 
 function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.MutableRefObject<{ set: (v: string) => void } | null>; onOpenInspiration?: () => void }) {
   const { t } = useTranslation();
+  const vs = useVideoStrings();
   const {
+    mediaType, setMediaType,
     setImageMode,
     currentModel,
     selectedModelId, setSelectedModelId,
     hasImageGroupsForModel, imageGroupsLoaded,
     imageSize, setImageSize,
     generate,
+    generateVideo,
+    videoModelId, setVideoModelId,
+    videoDuration, setVideoDuration,
+    videoResolution, setVideoResolution,
+    videoRatio, setVideoRatio,
+    videoAudio, setVideoAudio,
+    videoGroups, videoGroupsLoaded,
+    selectedVideoGroupId, setSelectedVideoGroupId,
     referenceImages, setReferenceImages,
     editRequest, clearEditRequest,
   } = useStudio();
+
+  const isVideo = mediaType === 'video';
 
   const [prompt, setPrompt] = useState('');
   const [count, setCount] = useState(1);
@@ -1037,7 +1050,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     return filtered;
   }, [baseModelOptions, hasImageGroupsForModel, imageGroupsLoaded]);
   const hasSelectableModel = !imageGroupsLoaded || modelOptions.length > 0;
-  const canSend = prompt.trim().length > 0 && hasSelectableModel;
+  const hasVideoGroup = !videoGroupsLoaded || videoGroups.length > 0;
+  const canSend = prompt.trim().length > 0 && (isVideo ? hasVideoGroup : hasSelectableModel);
 
   useEffect(() => {
     if (!modelOptions.some(m => m.id === selectedModelId) && modelOptions.length > 0) {
@@ -1048,6 +1062,12 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const handleSend = () => {
     const trimmed = prompt.trim();
     if (!trimmed) return;
+
+    if (isVideo) {
+      void generateVideo(trimmed, { sourceImages: hasSource ? allSources : undefined });
+      setPrompt('');
+      return;
+    }
 
     if (isSingleSource && selection) {
       // 局部重绘：单图单次，count 不适用
@@ -1281,7 +1301,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={hasSource
+          placeholder={isVideo
+            ? vs('video_placeholder')
+            : hasSource
             ? (isSingleSource && selection ? t('playground.studio_inpaint_placeholder') : t('playground.studio_img2img_placeholder'))
             : t('playground.studio_quick_placeholder')}
           rows={5}
@@ -1291,47 +1313,114 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       {/* Toolbar row */}
       <div style={c.toolbar}>
         <div style={c.toolbarLeft} className="studio-composer-toolbar-left">
-          <div style={c.modelSelect}>
-            <CustomSelect
-              value={selectedModelId}
-              options={modelOptions.map(m => ({ value: m.id, label: m.name }))}
-              onChange={setSelectedModelId}
-              placeholder={imageGroupsLoaded ? t('playground.studio_no_image_model_available') : t('playground.studio_image_models_loading')}
-              compact
-              minDropdownWidth={420}
-              disabled={!hasSelectableModel}
-            />
-          </div>
-          <div style={c.sizePicker} className="studio-size-picker">
-            <SizeSelector value={imageSize} sizes={currentModel.sizes} onChange={setImageSize} upward compact />
-          </div>
-          {onOpenInspiration && (
+          {/* 媒体切换：图像 / 视频 */}
+          <div style={c.countGroup}>
             <button
               type="button"
-              style={{ ...c.imgUploadBtn, width: 'auto', gap: 4, padding: '0 9px' }}
-              className="studio-gallery-action"
-              onClick={onOpenInspiration}
-              title={t('playground.studio_inspiration_gallery')}
+              style={!isVideo ? c.countBtnActive : c.countBtn}
+              onClick={() => setMediaType('image')}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z" />
-              </svg>
-              <span style={{ fontSize: 11, fontWeight: 500 }}>{t('playground.studio_inspiration_gallery')}</span>
+              {vs('media_image')}
             </button>
-          )}
-          <span style={{ fontSize: 10, color: cssVar('textTertiary'), marginLeft: 2, flexShrink: 0, whiteSpace: 'nowrap' }}>{t('playground.studio_quantity')}</span>
-          <div style={c.countGroup}>
-            {COUNT_OPTIONS.map(n => (
-              <button
-                key={n}
-                type="button"
-                style={count === n ? c.countBtnActive : c.countBtn}
-                onClick={() => setCount(n)}
-              >
-                {n}
-              </button>
-            ))}
+            <button
+              type="button"
+              style={isVideo ? c.countBtnActive : c.countBtn}
+              onClick={() => setMediaType('video')}
+            >
+              {vs('media_video')}
+            </button>
           </div>
+          {isVideo ? (
+            <>
+              <div style={c.modelSelect}>
+                <CustomSelect
+                  value={videoModelId}
+                  options={VIDEO_MODEL_REGISTRY.map(m => ({ value: m.id, label: vs(m.nameKey) }))}
+                  onChange={setVideoModelId}
+                  compact
+                  minDropdownWidth={220}
+                />
+              </div>
+              <CustomSelect
+                value={String(videoDuration)}
+                options={VIDEO_DURATIONS.map(d => ({ value: String(d), label: `${d}${vs('duration_seconds')}` }))}
+                onChange={v => setVideoDuration(Number(v))}
+                compact
+              />
+              <CustomSelect
+                value={videoResolution}
+                options={videoModelById(videoModelId).resolutions.map(r => ({ value: r, label: r }))}
+                onChange={setVideoResolution}
+                compact
+              />
+              <CustomSelect
+                value={videoRatio}
+                options={VIDEO_RATIOS.map(r => ({ value: r, label: r }))}
+                onChange={setVideoRatio}
+                compact
+              />
+              <button
+                type="button"
+                style={videoAudio ? c.countBtnActive : c.countBtn}
+                onClick={() => setVideoAudio(!videoAudio)}
+                title={vs('audio')}
+              >
+                {vs('audio')}
+              </button>
+              {videoGroups.length > 1 && (
+                <CustomSelect
+                  value={selectedVideoGroupId != null ? String(selectedVideoGroupId) : ''}
+                  options={videoGroups.map(g => ({ value: String(g.id), label: g.name }))}
+                  onChange={v => setSelectedVideoGroupId(Number(v))}
+                  compact
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <div style={c.modelSelect}>
+                <CustomSelect
+                  value={selectedModelId}
+                  options={modelOptions.map(m => ({ value: m.id, label: m.name }))}
+                  onChange={setSelectedModelId}
+                  placeholder={imageGroupsLoaded ? t('playground.studio_no_image_model_available') : t('playground.studio_image_models_loading')}
+                  compact
+                  minDropdownWidth={420}
+                  disabled={!hasSelectableModel}
+                />
+              </div>
+              <div style={c.sizePicker} className="studio-size-picker">
+                <SizeSelector value={imageSize} sizes={currentModel.sizes} onChange={setImageSize} upward compact />
+              </div>
+              {onOpenInspiration && (
+                <button
+                  type="button"
+                  style={{ ...c.imgUploadBtn, width: 'auto', gap: 4, padding: '0 9px' }}
+                  className="studio-gallery-action"
+                  onClick={onOpenInspiration}
+                  title={t('playground.studio_inspiration_gallery')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z" />
+                  </svg>
+                  <span style={{ fontSize: 11, fontWeight: 500 }}>{t('playground.studio_inspiration_gallery')}</span>
+                </button>
+              )}
+              <span style={{ fontSize: 10, color: cssVar('textTertiary'), marginLeft: 2, flexShrink: 0, whiteSpace: 'nowrap' }}>{t('playground.studio_quantity')}</span>
+              <div style={c.countGroup}>
+                {COUNT_OPTIONS.map(n => (
+                  <button
+                    key={n}
+                    type="button"
+                    style={count === n ? c.countBtnActive : c.countBtn}
+                    onClick={() => setCount(n)}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
         <button
           type="button"

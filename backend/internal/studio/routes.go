@@ -115,21 +115,39 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model is required"})
 		return
 	}
-	if err := validateImageModelSize(req.Model, req.Parameters); err != nil {
+	isVideo := req.Kind == "video"
+	if isVideo {
+		if err := validateVideoModelParams(req.Model, req.Parameters); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	} else if err := validateImageModelSize(req.Model, req.Parameters); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
 
-	// 先校验该平台确实有当前用户可用的图片分组；显式传 group_id 时再校验该分组。
+	// 先校验该平台确实有当前用户可用的分组；显式传 group_id 时再校验该分组。
 	// core 的 gateway.forward 侧还有专属分组授权兜底，这里用于给前端明确错误。
-	if err := validateGenerationAccess(r.Context(), p.host, userID, req.GroupID, req.Platform, req.Model); err != nil {
+	if isVideo {
+		if err := validateVideoGenerationAccess(r.Context(), p.host, userID, req.GroupID, req.Platform, req.Model); err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
+	} else if err := validateGenerationAccess(r.Context(), p.host, userID, req.GroupID, req.Platform, req.Model); err != nil {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
 	}
 
 	taskType := resolveTaskType(req.Kind, req.Operation)
 	input := buildTaskInput(req)
+	if isVideo {
+		// 视频执行器要把相对地址的参考图（/assets-runtime/...）暴露给上游拉取，
+		// 需要本站对外基地址；从反代注入的 X-Forwarded-* 推断。
+		if base := publicBaseFromRequest(r); base != "" {
+			input["public_base"] = base
+		}
+	}
 	attributes := buildTaskAttributes(req)
 	executorID := generationExecutorPluginID(req.Platform)
 	if !executorSupportsTaskType(executorID, taskType) {
@@ -232,8 +250,22 @@ func (p *StudioPlugin) handleListModels(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"models": models})
 }
 
-// handleListImageGroups 返回当前用户在指定平台下可选的图像生成计费分组，
+// publicBaseFromRequest 由反代注入的 X-Forwarded-Proto/Host 推断本站对外基地址。
+func publicBaseFromRequest(r *http.Request) string {
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		return ""
+	}
+	proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+	if proto == "" {
+		proto = "https"
+	}
+	return proto + "://" + host
+}
+
+// handleListImageGroups 返回当前用户在指定平台下可选的生成计费分组，
 // 已按有效倍率最便宜优先排序（与不指定分组时的自动选组顺序一致）。
+// ?media=video 时不要求图片能力（视频平台分组）。
 func (p *StudioPlugin) handleListImageGroups(w http.ResponseWriter, r *http.Request) {
 	platform := r.URL.Query().Get("platform")
 	if strings.TrimSpace(platform) == "" {
@@ -242,7 +274,8 @@ func (p *StudioPlugin) handleListImageGroups(w http.ResponseWriter, r *http.Requ
 	}
 	userID := parseUserIDInt64(r)
 	model := r.URL.Query().Get("model")
-	groups, err := hostListImageGroups(r.Context(), p.host, userID, platform, model)
+	needsImage := r.URL.Query().Get("media") != "video"
+	groups, err := hostListEligibleGroups(r.Context(), p.host, userID, platform, model, needsImage)
 	if err != nil {
 		p.logger.Error("list_image_groups_failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询可用分组失败"})

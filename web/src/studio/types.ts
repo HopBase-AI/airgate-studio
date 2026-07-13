@@ -2,6 +2,9 @@ export type MediaType = 'image' | 'video' | 'music';
 
 export type ImageMode = 'text2img' | 'img2img' | 'inpaint' | 'batch';
 
+// StudioMode 生成任务的工作模式：图像四态 + 视频。
+export type StudioMode = ImageMode | 'video';
+
 export interface GalleryItem {
   id: string;
   taskId?: number; // core task ID for API operations
@@ -10,7 +13,9 @@ export interface GalleryItem {
   alt: string;
   prompt: string;
   model: string;
-  mode: ImageMode;
+  mode: StudioMode;
+  // 渲染介质：缺省按 image 处理（历史数据兼容）。
+  mediaType?: MediaType;
   size?: string;
   createdAt: string;
   sourceUrl?: string; // for img2img/inpaint, the reference image
@@ -30,7 +35,7 @@ export interface BatchSubtask {
 export interface StudioGenerationTask {
   id: string;
   prompt: string;
-  mode: ImageMode;
+  mode: StudioMode;
   status: 'queued' | 'processing' | 'completed' | 'failed';
   progress?: number;
   result?: GalleryItem[];
