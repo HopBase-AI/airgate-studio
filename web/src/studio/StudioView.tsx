@@ -1313,20 +1313,30 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       {/* Toolbar row */}
       <div style={c.toolbar}>
         <div style={c.toolbarLeft} className="studio-composer-toolbar-left">
-          {/* 媒体切换：图像 / 视频 */}
-          <div style={c.countGroup}>
+          {/* 媒体切换：图像 / 视频（分段控件，与选择器同高） */}
+          <div style={c.mediaToggle} role="tablist">
             <button
               type="button"
-              style={!isVideo ? c.countBtnActive : c.countBtn}
+              style={!isVideo ? c.mediaBtnActive : c.mediaBtn}
+              className="studio-media-btn"
               onClick={() => setMediaType('image')}
+              aria-selected={!isVideo}
             >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+              </svg>
               {vs('media_image')}
             </button>
             <button
               type="button"
-              style={isVideo ? c.countBtnActive : c.countBtn}
+              style={isVideo ? c.mediaBtnActive : c.mediaBtn}
+              className="studio-media-btn"
               onClick={() => setMediaType('video')}
+              aria-selected={isVideo}
             >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="2" y="5" width="14" height="14" rx="2" /><path d="M22 8.5l-6 3.5 6 3.5z" />
+              </svg>
               {vs('media_video')}
             </button>
           </div>
@@ -1341,39 +1351,54 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                   minDropdownWidth={220}
                 />
               </div>
-              <CustomSelect
-                value={String(videoDuration)}
-                options={VIDEO_DURATIONS.map(d => ({ value: String(d), label: `${d}${vs('duration_seconds')}` }))}
-                onChange={v => setVideoDuration(Number(v))}
-                compact
-              />
-              <CustomSelect
-                value={videoResolution}
-                options={videoModelById(videoModelId).resolutions.map(r => ({ value: r, label: r }))}
-                onChange={setVideoResolution}
-                compact
-              />
-              <CustomSelect
-                value={videoRatio}
-                options={VIDEO_RATIOS.map(r => ({ value: r, label: r }))}
-                onChange={setVideoRatio}
-                compact
-              />
+              <div style={c.videoOption}>
+                <CustomSelect
+                  value={String(videoDuration)}
+                  options={VIDEO_DURATIONS.map(d => ({ value: String(d), label: `${d}${vs('duration_seconds')}` }))}
+                  onChange={v => setVideoDuration(Number(v))}
+                  compact
+                />
+              </div>
+              <div style={c.videoOption}>
+                <CustomSelect
+                  value={videoResolution}
+                  options={videoModelById(videoModelId).resolutions.map(r => ({ value: r, label: r }))}
+                  onChange={setVideoResolution}
+                  compact
+                />
+              </div>
+              <div style={c.videoOption}>
+                <CustomSelect
+                  value={videoRatio}
+                  options={VIDEO_RATIOS.map(r => ({ value: r, label: r }))}
+                  onChange={setVideoRatio}
+                  compact
+                />
+              </div>
               <button
                 type="button"
-                style={videoAudio ? c.countBtnActive : c.countBtn}
+                style={videoAudio ? c.audioBtnActive : c.audioBtn}
+                className="studio-gallery-action"
                 onClick={() => setVideoAudio(!videoAudio)}
                 title={vs('audio')}
+                aria-pressed={videoAudio}
               >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M11 5 6 9H2v6h4l5 4z" />
+                  <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                  {videoAudio && <path d="M19 5a9 9 0 0 1 0 14" />}
+                </svg>
                 {vs('audio')}
               </button>
               {videoGroups.length > 1 && (
-                <CustomSelect
-                  value={selectedVideoGroupId != null ? String(selectedVideoGroupId) : ''}
-                  options={videoGroups.map(g => ({ value: String(g.id), label: g.name }))}
-                  onChange={v => setSelectedVideoGroupId(Number(v))}
-                  compact
-                />
+                <div style={c.videoOption}>
+                  <CustomSelect
+                    value={selectedVideoGroupId != null ? String(selectedVideoGroupId) : ''}
+                    options={videoGroups.map(g => ({ value: String(g.id), label: g.name }))}
+                    onChange={v => setSelectedVideoGroupId(Number(v))}
+                    compact
+                  />
+                </div>
               )}
             </>
           ) : (
@@ -1406,8 +1431,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                   <span style={{ fontSize: 11, fontWeight: 500 }}>{t('playground.studio_inspiration_gallery')}</span>
                 </button>
               )}
-              <span style={{ fontSize: 10, color: cssVar('textTertiary'), marginLeft: 2, flexShrink: 0, whiteSpace: 'nowrap' }}>{t('playground.studio_quantity')}</span>
-              <div style={c.countGroup}>
+              <div style={c.countGroup} title={t('playground.studio_quantity')}>
                 {COUNT_OPTIONS.map(n => (
                   <button
                     key={n}
@@ -1624,10 +1648,99 @@ const c: Record<string, CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: 6,
+    rowGap: 6,
     flex: 1,
     minWidth: 0,
     flexWrap: 'wrap',
     overflow: 'visible',
+  },
+  // 图像/视频 分段切换（与选择器同高，不随空间被压扁）
+  mediaToggle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 2,
+    padding: 2,
+    background: cssVar('bgDeep'),
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 9,
+    flexShrink: 0,
+  },
+  mediaBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    height: 26,
+    padding: '0 10px',
+    border: 'none',
+    borderRadius: 7,
+    background: 'transparent',
+    color: cssVar('textTertiary'),
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 500,
+    fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    transition: 'all 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  mediaBtnActive: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    height: 26,
+    padding: '0 10px',
+    border: 'none',
+    borderRadius: 7,
+    background: cssVar('bgHover'),
+    color: cssVar('text'),
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 700,
+    fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    boxShadow: '0 1px 4px rgba(0, 0, 0, 0.14)',
+    transition: 'all 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  // 视频参数选择器的包裹（防止被压缩到文字换行）
+  videoOption: {
+    flexShrink: 0,
+  },
+  // 生成音频开关（胶囊态，选中带主题色）
+  audioBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    height: 30,
+    padding: '0 10px',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 8,
+    background: 'transparent',
+    color: cssVar('textSecondary'),
+    cursor: 'pointer',
+    fontSize: 12,
+    fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    transition: 'all 0.18s',
+  },
+  audioBtnActive: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    height: 30,
+    padding: '0 10px',
+    border: `1px solid color-mix(in oklab, ${cssVar('primary')} 40%, transparent)`,
+    borderRadius: 8,
+    background: cssVar('primarySubtle'),
+    color: cssVar('text'),
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 600,
+    fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    transition: 'all 0.18s',
   },
   modelSelect: {
     flex: '1 1 190px',
