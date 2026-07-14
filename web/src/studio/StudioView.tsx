@@ -7,7 +7,8 @@ import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
 import { EDIT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
-import { VIDEO_MODEL_REGISTRY, VIDEO_DURATIONS, VIDEO_RATIOS, videoModelById, useVideoStrings } from './video/videoConfig';
+import { VIDEO_MODEL_REGISTRY, videoModelById, useVideoStrings } from './video/videoConfig';
+import { VideoParamsPopover } from './video/VideoParamsPopover';
 import { ProjectSidebar, ThemeToggleButton } from './ProjectSidebar';
 import { api, type InspirationCatalog, type InspirationItem } from '../api';
 
@@ -1351,45 +1352,18 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                   minDropdownWidth={220}
                 />
               </div>
-              <div style={c.videoOption}>
-                <CustomSelect
-                  value={String(videoDuration)}
-                  options={VIDEO_DURATIONS.map(d => ({ value: String(d), label: `${d}${vs('duration_seconds')}` }))}
-                  onChange={v => setVideoDuration(Number(v))}
-                  compact
-                />
-              </div>
-              <div style={c.videoOption}>
-                <CustomSelect
-                  value={videoResolution}
-                  options={videoModelById(videoModelId).resolutions.map(r => ({ value: r, label: r }))}
-                  onChange={setVideoResolution}
-                  compact
-                />
-              </div>
-              <div style={c.videoOption}>
-                <CustomSelect
-                  value={videoRatio}
-                  options={VIDEO_RATIOS.map(r => ({ value: r, label: r }))}
-                  onChange={setVideoRatio}
-                  compact
-                />
-              </div>
-              <button
-                type="button"
-                style={videoAudio ? c.audioBtnActive : c.audioBtn}
-                className="studio-gallery-action"
-                onClick={() => setVideoAudio(!videoAudio)}
-                title={vs('audio')}
-                aria-pressed={videoAudio}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M11 5 6 9H2v6h4l5 4z" />
-                  <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-                  {videoAudio && <path d="M19 5a9 9 0 0 1 0 14" />}
-                </svg>
-                {vs('audio')}
-              </button>
+              <VideoParamsPopover
+                duration={videoDuration}
+                setDuration={setVideoDuration}
+                resolution={videoResolution}
+                setResolution={setVideoResolution}
+                ratio={videoRatio}
+                setRatio={setVideoRatio}
+                audio={videoAudio}
+                setAudio={setVideoAudio}
+                resolutions={videoModelById(videoModelId).resolutions}
+                vs={vs}
+              />
               {videoGroups.length > 1 && (
                 <div style={c.videoOption}>
                   <CustomSelect
