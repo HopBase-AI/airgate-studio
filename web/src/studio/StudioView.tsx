@@ -1351,8 +1351,6 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                   minDropdownWidth={220}
                 />
               </div>
-              {/* 行1=切换+模型,行2=时长/分辨率/画幅/音频/分组 */}
-              <div style={c.rowBreak} />
               <div style={c.videoOption}>
                 <CustomSelect
                   value={String(videoDuration)}
@@ -1641,8 +1639,7 @@ const c: Record<string, CSSProperties> = {
   },
   toolbar: {
     display: 'flex',
-    // 视频模式左侧两行,发送按钮贴齐最后一行;图像模式单行时视觉不变。
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
     padding: '2px 8px 0',
@@ -1705,16 +1702,10 @@ const c: Record<string, CSSProperties> = {
     boxShadow: '0 1px 4px rgba(0, 0, 0, 0.14)',
     transition: 'all 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
   },
-  // 视频参数选择器的包裹（防止被压缩到文字换行）
+  // 视频参数选择器的包裹（防止被压缩到文字换行；不撑开，按内容取宽）
   videoOption: {
     flexShrink: 0,
-    minWidth: 72,
-  },
-  // flex wrap 的强制换行符:视频模式把参数选择器压到第二行,
-  // 避免 6+ 个不可收缩控件在 720px 内随机换行挤压。
-  rowBreak: {
-    flexBasis: '100%',
-    height: 0,
+    minWidth: 64,
   },
   // 生成音频开关（胶囊态，选中带主题色）
   audioBtn: {
@@ -1752,14 +1743,16 @@ const c: Record<string, CSSProperties> = {
     flexShrink: 0,
     transition: 'all 0.18s',
   },
+  // 不撑开（grow=0）：按基准宽度取宽，空间不足时可收缩到 minWidth，
+  // 避免独占整行造成大片空白。基准放到能容下「Seedance 2.0 标准」不截断。
   modelSelect: {
-    flex: '1 1 190px',
-    minWidth: 160,
+    flex: '0 1 218px',
+    minWidth: 150,
     maxWidth: 240,
   },
   sizePicker: {
-    flex: '0 1 170px',
-    minWidth: 132,
+    flex: '0 1 150px',
+    minWidth: 120,
   },
   countGroup: {
     display: 'flex',
