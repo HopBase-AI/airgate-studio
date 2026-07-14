@@ -34,4 +34,14 @@ describe('videoConfig', () => {
       expect(VIDEO_STRINGS.en[model.nameKey]).toBeTruthy();
     }
   });
+
+  it('过期文案与上游 24h 签名口径一致(防回归 30 天)', () => {
+    for (const lang of ['zh', 'en', 'ja', 'zh-HK'] as const) {
+      expect(VIDEO_STRINGS[lang].expire_hint).toContain('24');
+      expect(VIDEO_STRINGS[lang].expire_hint).not.toContain('30');
+      expect(VIDEO_STRINGS[lang].expired_title).toBeTruthy();
+      expect(VIDEO_STRINGS[lang].expired_hint).toBeTruthy();
+      expect(VIDEO_STRINGS[lang].load_failed).toBeTruthy();
+    }
+  });
 });

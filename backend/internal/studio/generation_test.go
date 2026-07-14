@@ -72,6 +72,51 @@ func TestBuildGenerationTaskResponseReturnsInputImages(t *testing.T) {
 	}
 }
 
+func TestBuildGenerationTaskResponseReturnsKindAndDuration(t *testing.T) {
+	video := &hostTask{
+		ID:       21,
+		Status:   "processing",
+		Progress: 35,
+		Input: map[string]interface{}{
+			"prompt":   "a cat surfing",
+			"model":    "dreamina-seedance-2-0-mini-hc",
+			"duration": float64(5), // JSON 反序列化后的数值形态
+		},
+		Attributes: map[string]interface{}{
+			"kind":      "video",
+			"operation": "generate",
+			"size":      "720p",
+		},
+	}
+	resp := buildGenerationTaskResponse(video)
+	if got := resp["kind"]; got != "video" {
+		t.Fatalf("kind = %v, want video", got)
+	}
+	if got := resp["duration"]; got != 5 {
+		t.Fatalf("duration = %v (%T), want 5", got, got)
+	}
+
+	image := &hostTask{
+		ID:     22,
+		Status: "completed",
+		Input: map[string]interface{}{
+			"prompt": "a cat",
+			"model":  "gpt-image-2",
+		},
+		Attributes: map[string]interface{}{
+			"kind":      "image",
+			"operation": "generate",
+		},
+	}
+	imgResp := buildGenerationTaskResponse(image)
+	if got := imgResp["kind"]; got != "image" {
+		t.Fatalf("image kind = %v", got)
+	}
+	if _, ok := imgResp["duration"]; ok {
+		t.Fatalf("image task should not return duration, got %v", imgResp["duration"])
+	}
+}
+
 func TestGenerationExecutorPluginID(t *testing.T) {
 	if got := generationExecutorPluginID("gemini"); got != "gateway-gemini" {
 		t.Fatalf("gemini executor = %q", got)

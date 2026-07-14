@@ -315,6 +315,14 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 	if v, ok := task.Attributes["operation"]; ok && fmt.Sprint(v) != "" {
 		resp["operation"] = v
 	}
+	if v, ok := task.Attributes["kind"]; ok && fmt.Sprint(v) != "" {
+		resp["kind"] = v
+	}
+	if v, ok := task.Input["duration"]; ok {
+		if d, ok2 := toInt(v); ok2 && d > 0 {
+			resp["duration"] = d
+		}
+	}
 	return resp
 }
 

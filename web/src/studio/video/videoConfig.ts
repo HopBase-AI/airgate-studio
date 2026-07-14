@@ -56,7 +56,10 @@ export const VIDEO_STRINGS = {
     no_result: '生成完成但没有可用的视频输出',
     no_group: '当前没有可用的视频生成分组，请联系管理员配置',
     download: '下载视频',
-    expire_hint: '视频链接 30 天内有效，请及时下载保存',
+    expire_hint: '视频链接 24 小时内有效，请及时下载保存',
+    expired_title: '视频链接已过期',
+    expired_hint: '上游链接仅 24 小时有效，可重新生成获取新视频',
+    load_failed: '视频加载失败，链接可能已失效',
   },
   en: {
     media_image: 'Image',
@@ -74,7 +77,10 @@ export const VIDEO_STRINGS = {
     no_result: 'Task completed but returned no video output',
     no_group: 'No video generation group available. Please contact the administrator.',
     download: 'Download video',
-    expire_hint: 'Video links stay valid for 30 days — download to keep.',
+    expire_hint: 'Video links stay valid for 24 hours — download to keep.',
+    expired_title: 'Video link expired',
+    expired_hint: 'Upstream links last 24 hours — regenerate to get a fresh one.',
+    load_failed: 'Video failed to load — the link may have expired.',
   },
   ja: {
     media_image: '画像',
@@ -92,7 +98,10 @@ export const VIDEO_STRINGS = {
     no_result: 'タスクは完了しましたが動画出力がありません',
     no_group: '利用可能な動画生成グループがありません。管理者にお問い合わせください。',
     download: '動画をダウンロード',
-    expire_hint: '動画リンクの有効期間は 30 日です。お早めに保存してください。',
+    expire_hint: '動画リンクの有効期間は 24 時間です。お早めに保存してください。',
+    expired_title: '動画リンクの期限が切れました',
+    expired_hint: 'リンクの有効期間は 24 時間です。再生成で新しい動画を取得できます。',
+    load_failed: '動画を読み込めません。リンクが失効している可能性があります。',
   },
   'zh-HK': {
     media_image: '圖像',
@@ -110,7 +119,10 @@ export const VIDEO_STRINGS = {
     no_result: '生成完成但沒有可用的影片輸出',
     no_group: '目前沒有可用的影片生成分組，請聯絡管理員配置',
     download: '下載影片',
-    expire_hint: '影片連結 30 天內有效，請及時下載保存',
+    expire_hint: '影片連結 24 小時內有效，請及時下載保存',
+    expired_title: '影片連結已過期',
+    expired_hint: '上游連結僅 24 小時有效，可重新生成獲取新影片',
+    load_failed: '影片載入失敗，連結可能已失效',
   },
 } as const;
 

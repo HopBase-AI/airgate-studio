@@ -5,6 +5,9 @@ import { useStudio } from './StudioContext';
 import type { GalleryItem, StudioGenerationTask } from './types';
 import { studioStyles as ss } from './studioStyles';
 import { downloadImage } from '../utils';
+import { getExpiryNotice, isVideoExpired, VIDEO_URL_TTL_MS } from './expiry';
+import { estimateEtaSeconds, etaDisplayState, formatElapsedCompact, formatEtaLabel } from './etaStats';
+import { useVideoStrings } from './video/videoConfig';
 
 function useNearViewport(rootMargin = '600px', estimatedHeight = 0) {
   const ref = useRef<HTMLDivElement>(null);
@@ -55,40 +58,11 @@ function buildThumbSrcSet(url: string): string | undefined {
   return `${url}${sep}w=256 256w, ${url}${sep}w=512 512w, ${url} 1024w`;
 }
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
 function formatCreatedAt(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   const pad = (n: number): string => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-type Translate = (key: string, options?: Record<string, unknown>) => string;
-
-function formatRemainingTime(t: Translate, ms: number): string {
-  const safeMs = Math.max(0, ms);
-  const days = Math.floor(safeMs / MS_PER_DAY);
-  if (days >= 1) return t('playground.studio_time_days', { count: days });
-  const hours = Math.ceil(safeMs / (60 * 60 * 1000));
-  if (hours >= 1) return t('playground.studio_time_hours', { count: hours });
-  const minutes = Math.max(1, Math.ceil(safeMs / 60000));
-  return t('playground.studio_time_minutes', { count: minutes });
-}
-
-function getExpiryNotice(t: Translate, createdAt: string, retentionDays: number | null): { tone: 'warning' | 'danger'; remainingLabel: string } | null {
-  if (!retentionDays || retentionDays <= 0) return null;
-  const createdAtMs = Date.parse(createdAt);
-  if (!Number.isFinite(createdAtMs)) return null;
-  const expiresAt = createdAtMs + retentionDays * MS_PER_DAY;
-  const remainingMs = expiresAt - Date.now();
-  if (remainingMs <= 0) {
-    return { tone: 'danger', remainingLabel: '' };
-  }
-  if (remainingMs <= MS_PER_DAY) {
-    return { tone: 'warning', remainingLabel: formatRemainingTime(t, remainingMs) };
-  }
-  return null;
 }
 
 // Parse "1024x1024" → 1, "1024x768" → 0.75. Returns undefined if unparseable
@@ -275,7 +249,13 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
   const queuePos = task.status === 'queued'
     ? tasks.filter(x => x.status === 'queued').findIndex(x => x.id === task.id) + 1
     : 0;
-  const etaSeconds = /3840|2160|4k/i.test(task.size || '') ? 40 : /2048|2k/i.test(task.size || '') ? 25 : 15;
+  // ETA 来自同桶历史耗时的中位数(localStorage 滚动统计),无历史时回落静态种子。
+  const etaSeconds = estimateEtaSeconds({
+    mediaType: task.mode === 'video' ? 'video' : 'image',
+    model: task.model,
+    size: task.size,
+    durationSeconds: task.durationSeconds,
+  });
 
   // 批量任务：渲染聚合卡（子任务进度 + 全部重试）。
   const isBatch = !!task.subtasks && task.subtasks.length > 0;
@@ -417,7 +397,16 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
           <div style={{ fontSize: 10, color: cssVar('textTertiary'), fontFamily: cssVar('fontMono') }}>
             {task.status === 'queued' && queuePos > 0
               ? t('playground.studio_queue_position', { pos: queuePos })
-              : t('playground.studio_eta', { elapsed, eta: etaSeconds })}
+              : etaDisplayState(elapsed, etaSeconds) === 'eta'
+                ? t('playground.studio_eta_flex', {
+                    defaultValue: '{{elapsed}} elapsed · ~{{eta}}',
+                    elapsed: formatElapsedCompact(elapsed),
+                    eta: formatEtaLabel(t, etaSeconds),
+                  })
+                : t('playground.studio_eta_overtime', {
+                    defaultValue: '{{elapsed}} elapsed · taking longer than usual',
+                    elapsed: formatElapsedCompact(elapsed),
+                  })}
             {typeof task.progress === 'number' && task.progress > 0 ? ` · ${Math.round(task.progress)}%` : ''}
           </div>
         </>
@@ -468,6 +457,55 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
 const GALLERY_COL_WIDTH = 200;
 const GALLERY_OVERLAY_HEIGHT = 104;
 
+// 过期/加载失败的媒体占位（视频 24h 后上游签名必然失效，不再渲染注定 410 的
+// <video>；图片则只在真实加载失败时兜底）。
+const mediaPlaceholderStyles: Record<string, CSSProperties> = {
+  wrap: {
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    padding: '18px 12px',
+    boxSizing: 'border-box',
+    textAlign: 'center',
+    background: cssVar('bgDeep'),
+    color: cssVar('textTertiary'),
+  },
+  title: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: cssVar('textSecondary'),
+  },
+  hint: {
+    fontSize: 11,
+    lineHeight: 1.5,
+    color: cssVar('textTertiary'),
+  },
+  retryBtn: {
+    marginTop: 4,
+    height: 26,
+    padding: '0 12px',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 8,
+    background: 'transparent',
+    color: cssVar('textSecondary'),
+    cursor: 'pointer',
+    fontSize: 11,
+    fontFamily: 'inherit',
+  },
+};
+
+function MediaPlaceholderIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ opacity: 0.6 }}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
 interface GalleryCardProps {
   item: GalleryItem;
   index: number;
@@ -475,15 +513,32 @@ interface GalleryCardProps {
 
 function GalleryCard({ item, index }: GalleryCardProps) {
   const { t } = useTranslation();
+  const vs = useVideoStrings();
   const { setPreviewItem, deleteGalleryItem, useAsReference, regenerate, requestEdit, generatedAssetRetentionDays } = useStudio();
   const { copied, copy } = useCopyOnClick(item.prompt);
   const aspectRatio = parseAspectRatio(item.size);
   const createdAtLabel = formatCreatedAt(item.createdAt);
-  const expiryNotice = getExpiryNotice(t, item.createdAt, generatedAssetRetentionDays);
+  const expiryNotice = getExpiryNotice(t, item, generatedAssetRetentionDays);
   const estimatedHeight = aspectRatio
     ? Math.round(GALLERY_COL_WIDTH / aspectRatio) + GALLERY_OVERLAY_HEIGHT
     : 0;
   const { ref, near, placeholderHeight } = useNearViewport('800px', estimatedHeight);
+
+  // 视频到点自动翻转为过期占位；媒体加载失败（提前失效/网络问题）由 onError 兜底。
+  const [mediaError, setMediaError] = useState(false);
+  const [expired, setExpired] = useState(() => item.mediaType === 'video' && isVideoExpired(item.createdAt));
+  useEffect(() => {
+    if (item.mediaType !== 'video') return;
+    const createdMs = Date.parse(item.createdAt);
+    if (!Number.isFinite(createdMs)) return;
+    const remaining = createdMs + VIDEO_URL_TTL_MS - Date.now();
+    if (remaining <= 0) {
+      setExpired(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setExpired(true), remaining);
+    return () => window.clearTimeout(timer);
+  }, [item.createdAt, item.mediaType]);
 
   const handleDownload = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -535,7 +590,21 @@ function GalleryCard({ item, index }: GalleryCardProps) {
       }}
       className="studio-gallery-card"
     >
-      {item.mediaType === 'video' ? (
+      {item.mediaType === 'video' && (expired || mediaError) ? (
+        <div style={{ ...mediaPlaceholderStyles.wrap, aspectRatio: '16/9' }}>
+          <MediaPlaceholderIcon />
+          <div style={mediaPlaceholderStyles.title}>{vs(expired ? 'expired_title' : 'load_failed')}</div>
+          <div style={mediaPlaceholderStyles.hint}>{vs('expired_hint')}</div>
+          <button
+            type="button"
+            style={mediaPlaceholderStyles.retryBtn}
+            className="studio-gallery-action"
+            onClick={handleRegenerate}
+          >
+            {t('playground.studio_regenerate')}
+          </button>
+        </div>
+      ) : item.mediaType === 'video' ? (
         <video
           src={item.url}
           controls
@@ -543,7 +612,23 @@ function GalleryCard({ item, index }: GalleryCardProps) {
           preload="metadata"
           style={aspectRatio !== undefined ? { ...ss.galleryCardImg, aspectRatio: String(aspectRatio) } : ss.galleryCardImg}
           onClick={handlePreview}
+          onError={() => setMediaError(true)}
         />
+      ) : mediaError ? (
+        <div style={{ ...mediaPlaceholderStyles.wrap, aspectRatio: aspectRatio !== undefined ? String(aspectRatio) : '1/1' }}>
+          <MediaPlaceholderIcon />
+          <div style={mediaPlaceholderStyles.title}>
+            {t('playground.studio_image_unavailable', { defaultValue: 'Image failed to load — it may have expired' })}
+          </div>
+          <button
+            type="button"
+            style={mediaPlaceholderStyles.retryBtn}
+            className="studio-gallery-action"
+            onClick={handleRegenerate}
+          >
+            {t('playground.studio_regenerate')}
+          </button>
+        </div>
       ) : (
         <img
           src={item.url}
@@ -555,6 +640,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
           decoding="async"
           fetchPriority="low"
           onClick={handlePreview}
+          onError={() => setMediaError(true)}
         />
       )}
       <div style={ss.galleryCardOverlay}>
@@ -576,7 +662,12 @@ function GalleryCard({ item, index }: GalleryCardProps) {
               >
                 {expiryNotice.tone === 'danger'
                 ? t('playground.studio_asset_expired')
-                : t('playground.studio_asset_expiring', { time: expiryNotice.remainingLabel })}
+                : item.mediaType === 'video'
+                  ? t('playground.studio_video_expiring', {
+                      defaultValue: 'Video link expires in {{time}} — download soon',
+                      time: expiryNotice.remainingLabel,
+                    })
+                  : t('playground.studio_asset_expiring', { time: expiryNotice.remainingLabel })}
               </span>
           )}
         </div>
@@ -677,7 +768,12 @@ function GalleryCard({ item, index }: GalleryCardProps) {
 
 function PreviewOverlay() {
   const { t } = useTranslation();
+  const vs = useVideoStrings();
   const { previewItem, setPreviewItem } = useStudio();
+  const [videoError, setVideoError] = useState(false);
+  useEffect(() => {
+    setVideoError(false);
+  }, [previewItem]);
   const [hiResReady, setHiResReady] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -791,13 +887,25 @@ function PreviewOverlay() {
           ×
         </button>
         <div style={ss.previewStage} onClick={e => e.stopPropagation()}>
-          <video
-            src={previewItem.url}
-            controls
-            autoPlay
-            playsInline
-            style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 12, background: '#000' }}
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            {videoError ? (
+              <div style={{ padding: '48px 32px', color: 'rgba(255,255,255,0.85)', fontSize: 14, textAlign: 'center' }}>
+                {vs('load_failed')}
+              </div>
+            ) : (
+              <video
+                src={previewItem.url}
+                controls
+                autoPlay
+                playsInline
+                style={{ maxWidth: '90vw', maxHeight: '82vh', borderRadius: 12, background: '#000' }}
+                onError={() => setVideoError(true)}
+              />
+            )}
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', textAlign: 'center' }}>
+              {vs('expire_hint')}
+            </div>
+          </div>
         </div>
       </div>
     );

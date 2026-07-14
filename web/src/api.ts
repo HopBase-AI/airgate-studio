@@ -75,6 +75,10 @@ export interface GenerationTask {
   prompt: string;
   model?: string;
   operation?: string;
+  // kind/duration 来自任务创建入参(image|video / 视频秒数),恢复链路用来
+  // 还原媒体语义与 ETA 分桶;老后端不回传时缺省。
+  kind?: string;
+  duration?: number;
   size?: string;
   quality?: string;
   input_images?: string[];

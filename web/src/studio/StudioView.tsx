@@ -1351,6 +1351,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                   minDropdownWidth={220}
                 />
               </div>
+              {/* 行1=切换+模型,行2=时长/分辨率/画幅/音频/分组 */}
+              <div style={c.rowBreak} />
               <div style={c.videoOption}>
                 <CustomSelect
                   value={String(videoDuration)}
@@ -1639,7 +1641,8 @@ const c: Record<string, CSSProperties> = {
   },
   toolbar: {
     display: 'flex',
-    alignItems: 'center',
+    // 视频模式左侧两行,发送按钮贴齐最后一行;图像模式单行时视觉不变。
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: 8,
     padding: '2px 8px 0',
@@ -1705,6 +1708,13 @@ const c: Record<string, CSSProperties> = {
   // 视频参数选择器的包裹（防止被压缩到文字换行）
   videoOption: {
     flexShrink: 0,
+    minWidth: 72,
+  },
+  // flex wrap 的强制换行符:视频模式把参数选择器压到第二行,
+  // 避免 6+ 个不可收缩控件在 720px 内随机换行挤压。
+  rowBreak: {
+    flexBasis: '100%',
+    height: 0,
   },
   // 生成音频开关（胶囊态，选中带主题色）
   audioBtn: {

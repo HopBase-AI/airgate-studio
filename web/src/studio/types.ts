@@ -45,6 +45,8 @@ export interface StudioGenerationTask {
   platform?: string;
   model?: string;
   size?: string;
+  // 视频时长(秒),ETA 估算分桶用;图片任务缺省。
+  durationSeconds?: number;
   // 本次任务绑定的计费分组（用户在分组选择器里选的；重试沿用，避免切组后错扣）。
   groupId?: number;
   // 批量专用：子任务状态 + 重试所需的执行上下文（不依赖当前 UI state，

@@ -11,9 +11,10 @@ import {
 import { useTranslation } from 'react-i18next';
 import { api, ApiRequestError } from '../api';
 import type { GenerationTask, ImageGroup, Project, ProjectAsset } from '../api';
-import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType } from './types';
+import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType, StudioMode } from './types';
 import { getModelConfig, getDefaultModel, MODEL_REGISTRY, type ModelConfig } from './modelConfig';
 import { VIDEO_MODEL_REGISTRY, videoModelById, useVideoStrings } from './video/videoConfig';
+import { recordRemoteTaskSample } from './etaStats';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,21 @@ function operationToImageMode(operation: string): ImageMode {
   return 'text2img';
 }
 
+// remoteTaskMediaType 判定 host task 的媒体类型:优先后端 DTO 的 kind,其次
+// 产物字段,最后按视频模型/分辨率形态启发(兼容插件后端未升级的窗口期,
+// 那时 kind 字段还没回传)。
+function remoteTaskMediaType(t: GenerationTask): 'video' | 'image' {
+  if (t.kind === 'video') return 'video';
+  if ((t.video_urls?.length ?? 0) > 0) return 'video';
+  if (t.model && VIDEO_MODEL_REGISTRY.some(m => m.id === t.model)) return 'video';
+  if (t.size && /^(\d{3,4}p|4k)$/i.test(t.size)) return 'video';
+  return 'image';
+}
+
+function remoteTaskMode(t: GenerationTask): StudioMode {
+  return remoteTaskMediaType(t) === 'video' ? 'video' : operationToImageMode(t.operation ?? 'generate');
+}
+
 function modeToOperation(mode: ImageMode): 'generate' | 'edit' | 'inpaint' {
   if (mode === 'inpaint') return 'inpaint';
   if (mode === 'img2img') return 'edit';
@@ -92,6 +108,9 @@ interface GenerateOptions {
 }
 
 // projectAssetToGallery 把后端持久化的项目资产记录映射成画廊条目。
+// mediaType 从已落库的 mode 推导('video' 自视频上线起就在写),不需要给
+// studio_assets 加列;若未来同一媒体类型出现多种 mode(如 img2vid/vid2vid
+// 细分),再迁移为独立 media_type 列。
 function projectAssetToGallery(a: ProjectAsset): GalleryItem {
   return {
     id: `a-${a.id}`,
@@ -100,7 +119,8 @@ function projectAssetToGallery(a: ProjectAsset): GalleryItem {
     alt: a.prompt || '',
     prompt: a.prompt || '',
     model: a.model || '',
-    mode: (a.mode as ImageMode) || 'text2img',
+    mode: (a.mode as StudioMode) || 'text2img',
+    mediaType: a.mode === 'video' ? 'video' : 'image',
     size: a.size || undefined,
     createdAt: a.created_at,
     assetId: a.id,
@@ -274,6 +294,24 @@ function galleryItemsFromCompletedTask(
   task: GenerationTask,
   fallback: Pick<GalleryItem, 'prompt' | 'model' | 'mode'>,
 ): GalleryItem[] {
+  // 视频任务:产物是单条视频 URL(中继地址),不走 markdown 图片解析。
+  if (remoteTaskMediaType(task) === 'video') {
+    const url = task.video_urls?.[0] || (task.result_content || '').trim();
+    if (!url) return [];
+    return [{
+      id: uid(),
+      taskId: task.id,
+      url,
+      alt: task.prompt || fallback.prompt,
+      prompt: task.prompt || fallback.prompt,
+      model: task.model ?? fallback.model,
+      mode: 'video',
+      mediaType: 'video',
+      size: taskSize(task),
+      createdAt: taskAssetCreatedAt(task),
+      sourceUrl: taskSourceUrl(task),
+    }];
+  }
   return parseMarkdownImages(task.result_content || '').map(img => ({
     id: uid(),
     taskId: task.id,
@@ -719,7 +757,27 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   function tasksToGallery(taskList: GenerationTask[]): GalleryItem[] {
     const items: GalleryItem[] = [];
     for (const t of taskList) {
-      if (t.status !== 'completed' || !t.result_content) continue;
+      if (t.status !== 'completed') continue;
+      // 视频任务:产物是视频 URL,单独成卡(修复「全部」视图里历史视频消失)。
+      if (remoteTaskMediaType(t) === 'video') {
+        const url = t.video_urls?.[0] || (t.result_content || '').trim();
+        if (!url) continue;
+        items.push({
+          id: uid(),
+          taskId: t.id,
+          url,
+          alt: t.prompt,
+          prompt: t.prompt,
+          model: t.model ?? '',
+          mode: 'video',
+          mediaType: 'video',
+          size: taskSize(t),
+          createdAt: taskAssetCreatedAt(t),
+          sourceUrl: taskSourceUrl(t),
+        });
+        continue;
+      }
+      if (!t.result_content) continue;
       for (const img of parseMarkdownImages(t.result_content)) {
         items.push({
           id: uid(),
@@ -764,22 +822,24 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         ...failed.map(t => ({
           id: `r-${t.id}`,
           prompt: t.prompt,
-          mode: operationToImageMode(t.operation ?? 'generate'),
+          mode: remoteTaskMode(t),
           status: 'failed' as const,
           error: t.error_message || pollErrorMessages.failed,
           createdAt: t.created_at,
           model: t.model,
           size: t.size,
+          durationSeconds: t.duration,
           remoteTaskIds: [t.id],
         })),
         ...inFlight.map(t => ({
           id: `r-${t.id}`,
           prompt: t.prompt,
-          mode: operationToImageMode(t.operation ?? 'generate'),
+          mode: remoteTaskMode(t),
           status: 'processing' as const,
           createdAt: t.created_at,
           model: t.model,
           size: t.size,
+          durationSeconds: t.duration,
           remoteTaskIds: [t.id],
         })),
       ];
@@ -800,20 +860,23 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setIsGenerating(true);
       activeCountRef.current = inFlight.length;
       const noResultImageError = t('playground.studio_error_no_result_image');
+      const noResultVideoError = vs('no_result');
       const recoveryFailedError = t('playground.studio_error_recovery_failed');
       for (const t of inFlight) {
         const taskUiId = `r-${t.id}`;
-        pollGenerationTask(t.id, signal, POLL_MAX_ATTEMPTS, undefined, pollErrorMessages)
+        const isVideoTask = remoteTaskMediaType(t) === 'video';
+        pollGenerationTask(t.id, signal, isVideoTask ? VIDEO_POLL_MAX_ATTEMPTS : POLL_MAX_ATTEMPTS, undefined, pollErrorMessages)
           .then(done => {
             if (signal.aborted) return;
+            recordRemoteTaskSample(done);
             const items = galleryItemsFromCompletedTask(done, {
               prompt: t.prompt,
               model: t.model ?? '',
-              mode: operationToImageMode(t.operation ?? 'generate'),
+              mode: remoteTaskMode(t),
             });
             if (items.length === 0) {
               setTasks(prev => prev.map(gt => gt.id === taskUiId
-                ? mergeTaskPatch(gt, { status: 'failed', error: noResultImageError }, [done.id])
+                ? mergeTaskPatch(gt, { status: 'failed', error: isVideoTask ? noResultVideoError : noResultImageError }, [done.id])
                 : gt));
               return;
             }
@@ -845,7 +908,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     } catch {
       // task recovery is non-fatal
     }
-  }, [pollErrorMessages, t]);
+  }, [pollErrorMessages, t, vs]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
@@ -963,6 +1026,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         try {
           const remote = await api.getGenerationTask(remoteId);
           if (remote.status === 'completed') {
+            recordRemoteTaskSample(remote, {
+              mediaType: uiTask.mode === 'video' ? 'video' : 'image',
+              model: uiTask.model,
+              size: uiTask.size,
+              durationSeconds: uiTask.durationSeconds,
+            });
             const items = galleryItemsFromCompletedTask(remote, {
               prompt: uiTask.prompt,
               model: uiTask.model ?? '',
@@ -970,7 +1039,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             });
             if (items.length === 0) {
               setTasks(prev => prev.map(gt => gt.id === uiTask.id
-                ? mergeTaskPatch(gt, { status: 'failed', error: t('playground.studio_error_no_result_image') }, [remote.id])
+                ? mergeTaskPatch(gt, { status: 'failed', error: uiTask.mode === 'video' ? vs('no_result') : t('playground.studio_error_no_result_image') }, [remote.id])
                 : gt));
               return;
             }
@@ -1016,7 +1085,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', onFocus);
       window.clearInterval(timer);
     };
-  }, [pollErrorMessages, t, tasks]);
+  }, [pollErrorMessages, t, tasks, vs]);
 
   // ── Generation ────────────────────────────────────────────────────────────
 
@@ -1155,6 +1224,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               patchSubtask(sub.id, { remoteTaskId: created.id });
               updateTask({ remoteTaskIds: [...remoteTaskIds] });
               const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, undefined, pollErrorMessages);
+              recordRemoteTaskSample(completed, { mediaType: 'image', model: selectedModelId, size: imageSize });
               const items = galleryItemsFromCompletedTask(completed, {
                 prompt: sub.prompt,
                 model: selectedModelId,
@@ -1257,6 +1327,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               updateTask(failedTaskPatchFromRemote(completed, pollErrorMessages.failed));
               return;
             }
+            recordRemoteTaskSample(completed, { mediaType: 'image', model: selectedModelId, size: imageSize });
             const images = parseMarkdownImages(completed.result_content || '');
             if (images.length === 0) {
               updateTask({ status: 'failed', error: t('playground.studio_error_no_result_image'), remoteTaskIds: [created.id] });
@@ -1339,6 +1410,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         model,
         groupId,
         size: videoResolution,
+        durationSeconds: videoDuration,
         remoteTaskIds: [],
       };
       setTasks(prev => [task, ...prev]);
@@ -1393,6 +1465,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask(failedTaskPatchFromRemote(completed, pollErrorMessages.failed));
             return;
           }
+          recordRemoteTaskSample(completed, { mediaType: 'video', model, size: videoResolution, durationSeconds: videoDuration });
           const videoUrl = completed.video_urls?.[0] || (completed.result_content || '').trim();
           if (!videoUrl) {
             updateTask({ status: 'failed', error: vs('no_result'), remoteTaskIds: [created.id] });
