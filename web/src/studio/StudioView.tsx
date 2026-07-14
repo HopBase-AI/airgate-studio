@@ -1314,7 +1314,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       {/* Toolbar row */}
       <div style={c.toolbar}>
         <div style={c.toolbarLeft} className="studio-composer-toolbar-left">
-          {/* 媒体切换：图像 / 视频（分段控件，与选择器同高） */}
+          {/* 媒体切换：图像 / 视频（图标分段控件，省空间；文案进 title/aria-label） */}
           <div style={c.mediaToggle} role="tablist">
             <button
               type="button"
@@ -1322,11 +1322,12 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               className="studio-media-btn"
               onClick={() => setMediaType('image')}
               aria-selected={!isVideo}
+              title={vs('media_image')}
+              aria-label={vs('media_image')}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
               </svg>
-              {vs('media_image')}
             </button>
             <button
               type="button"
@@ -1334,11 +1335,12 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               className="studio-media-btn"
               onClick={() => setMediaType('video')}
               aria-selected={isVideo}
+              title={vs('media_video')}
+              aria-label={vs('media_video')}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <rect x="2" y="5" width="14" height="14" rx="2" /><path d="M22 8.5l-6 3.5 6 3.5z" />
               </svg>
-              {vs('media_video')}
             </button>
           </div>
           {isVideo ? (
@@ -1405,17 +1407,14 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                   <span style={{ fontSize: 11, fontWeight: 500 }}>{t('playground.studio_inspiration_gallery')}</span>
                 </button>
               )}
-              <div style={c.countGroup} title={t('playground.studio_quantity')}>
-                {COUNT_OPTIONS.map(n => (
-                  <button
-                    key={n}
-                    type="button"
-                    style={count === n ? c.countBtnActive : c.countBtn}
-                    onClick={() => setCount(n)}
-                  >
-                    {n}
-                  </button>
-                ))}
+              <div style={c.countSelect} title={t('playground.studio_quantity')}>
+                <CustomSelect
+                  value={String(count)}
+                  options={COUNT_OPTIONS.map(n => ({ value: String(n), label: `×${n}` }))}
+                  onChange={v => setCount(Number(v))}
+                  compact
+                  minDropdownWidth={88}
+                />
               </div>
             </>
           )}
@@ -1642,36 +1641,30 @@ const c: Record<string, CSSProperties> = {
   mediaBtn: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 5,
+    justifyContent: 'center',
+    width: 32,
     height: 26,
-    padding: '0 10px',
+    padding: 0,
     border: 'none',
     borderRadius: 7,
     background: 'transparent',
     color: cssVar('textTertiary'),
     cursor: 'pointer',
-    fontSize: 12,
-    fontWeight: 500,
-    fontFamily: 'inherit',
-    whiteSpace: 'nowrap',
     flexShrink: 0,
     transition: 'all 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
   },
   mediaBtnActive: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 5,
+    justifyContent: 'center',
+    width: 32,
     height: 26,
-    padding: '0 10px',
+    padding: 0,
     border: 'none',
     borderRadius: 7,
     background: cssVar('bgHover'),
     color: cssVar('text'),
     cursor: 'pointer',
-    fontSize: 12,
-    fontWeight: 700,
-    fontFamily: 'inherit',
-    whiteSpace: 'nowrap',
     flexShrink: 0,
     boxShadow: '0 1px 4px rgba(0, 0, 0, 0.14)',
     transition: 'all 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -1728,39 +1721,10 @@ const c: Record<string, CSSProperties> = {
     flex: '0 1 150px',
     minWidth: 120,
   },
-  countGroup: {
-    display: 'flex',
-    gap: 2,
+  // 生成数量：紧凑下拉（×N），替代原 4 连按钮,省一行空间
+  countSelect: {
     flexShrink: 0,
-  },
-  countBtn: {
-    width: 26,
-    height: 26,
-    border: `1px solid ${cssVar('borderSubtle')}`,
-    borderRadius: 6,
-    background: 'transparent',
-    color: cssVar('textSecondary'),
-    cursor: 'pointer',
-    fontSize: 11,
-    fontFamily: 'inherit',
-    fontVariantNumeric: 'tabular-nums',
-    transition: 'all 0.15s',
-    padding: 0,
-  },
-  countBtnActive: {
-    width: 26,
-    height: 26,
-    border: `1px solid color-mix(in oklab, ${cssVar('primary')} 40%, transparent)`,
-    borderRadius: 6,
-    background: cssVar('primarySubtle'),
-    color: cssVar('text'),
-    cursor: 'pointer',
-    fontSize: 11,
-    fontFamily: 'inherit',
-    fontWeight: 700,
-    fontVariantNumeric: 'tabular-nums',
-    transition: 'all 0.15s',
-    padding: 0,
+    width: 68,
   },
   batchHint: {
     fontSize: 11,
