@@ -798,22 +798,29 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const recoverTasks = useCallback(async (signal: AbortSignal) => {
     try {
-      const [
-        { tasks: completedTasks, total: completedTotal },
-        { tasks: recentTasks },
-      ] = await Promise.all([
+      // 历史图(completed)与「进行中/失败卡恢复」(recent)是两件独立的事,却共用一次
+      // 拉取。用 allSettled 让二者解耦:任一请求瞬时抖动都不再把成功那半的结果一起丢掉
+      // (旧代码 Promise.all 只要一条失败,catch 吞掉后历史整片空白且不重试)。
+      const [completedRes, recentRes] = await Promise.allSettled([
         api.listGenerationTasks({ limit: PAGE_SIZE, offset: 0, status: 'completed' }),
         api.listGenerationTasks({ limit: PAGE_SIZE, offset: 0 }),
       ]);
       if (signal.aborted) return;
 
       const deletedTaskRecords = deletedTaskRecordsRef.current;
-      const visibleCompletedTasks = filterDeletedRemoteTasks(completedTasks, deletedTaskRecords);
-      const visibleRecentTasks = filterDeletedRemoteTasks(recentTasks, deletedTaskRecords);
 
-      setGallery(tasksToGallery(visibleCompletedTasks));
-      galleryOffsetRef.current = completedTasks.length;
-      setHasMore(completedTasks.length < completedTotal);
+      // 历史图:completed 请求成功就渲染,与 recent 成败无关。
+      if (completedRes.status === 'fulfilled') {
+        const { tasks: completedTasks, total: completedTotal } = completedRes.value;
+        const visibleCompletedTasks = filterDeletedRemoteTasks(completedTasks, deletedTaskRecords);
+        setGallery(tasksToGallery(visibleCompletedTasks));
+        galleryOffsetRef.current = completedTasks.length;
+        setHasMore(completedTasks.length < completedTotal);
+      }
+
+      // 进行中/失败卡恢复:recent 请求失败就跳过(历史图已独立渲染)。
+      if (recentRes.status !== 'fulfilled') return;
+      const visibleRecentTasks = filterDeletedRemoteTasks(recentRes.value.tasks, deletedTaskRecords);
 
       const failed = visibleRecentTasks.filter(t => isRemoteTaskFailed(t.status) || hasTerminalRemoteError(t));
       const inFlight = visibleRecentTasks.filter(t => isRemoteTaskActive(t.status) && !hasTerminalRemoteError(t));
@@ -985,15 +992,19 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  // 历史恢复只跑一次:recoverTasks 的身份会随 i18n 的 t/vs 变化,effect 会重跑,
+  // 用 ref 兜住只发一次请求。
+  // ⚠️ 不要再用「cleanup 翻 active 标志位」来门控 finally——effect 一旦因 t 变化重跑,
+  // React 会先执行上一次 cleanup 把 active 置 false,而 ref 守卫又拦掉了重跑(不会 arm
+  // 新的 active),于是这唯一一次恢复的 finally 里 setGalleryRecovered 永不执行,
+  // initialLoadComplete 卡在 false,画廊永远停在骨架屏(历史加载不出来的真凶)。
+  // 恢复结束就无条件置位;组件已卸载时 setState 是 no-op,无害。
   useEffect(() => {
-    if (!recoveryPromiseRef.current) {
-      let active = true;
-      const controller = new AbortController();
-      recoveryPromiseRef.current = recoverTasks(controller.signal).finally(() => {
-        if (active) setGalleryRecovered(true);
-      });
-      return () => { active = false; };
-    }
+    if (recoveryPromiseRef.current) return;
+    const controller = new AbortController();
+    recoveryPromiseRef.current = recoverTasks(controller.signal).finally(() => {
+      setGalleryRecovered(true);
+    });
   }, [recoverTasks]);
 
   // 加载项目列表（探测后端是否启用了项目功能）。后端 /projects 在首次访问时会自动
