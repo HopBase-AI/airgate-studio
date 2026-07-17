@@ -117,6 +117,39 @@ func TestBuildGenerationTaskResponseReturnsKindAndDuration(t *testing.T) {
 	}
 }
 
+func TestBuildGenerationTaskResponseReturnsSourceOutputs(t *testing.T) {
+	video := &hostTask{
+		ID:     23,
+		Status: "completed",
+		Input: map[string]interface{}{
+			"prompt": "a cat surfing",
+			"model":  "dreamina-seedance-2-0-mini-hc",
+		},
+		Output: map[string]interface{}{
+			"video_urls":     []interface{}{"https://api.example.com/relay/v0.mp4"},
+			"source_outputs": []interface{}{"https://tos.example.com/official/v0.mp4?sig=x"},
+		},
+		Attributes: map[string]interface{}{"kind": "video", "operation": "generate"},
+	}
+	resp := buildGenerationTaskResponse(video)
+	urls, ok := resp["source_outputs"].([]string)
+	if !ok || len(urls) != 1 || urls[0] != "https://tos.example.com/official/v0.mp4?sig=x" {
+		t.Fatalf("source_outputs = %#v", resp["source_outputs"])
+	}
+
+	// 无 source_outputs 时不应出现该键(老任务兼容)。
+	noSource := &hostTask{
+		ID:     24,
+		Status: "completed",
+		Output: map[string]interface{}{
+			"video_urls": []interface{}{"https://api.example.com/relay/v1.mp4"},
+		},
+	}
+	if _, ok := buildGenerationTaskResponse(noSource)["source_outputs"]; ok {
+		t.Fatal("task without source_outputs should not return the key")
+	}
+}
+
 func TestGenerationExecutorPluginID(t *testing.T) {
 	if got := generationExecutorPluginID("gemini"); got != "gateway-gemini" {
 		t.Fatalf("gemini executor = %q", got)

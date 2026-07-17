@@ -36,7 +36,8 @@ export function medianOf(samples: number[]): number {
 }
 
 // seedEtaSeconds 静态种子:image 沿用旧写死档位;video 按档位基底 × 分辨率 ×
-// 时长系数(mini/720p/5s = 150s 对齐生产实测 ~2.5min)。
+// 时长系数(mini/720p/5s = 150s 对齐生产实测 ~2.5min;10s ≈ ×1.6,15s 档
+// 按同斜率外推 ≈ ×2.2)。未知时长自然落入最近档,不会 map 硬取崩溃。
 export function seedEtaSeconds(p: EtaParams): number {
   if (p.mediaType === 'image') {
     const size = p.size || '';
@@ -48,7 +49,8 @@ export function seedEtaSeconds(p: EtaParams): number {
   const base = model.includes('-mini-') ? 150 : model.includes('-fast-') ? 210 : 330;
   const size = (p.size || '').toLowerCase();
   const resFactor = size === '480p' ? 0.8 : size === '1080p' ? 1.5 : size === '4k' ? 2.5 : 1;
-  const durFactor = (p.durationSeconds ?? 0) > 5 ? 1.6 : 1;
+  const dur = p.durationSeconds ?? 0;
+  const durFactor = dur > 10 ? 2.2 : dur > 5 ? 1.6 : 1;
   return Math.round((base * resFactor * durFactor) / 10) * 10;
 }
 

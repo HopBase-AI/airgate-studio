@@ -545,6 +545,15 @@ function GalleryCard({ item, index }: GalleryCardProps) {
     void downloadImage(item.url, item.alt);
   };
 
+  // 「官方源链接」：新标签页打开上游官方直链（证明视频产自官方上游）。
+  // 与视频同为 24h 过期，过期后隐藏。
+  const handleOpenSource = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!item.sourceVideoUrl) return;
+    window.open(item.sourceVideoUrl, '_blank', 'noopener');
+  };
+  const showSourceLink = item.mediaType === 'video' && !!item.sourceVideoUrl && !expired;
+
   const handleRegenerate = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!await confirm(t('playground.studio_confirm_regenerate'))) return;
@@ -703,6 +712,21 @@ function GalleryCard({ item, index }: GalleryCardProps) {
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
           </button>
+          {showSourceLink && (
+            <button
+              type="button"
+              style={ss.galleryCardActionBtn}
+              className="studio-gallery-action"
+              onClick={handleOpenSource}
+              title={vs('source_link')}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
             style={ss.galleryCardActionBtn}
@@ -902,8 +926,20 @@ function PreviewOverlay() {
                 onError={() => setVideoError(true)}
               />
             )}
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', textAlign: 'center' }}>
-              {vs('expire_hint')}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: 'rgba(255,255,255,0.55)', textAlign: 'center' }}>
+              <span>{vs('expire_hint')}</span>
+              {/* 官方源链接：上游官方直链溯源（与视频同 24h 过期，过期后隐藏） */}
+              {previewItem.sourceVideoUrl && !isVideoExpired(previewItem.createdAt) && (
+                <a
+                  href={previewItem.sourceVideoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'rgba(255,255,255,0.75)', textDecoration: 'underline', whiteSpace: 'nowrap' }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  {vs('source_link')}
+                </a>
+              )}
             </div>
           </div>
         </div>

@@ -85,6 +85,8 @@ export interface GenerationTask {
   input_mask?: string;
   result_content?: string;
   video_urls?: string[];
+  // 官方上游直链(seedance 视频,与中继地址同为 24h 有效),用于「官方源链接」溯源。
+  source_outputs?: string[];
   error_message?: string;
   created_at: string;
   updated_at?: string;
@@ -137,6 +139,8 @@ export interface ProjectAsset {
   model: string;
   mode: string;
   size: string;
+  // 视频官方上游直链(24h 有效);老记录/图片为空串。
+  source_video_url?: string;
   created_at: string;
 }
 
@@ -262,6 +266,7 @@ export const api = {
     model?: string;
     mode?: string;
     size?: string;
+    source_video_url?: string;
   }): Promise<ProjectAsset> {
     return request('POST', `/projects/${projectId}/assets`, asset);
   },

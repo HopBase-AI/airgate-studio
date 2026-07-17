@@ -124,6 +124,7 @@ function projectAssetToGallery(a: ProjectAsset): GalleryItem {
     size: a.size || undefined,
     createdAt: a.created_at,
     assetId: a.id,
+    sourceVideoUrl: a.source_video_url || undefined,
   };
 }
 
@@ -165,6 +166,11 @@ function taskAssetCreatedAt(task: GenerationTask): string {
 
 function taskSourceUrl(task: GenerationTask): string | undefined {
   return task.input_images?.find(url => !!url);
+}
+
+// 视频官方上游直链（与中继同为 24h 过期），取值口径收敛于此，勿在构造点内联。
+function taskSourceVideoUrl(task: GenerationTask): string | undefined {
+  return task.source_outputs?.[0];
 }
 
 function isRemoteTaskActive(status: string): boolean {
@@ -310,6 +316,7 @@ function galleryItemsFromCompletedTask(
       size: taskSize(task),
       createdAt: taskAssetCreatedAt(task),
       sourceUrl: taskSourceUrl(task),
+      sourceVideoUrl: taskSourceVideoUrl(task),
     }];
   }
   return parseMarkdownImages(task.result_content || '').map(img => ({
@@ -774,6 +781,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           size: taskSize(t),
           createdAt: taskAssetCreatedAt(t),
           sourceUrl: taskSourceUrl(t),
+          sourceVideoUrl: taskSourceVideoUrl(t),
         });
         continue;
       }
@@ -985,6 +993,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           model: item.model,
           mode: item.mode,
           size: item.size,
+          // 视频官方直链一并落库,重载会话后 24h 内仍能显示「官方源链接」。
+          source_video_url: item.sourceVideoUrl,
         });
         // 回填 assetId，让删除走项目资产删除而非 host task 删除
         setGallery(prev => prev.map(g => (g.id === item.id ? { ...g, assetId: saved.id } : g)));
@@ -1494,6 +1504,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             size: videoResolution,
             createdAt: taskAssetCreatedAt(completed),
             sourceUrl: sources[0],
+            sourceVideoUrl: taskSourceVideoUrl(completed),
           };
           setGallery(prev => [item, ...prev]);
           updateTask({ status: 'completed', result: [item], remoteTaskIds: [created.id] });

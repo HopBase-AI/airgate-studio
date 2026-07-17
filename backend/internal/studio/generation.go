@@ -287,6 +287,11 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 		if urls := stringSliceFromAny(task.Output["video_urls"]); len(urls) > 0 {
 			resp["video_urls"] = urls
 		}
+		// 官方上游直链（seedance 插件在完结时写入,与视频同为 24h 有效),
+		// 前端用来提供「官方源链接」溯源入口。
+		if urls := stringSliceFromAny(task.Output["source_outputs"]); len(urls) > 0 {
+			resp["source_outputs"] = urls
+		}
 		if model, ok := task.Output["model"]; ok {
 			resp["model"] = model
 		}

@@ -28,7 +28,7 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
   },
 ];
 
-export const VIDEO_DURATIONS = [5, 10] as const;
+export const VIDEO_DURATIONS = [5, 10, 15] as const;
 export const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3'] as const;
 
 export function videoModelById(id: string): VideoModelConfig {
@@ -56,6 +56,7 @@ export const VIDEO_STRINGS = {
     no_result: '生成完成但没有可用的视频输出',
     no_group: '当前没有可用的视频生成分组，请联系管理员配置',
     download: '下载视频',
+    source_link: '官方源链接',
     expire_hint: '视频链接 24 小时内有效，请及时下载保存',
     expired_title: '视频链接已过期',
     expired_hint: '上游链接仅 24 小时有效，可重新生成获取新视频',
@@ -77,6 +78,7 @@ export const VIDEO_STRINGS = {
     no_result: 'Task completed but returned no video output',
     no_group: 'No video generation group available. Please contact the administrator.',
     download: 'Download video',
+    source_link: 'Source URL',
     expire_hint: 'Video links stay valid for 24 hours — download to keep.',
     expired_title: 'Video link expired',
     expired_hint: 'Upstream links last 24 hours — regenerate to get a fresh one.',
@@ -98,6 +100,7 @@ export const VIDEO_STRINGS = {
     no_result: 'タスクは完了しましたが動画出力がありません',
     no_group: '利用可能な動画生成グループがありません。管理者にお問い合わせください。',
     download: '動画をダウンロード',
+    source_link: '生成元リンク',
     expire_hint: '動画リンクの有効期間は 24 時間です。お早めに保存してください。',
     expired_title: '動画リンクの期限が切れました',
     expired_hint: 'リンクの有効期間は 24 時間です。再生成で新しい動画を取得できます。',
@@ -119,6 +122,7 @@ export const VIDEO_STRINGS = {
     no_result: '生成完成但沒有可用的影片輸出',
     no_group: '目前沒有可用的影片生成分組，請聯絡管理員配置',
     download: '下載影片',
+    source_link: '官方源連結',
     expire_hint: '影片連結 24 小時內有效，請及時下載保存',
     expired_title: '影片連結已過期',
     expired_hint: '上游連結僅 24 小時有效，可重新生成獲取新影片',

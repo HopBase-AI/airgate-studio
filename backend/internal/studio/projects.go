@@ -116,12 +116,13 @@ func (p *StudioPlugin) handleAddProjectAsset(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req struct {
-		TaskID int64  `json:"task_id"`
-		URL    string `json:"url"`
-		Prompt string `json:"prompt"`
-		Model  string `json:"model"`
-		Mode   string `json:"mode"`
-		Size   string `json:"size"`
+		TaskID         int64  `json:"task_id"`
+		URL            string `json:"url"`
+		Prompt         string `json:"prompt"`
+		Model          string `json:"model"`
+		Mode           string `json:"mode"`
+		Size           string `json:"size"`
+		SourceVideoURL string `json:"source_video_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -132,12 +133,13 @@ func (p *StudioPlugin) handleAddProjectAsset(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	asset, err := p.svc.AddAsset(r.Context(), userID, projectID, AssetRecord{
-		TaskID: req.TaskID,
-		URL:    req.URL,
-		Prompt: req.Prompt,
-		Model:  req.Model,
-		Mode:   req.Mode,
-		Size:   req.Size,
+		TaskID:         req.TaskID,
+		URL:            req.URL,
+		Prompt:         req.Prompt,
+		Model:          req.Model,
+		Mode:           req.Mode,
+		Size:           req.Size,
+		SourceVideoURL: req.SourceVideoURL,
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {

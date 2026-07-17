@@ -19,6 +19,9 @@ export interface GalleryItem {
   size?: string;
   createdAt: string;
   sourceUrl?: string; // for img2img/inpaint, the reference image
+  // 视频官方上游直链(火山 TOS 签名,取 source_outputs 首个),与视频同为 24h 过期;
+  // 用于「官方源链接」溯源按钮。
+  sourceVideoUrl?: string;
 }
 
 // BatchSubtask —— 批量生成里的单个子任务状态。批量任务把 N 张图聚成一个

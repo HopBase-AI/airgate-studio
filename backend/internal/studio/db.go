@@ -22,16 +22,19 @@ type Project struct {
 // （purpose=generated），task 返回的就是持久 public URL。这里只存该 URL 的引用，
 // 不重复 store —— 重复 store 只会产生副本、保留期还一样。
 type AssetRecord struct {
-	ID        int64     `json:"id"`
-	UserID    int       `json:"user_id"`
-	ProjectID int64     `json:"project_id"`
-	TaskID    int64     `json:"task_id"`
-	URL       string    `json:"url"`
-	Prompt    string    `json:"prompt"`
-	Model     string    `json:"model"`
-	Mode      string    `json:"mode"`
-	Size      string    `json:"size"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        int64  `json:"id"`
+	UserID    int    `json:"user_id"`
+	ProjectID int64  `json:"project_id"`
+	TaskID    int64  `json:"task_id"`
+	URL       string `json:"url"`
+	Prompt    string `json:"prompt"`
+	Model     string `json:"model"`
+	Mode      string `json:"mode"`
+	Size      string `json:"size"`
+	// SourceVideoURL 视频官方上游直链（火山 TOS 签名，与视频同为 24h 过期）。
+	// 仅视频资产写入；前端用它在有效期内展示「官方源链接」溯源按钮。
+	SourceVideoURL string    `json:"source_video_url,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func migrate(db *sql.DB) error {
@@ -60,6 +63,8 @@ func migrate(db *sql.DB) error {
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_studio_assets_project ON studio_assets(project_id, created_at DESC);
+
+		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS source_video_url TEXT NOT NULL DEFAULT '';
 	`)
 	return err
 }
