@@ -468,6 +468,44 @@ export const studioStyles: Record<string, CSSProperties> = {
     display: 'block',
   },
 
+  galleryCardVideo: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    display: 'block',
+  },
+
+  galleryVideoPreview: {
+    position: 'relative',
+    width: '100%',
+    display: 'block',
+    padding: 0,
+    border: 0,
+    overflow: 'hidden',
+    background: '#000',
+    color: '#fff',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  } as CSSProperties,
+
+  galleryVideoPlayBadge: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    width: 42,
+    height: 42,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '50%',
+    border: '1px solid rgba(255, 255, 255, 0.5)',
+    background: 'rgba(0, 0, 0, 0.56)',
+    boxShadow: '0 4px 18px rgba(0, 0, 0, 0.28)',
+    transform: 'translate(-50%, -50%)',
+    transition: 'transform 0.16s ease, background 0.16s ease',
+    pointerEvents: 'none',
+  } as CSSProperties,
+
   galleryCardOverlay: {
     display: 'flex',
     flexDirection: 'column',
@@ -776,6 +814,16 @@ export const studioCSS = `
   .studio-gallery-action:hover {
     background: ${cssVar('bgHover')} !important;
     color: ${cssVar('text')} !important;
+  }
+
+  .studio-gallery-video-preview:hover > span,
+  .studio-gallery-video-preview:focus-visible > span {
+    background: rgba(0, 0, 0, 0.72) !important;
+    transform: translate(-50%, -50%) scale(1.06) !important;
+  }
+  .studio-gallery-video-preview:focus-visible {
+    outline: 2px solid ${cssVar('primary')};
+    outline-offset: -2px;
   }
 
   .studio-source-thumb::after {

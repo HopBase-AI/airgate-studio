@@ -516,6 +516,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
   const vs = useVideoStrings();
   const { setPreviewItem, deleteGalleryItem, useAsReference, regenerate, requestEdit, generatedAssetRetentionDays } = useStudio();
   const { copied, copy } = useCopyOnClick(item.prompt);
+  const { copied: sourceCopied, copy: copySourceLink } = useCopyOnClick(item.sourceVideoUrl);
   const aspectRatio = parseAspectRatio(item.size);
   const createdAtLabel = formatCreatedAt(item.createdAt);
   const expiryNotice = getExpiryNotice(t, item, generatedAssetRetentionDays);
@@ -545,13 +546,8 @@ function GalleryCard({ item, index }: GalleryCardProps) {
     void downloadImage(item.url, item.alt);
   };
 
-  // 「官方源链接」：新标签页打开上游官方直链（证明视频产自官方上游）。
+  // 「官方源链接」只负责复制上游透传地址；下载由相邻的下载按钮处理。
   // 与视频同为 24h 过期，过期后隐藏。
-  const handleOpenSource = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!item.sourceVideoUrl) return;
-    window.open(item.sourceVideoUrl, '_blank', 'noopener');
-  };
   const showSourceLink = item.mediaType === 'video' && !!item.sourceVideoUrl && !expired;
 
   const handleRegenerate = async (e: React.MouseEvent) => {
@@ -614,15 +610,29 @@ function GalleryCard({ item, index }: GalleryCardProps) {
           </button>
         </div>
       ) : item.mediaType === 'video' ? (
-        <video
-          src={item.url}
-          controls
-          playsInline
-          preload="metadata"
-          style={aspectRatio !== undefined ? { ...ss.galleryCardImg, aspectRatio: String(aspectRatio) } : ss.galleryCardImg}
+        <button
+          type="button"
+          style={{ ...ss.galleryVideoPreview, aspectRatio: String(aspectRatio ?? (16 / 9)) }}
+          className="studio-gallery-video-preview"
           onClick={handlePreview}
-          onError={() => setMediaError(true)}
-        />
+          aria-label={vs('preview_video')}
+        >
+          <video
+            src={item.url}
+            muted
+            playsInline
+            preload="metadata"
+            tabIndex={-1}
+            aria-hidden="true"
+            style={ss.galleryCardVideo}
+            onError={() => setMediaError(true)}
+          />
+          <span style={ss.galleryVideoPlayBadge} aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7Z" />
+            </svg>
+          </span>
+        </button>
       ) : mediaError ? (
         <div style={{ ...mediaPlaceholderStyles.wrap, aspectRatio: aspectRatio !== undefined ? String(aspectRatio) : '1/1' }}>
           <MediaPlaceholderIcon />
@@ -717,14 +727,20 @@ function GalleryCard({ item, index }: GalleryCardProps) {
               type="button"
               style={ss.galleryCardActionBtn}
               className="studio-gallery-action"
-              onClick={handleOpenSource}
-              title={vs('source_link')}
+              onClick={copySourceLink}
+              title={vs(sourceCopied ? 'source_copied' : 'copy_source_link')}
+              aria-label={vs(sourceCopied ? 'source_copied' : 'copy_source_link')}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                <polyline points="15 3 21 3 21 9" />
-                <line x1="10" y1="14" x2="21" y2="3" />
-              </svg>
+              {sourceCopied ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="11" height="11" rx="2" />
+                  <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
+                </svg>
+              )}
             </button>
           )}
           <button
@@ -794,6 +810,7 @@ function PreviewOverlay() {
   const { t } = useTranslation();
   const vs = useVideoStrings();
   const { previewItem, setPreviewItem } = useStudio();
+  const { copied: previewSourceCopied, copy: copyPreviewSourceLink } = useCopyOnClick(previewItem?.sourceVideoUrl);
   const [videoError, setVideoError] = useState(false);
   useEffect(() => {
     setVideoError(false);
@@ -928,17 +945,16 @@ function PreviewOverlay() {
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: 'rgba(255,255,255,0.55)', textAlign: 'center' }}>
               <span>{vs('expire_hint')}</span>
-              {/* 官方源链接：上游官方直链溯源（与视频同 24h 过期，过期后隐藏） */}
+              {/* 官方源链接：复制上游透传地址（与视频同 24h 过期，过期后隐藏） */}
               {previewItem.sourceVideoUrl && !isVideoExpired(previewItem.createdAt) && (
-                <a
-                  href={previewItem.sourceVideoUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'rgba(255,255,255,0.75)', textDecoration: 'underline', whiteSpace: 'nowrap' }}
-                  onClick={e => e.stopPropagation()}
+                <button
+                  type="button"
+                  style={{ padding: 0, border: 0, background: 'transparent', color: 'rgba(255,255,255,0.75)', textDecoration: 'underline', whiteSpace: 'nowrap', cursor: 'pointer', font: 'inherit' }}
+                  onClick={copyPreviewSourceLink}
+                  aria-live="polite"
                 >
-                  {vs('source_link')}
-                </a>
+                  {vs(previewSourceCopied ? 'source_copied' : 'copy_source_link')}
+                </button>
               )}
             </div>
           </div>
