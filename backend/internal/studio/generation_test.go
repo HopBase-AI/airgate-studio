@@ -178,6 +178,9 @@ func TestExecutorSupportsTaskType(t *testing.T) {
 	}{
 		{"gateway-gemini", "image.generate", true},
 		{"gateway-gemini", "image.edit", false},
+		{"gateway-seedance", "video.generate", true},
+		{"gateway-seedance", "image.generate", true},
+		{"gateway-seedance", "image.edit", false},
 		{"gateway-openai", "image.generate", true},
 		{"gateway-openai", "image.edit", true},
 	}
@@ -200,6 +203,9 @@ func TestValidateImageModelSize(t *testing.T) {
 		{name: "banana lite rejects 2k", model: "gemini-3.1-flash-lite-image", size: "2048x2048", wantErr: true},
 		{name: "banana 2 rejects 4k", model: "gemini-3.1-flash-image", size: "3840x2160", wantErr: true},
 		{name: "banana 2 chat variant rejects 4k", model: "gemini-3.1-flash-image-c", size: "3840x2160", wantErr: true},
+		{name: "seedream 2k", model: "seedream-5-0-pro", size: "2048x2048"},
+		{name: "seedream 4k", model: "seedream-5-0-pro", size: "4096x4096"},
+		{name: "seedream rejects non-tier size", model: "seedream-5-0-pro", size: "1536x1024", wantErr: true},
 		{name: "unknown model passes through", model: "custom-image-model", size: "2048x2048"},
 		{name: "empty size passes through", model: "gemini-3.1-flash-lite-image", size: ""},
 	}

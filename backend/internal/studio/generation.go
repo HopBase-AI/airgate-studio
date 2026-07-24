@@ -37,13 +37,14 @@ func isGenerationExecutor(pluginID string) bool {
 
 // executorSupportsTaskType 校验执行插件是否支持该任务类型。
 // gateway-gemini 当前只实现了文生图（image.edit 会被插件直接 fail），
-// gateway-seedance 只做视频生成；在创建入口就拦下，给前端明确报错而不是排队后失败。
+// gateway-seedance 支持视频生成与 seedream 文生图（首期不支持编辑/参考图，
+// image.edit 拦下）；在创建入口就拦下，给前端明确报错而不是排队后失败。
 func executorSupportsTaskType(executorID, taskType string) bool {
 	switch executorID {
 	case "gateway-gemini":
 		return taskType == "image.generate"
 	case "gateway-seedance":
-		return taskType == "video.generate"
+		return taskType == "video.generate" || taskType == "image.generate"
 	default:
 		return true
 	}
@@ -159,6 +160,12 @@ var imageModelSupportedSizes = map[string]map[string]struct{}{
 	},
 	"gemini-3.1-flash-lite-image": {
 		"1024x1024": {}, "1536x1024": {}, "1024x1536": {},
+	},
+	// seedream-5-0-pro（gateway-seedance 文生图）按 1K/2K/4K 三档计费，默认 2K。
+	// seedance 插件侧接受 "宽x高" 像素格式，这里沿用本表既有格式，三档各取正方形值，
+	// 与前端 modelConfig.ts 的 SEEDREAM_SIZES 契约一致。
+	"seedream-5-0-pro": {
+		"1024x1024": {}, "2048x2048": {}, "4096x4096": {},
 	},
 }
 
