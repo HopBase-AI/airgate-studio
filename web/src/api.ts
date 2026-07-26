@@ -44,13 +44,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   const resp = await fetch(url, options);
   if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: { message: resp.statusText } }));
+    const err = (await resp.json().catch(() => ({ error: { message: resp.statusText } }))) as {
+      error?: string | { message?: string };
+      message?: string;
+    };
     const detail = typeof err?.error === 'string'
       ? err.error
       : err?.error?.message || err?.message;
     throw new ApiRequestError(resp.status, detail || `HTTP ${resp.status}`);
   }
-  return resp.json();
+  return resp.json() as Promise<T>;
 }
 
 async function requestCore<T>(path: string): Promise<T> {

@@ -532,7 +532,7 @@ export interface StudioContextValue {
   deleteGalleryItem: (id: string) => Promise<void>;
   deleteTask: (uiId: string) => Promise<void>;
   retryBatchFailures: (uiId: string) => void;
-  useAsReference: (item: GalleryItem) => void;
+  applyAsReference: (item: GalleryItem) => void;
   regenerate: (item: GalleryItem) => void;
   variations: (item: GalleryItem) => void;
   // 「编辑这张」：把某张结果图载入主创作框并打开蒙版编辑器（ComposerBar 监听 editRequest）。
@@ -1613,7 +1613,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }
   }, [deleteTask, gallery, tasks]);
 
-  const useAsReference = useCallback((item: GalleryItem) => {
+  const applyAsReference = useCallback((item: GalleryItem) => {
     // 视频不能作图像参考。
     if (item.mediaType === 'video') return;
     // Dedupe-append rather than replace so multiple gallery items accumulate.
@@ -1727,7 +1727,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           const items = galleryItemsFromCompletedTask(completed, {
             prompt: sub.prompt,
             model,
-            mode: 'batch' as ImageMode,
+            mode: 'batch',
           }).map(item => ({
             ...item,
             sourceUrl: sources[0],
@@ -1837,7 +1837,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     deleteGalleryItem,
     deleteTask,
     retryBatchFailures,
-    useAsReference,
+    applyAsReference,
     regenerate,
     variations,
     editRequest,

@@ -57,12 +57,9 @@ export function TextToImagePanel() {
   const handleGenerate = () => {
     const trimmed = prompt.trim();
     if (!trimmed || isGenerating) return;
-    const fireAll = async () => {
-      for (let i = 0; i < count; i++) {
-        generate(trimmed, { mode: 'text2img', count: 1 });
-      }
-    };
-    void fireAll();
+    for (let i = 0; i < count; i++) {
+      void generate(trimmed, { mode: 'text2img', count: 1 });
+    }
   };
 
   return (

@@ -426,13 +426,13 @@ export const studioStyles: Record<string, CSSProperties> = {
     padding: '20px 20px 220px',
     boxSizing: 'border-box',
     background: cssVar('bgElevated'),
-  } as CSSProperties,
+  },
 
   galleryGrid: {
     columns: '200px',
     columnGap: 14,
     width: '100%',
-  } as CSSProperties,
+  },
 
   galleryEmpty: {
     display: 'flex',
@@ -460,7 +460,7 @@ export const studioStyles: Record<string, CSSProperties> = {
     marginBottom: 14,
     breakInside: 'avoid',
     transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-  } as CSSProperties,
+  },
 
   galleryCardImg: {
     width: '100%',
@@ -486,7 +486,7 @@ export const studioStyles: Record<string, CSSProperties> = {
     color: '#fff',
     cursor: 'pointer',
     fontFamily: 'inherit',
-  } as CSSProperties,
+  },
 
   galleryVideoPlayBadge: {
     position: 'absolute',
@@ -504,7 +504,7 @@ export const studioStyles: Record<string, CSSProperties> = {
     transform: 'translate(-50%, -50%)',
     transition: 'transform 0.16s ease, background 0.16s ease',
     pointerEvents: 'none',
-  } as CSSProperties,
+  },
 
   galleryCardOverlay: {
     display: 'flex',
@@ -512,14 +512,14 @@ export const studioStyles: Record<string, CSSProperties> = {
     gap: 7,
     padding: '8px 10px',
     background: cssVar('bgElevated'),
-  } as CSSProperties,
+  },
 
   galleryCardMetaRow: {
     display: 'flex',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: 6,
-  } as CSSProperties,
+  },
 
   galleryCardMetaItem: {
     display: 'inline-flex',
@@ -530,7 +530,7 @@ export const studioStyles: Record<string, CSSProperties> = {
     fontFamily: cssVar('fontMono'),
     whiteSpace: 'nowrap',
     letterSpacing: '0.01em',
-  } as CSSProperties,
+  },
 
   galleryCardExpiryBadge: {
     display: 'inline-flex',
@@ -542,19 +542,19 @@ export const studioStyles: Record<string, CSSProperties> = {
     fontWeight: 600,
     whiteSpace: 'nowrap',
     letterSpacing: '0.01em',
-  } as CSSProperties,
+  },
 
   galleryCardExpiryBadgeWarning: {
     background: cssVar('warningSubtle'),
     color: cssVar('warning'),
     border: `1px solid color-mix(in oklab, ${cssVar('warning')} 22%, transparent)`,
-  } as CSSProperties,
+  },
 
   galleryCardExpiryBadgeDanger: {
     background: cssVar('dangerSubtle'),
     color: cssVar('danger'),
     border: `1px solid color-mix(in oklab, ${cssVar('danger')} 22%, transparent)`,
-  } as CSSProperties,
+  },
 
   galleryCardPrompt: {
     fontSize: 11,

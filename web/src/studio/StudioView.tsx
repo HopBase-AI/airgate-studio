@@ -18,7 +18,7 @@ function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
+    reader.onerror = () => reject(reader.error ?? new Error('file read failed'));
     reader.readAsDataURL(file);
   });
 }
@@ -83,7 +83,7 @@ const me: Record<string, CSSProperties> = {
     background: 'rgba(248,113,113,0.32)',
     boxShadow: '0 0 0 9999px rgba(0,0,0,0.28), inset 0 0 0 1px rgba(255,255,255,0.65), 0 0 18px rgba(248,113,113,0.45)',
     borderRadius: 4, pointerEvents: 'none', boxSizing: 'border-box',
-  } as CSSProperties,
+  },
   actions: {
     display: 'flex', gap: 8,
   },
@@ -446,7 +446,7 @@ const tpl: Record<string, CSSProperties> = {
   grid: {
     columns: '160px',
     columnGap: 10,
-  } as CSSProperties,
+  },
   card: {
     width: '100%',
     textAlign: 'left',
@@ -462,7 +462,7 @@ const tpl: Record<string, CSSProperties> = {
     padding: 0,
     font: 'inherit',
     color: 'inherit',
-  } as CSSProperties,
+  },
   promptCard: {
     width: '100%',
     textAlign: 'left',
@@ -480,7 +480,7 @@ const tpl: Record<string, CSSProperties> = {
     gap: 7,
     font: 'inherit',
     color: 'inherit',
-  } as CSSProperties,
+  },
   thumb: {
     width: '100%',
     height: 110,
