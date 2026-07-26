@@ -174,7 +174,7 @@ export function BatchPanel() {
     setImages(prev => prev.filter(img => img.id !== id));
   }, []);
 
-  const handleGenerate = async () => {
+  const handleGenerate = () => {
     if (!canGenerate) return;
     if (mode === 'multi_prompt') {
       for (const line of promptLines) {

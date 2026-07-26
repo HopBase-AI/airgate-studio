@@ -128,7 +128,7 @@ const taskCardStyles: Record<string, CSSProperties> = {
     breakInside: 'avoid',
     backdropFilter: 'blur(8px)',
     WebkitBackdropFilter: 'blur(8px)',
-  } as CSSProperties,
+  },
   spinner: {
     width: 32,
     height: 32,
@@ -514,7 +514,7 @@ interface GalleryCardProps {
 function GalleryCard({ item, index }: GalleryCardProps) {
   const { t } = useTranslation();
   const vs = useVideoStrings();
-  const { setPreviewItem, deleteGalleryItem, useAsReference, regenerate, requestEdit, generatedAssetRetentionDays } = useStudio();
+  const { setPreviewItem, deleteGalleryItem, applyAsReference, regenerate, requestEdit, generatedAssetRetentionDays } = useStudio();
   const { copied, copy } = useCopyOnClick(item.prompt);
   const { copied: sourceCopied, copy: copySourceLink } = useCopyOnClick(item.sourceVideoUrl);
   const aspectRatio = parseAspectRatio(item.size);
@@ -558,7 +558,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
 
   const handleUseAsReference = (e: React.MouseEvent) => {
     e.stopPropagation();
-    useAsReference(item);
+    applyAsReference(item);
   };
 
   const handleDelete = async (e: React.MouseEvent) => {
