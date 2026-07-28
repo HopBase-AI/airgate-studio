@@ -14,7 +14,7 @@ import { useStudio } from '../StudioContext';
 import { CustomSelect } from '../CustomSelect';
 import { GroupSelector } from '../GroupSelector';
 import { SizeSelector } from '../SizeSelector';
-import { EDIT_MODEL_REGISTRY } from '../modelConfig';
+import { INPAINT_MODEL_REGISTRY } from '../modelConfig';
 import { studioStyles as ss } from '../studioStyles';
 
 interface NormalizedRect {
@@ -166,8 +166,8 @@ export function InpaintPanel() {
   const imgRef = useRef<HTMLImageElement>(null);
 
   const editModelOptions = imageGroupsLoaded
-    ? EDIT_MODEL_REGISTRY.filter(model => hasImageGroupsForModel(model))
-    : EDIT_MODEL_REGISTRY;
+    ? INPAINT_MODEL_REGISTRY.filter(model => hasImageGroupsForModel(model))
+    : INPAINT_MODEL_REGISTRY;
 
   // 当前模型不支持局部重绘（如 gemini/imagen 系）时自动切到首个支持编辑的模型。
   useEffect(() => {

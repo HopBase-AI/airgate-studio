@@ -5,7 +5,7 @@ import { useStudio } from '../StudioContext';
 import { CustomSelect } from '../CustomSelect';
 import { GroupSelector } from '../GroupSelector';
 import { SizeSelector } from '../SizeSelector';
-import { EDIT_MODEL_REGISTRY, MODEL_REGISTRY } from '../modelConfig';
+import { IMG2IMG_MODEL_REGISTRY, MODEL_REGISTRY } from '../modelConfig';
 import { studioStyles as ss } from '../studioStyles';
 
 const local: Record<string, CSSProperties> = {
@@ -142,7 +142,7 @@ export function BatchPanel() {
 
   // 多图片模式走 img2img（image.edit），只有支持编辑的模型可选；
   // 切进该模式时若当前模型不支持则自动换成首个支持编辑的模型。
-  const availableModels = (mode === 'multi_image' ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY)
+  const availableModels = (mode === 'multi_image' ? IMG2IMG_MODEL_REGISTRY : MODEL_REGISTRY)
     .filter(model => !imageGroupsLoaded || hasImageGroupsForModel(model));
   useEffect(() => {
     if (!availableModels.some(m => m.id === selectedModelId) && availableModels.length > 0) {

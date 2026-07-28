@@ -12,9 +12,9 @@ export interface ModelConfig {
   platform: string;
   defaultSize: string;
   sizes: SizeOption[];
-  // 是否支持图生图/局部重绘（image.edit）。gateway-gemini 当前只实现文生图，
-  // Gemini 系模型在编辑类面板中不可选。
-  supportsEdit: boolean;
+  // 图生图只需要参考图；局部重绘还要求上游理解 mask，二者不能共用能力开关。
+  supportsImg2Img: boolean;
+  supportsInpaint: boolean;
 }
 
 // ── Model Registry ─────────────────────────────────────────────────────────
@@ -90,7 +90,8 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     platform: 'openai',
     defaultSize: 'auto',
     sizes: GPT_IMAGE_SIZES,
-    supportsEdit: true,
+    supportsImg2Img: true,
+    supportsInpaint: true,
   },
   {
     id: 'gemini-2.5-flash-image',
@@ -98,7 +99,8 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,
-    supportsEdit: false,
+    supportsImg2Img: true,
+    supportsInpaint: false,
   },
   {
     id: 'gemini-3-pro-image',
@@ -106,7 +108,8 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_ALL_SIZES,
-    supportsEdit: false,
+    supportsImg2Img: true,
+    supportsInpaint: false,
   },
   {
     id: 'gemini-3-pro-image-preview',
@@ -114,7 +117,8 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_ALL_SIZES,
-    supportsEdit: false,
+    supportsImg2Img: true,
+    supportsInpaint: false,
   },
   {
     id: 'gemini-3.1-flash-image',
@@ -122,7 +126,8 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_UP_TO_2K_SIZES,
-    supportsEdit: false,
+    supportsImg2Img: true,
+    supportsInpaint: false,
   },
   {
     id: 'gemini-3.1-flash-image-preview',
@@ -130,7 +135,8 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_UP_TO_2K_SIZES,
-    supportsEdit: false,
+    supportsImg2Img: true,
+    supportsInpaint: false,
   },
   {
     id: 'gemini-3.1-flash-lite-image',
@@ -138,7 +144,8 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,
-    supportsEdit: false,
+    supportsImg2Img: true,
+    supportsInpaint: false,
   },
   {
     id: 'seedream-5-0-pro',
@@ -147,7 +154,8 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     defaultSize: '2048x2048',
     sizes: SEEDREAM_SIZES,
     // 首期不支持编辑/参考图。
-    supportsEdit: false,
+    supportsImg2Img: false,
+    supportsInpaint: false,
   },
 ];
 
@@ -159,8 +167,8 @@ export function getDefaultModel(): ModelConfig {
   return MODEL_REGISTRY[0];
 }
 
-// 支持图生图/局部重绘的模型子集，供编辑类面板过滤下拉选项。
-export const EDIT_MODEL_REGISTRY: ModelConfig[] = MODEL_REGISTRY.filter(m => m.supportsEdit);
+export const IMG2IMG_MODEL_REGISTRY: ModelConfig[] = MODEL_REGISTRY.filter(m => m.supportsImg2Img);
+export const INPAINT_MODEL_REGISTRY: ModelConfig[] = MODEL_REGISTRY.filter(m => m.supportsInpaint);
 
 export function getSizeOption(model: ModelConfig, sizeValue: string): SizeOption | undefined {
   return model.sizes.find(s => s.value === sizeValue);

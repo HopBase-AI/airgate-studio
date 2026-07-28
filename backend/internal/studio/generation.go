@@ -36,18 +36,22 @@ func isGenerationExecutor(pluginID string) bool {
 }
 
 // executorSupportsTaskType 校验执行插件是否支持该任务类型。
-// gateway-gemini 当前只实现了文生图（image.edit 会被插件直接 fail），
-// gateway-seedance 支持视频生成与 seedream 文生图（首期不支持编辑/参考图，
-// image.edit 拦下）；在创建入口就拦下，给前端明确报错而不是排队后失败。
+// gateway-gemini 支持文生图和参考图编辑，但不支持 mask 局部重绘；Studio 的
+// capability registry 负责不在 inpaint UI 暴露 Gemini。gateway-seedance 首期
+// 不支持编辑/参考图，在创建入口拦下。
 func executorSupportsTaskType(executorID, taskType string) bool {
 	switch executorID {
 	case "gateway-gemini":
-		return taskType == "image.generate"
+		return taskType == "image.generate" || taskType == "image.edit"
 	case "gateway-seedance":
 		return taskType == "video.generate" || taskType == "image.generate"
 	default:
 		return true
 	}
+}
+
+func executorSupportsOperation(executorID, operation string) bool {
+	return executorID != "gateway-gemini" || operation != "inpaint"
 }
 
 // videoModelResolutions Seedance 各档位允许的分辨率（与插件 registry 桶表一致）。
