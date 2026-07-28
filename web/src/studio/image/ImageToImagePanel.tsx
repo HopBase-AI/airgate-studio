@@ -5,7 +5,7 @@ import { useStudio } from '../StudioContext';
 import { CustomSelect } from '../CustomSelect';
 import { GroupSelector } from '../GroupSelector';
 import { SizeSelector } from '../SizeSelector';
-import { EDIT_MODEL_REGISTRY } from '../modelConfig';
+import { IMG2IMG_MODEL_REGISTRY } from '../modelConfig';
 import { studioStyles as ss } from '../studioStyles';
 
 const local: Record<string, CSSProperties> = {
@@ -97,11 +97,10 @@ export function ImageToImagePanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const editModelOptions = imageGroupsLoaded
-    ? EDIT_MODEL_REGISTRY.filter(model => hasImageGroupsForModel(model))
-    : EDIT_MODEL_REGISTRY;
+    ? IMG2IMG_MODEL_REGISTRY.filter(model => hasImageGroupsForModel(model))
+    : IMG2IMG_MODEL_REGISTRY;
 
-  // 当前模型不支持图生图（如 gemini/imagen 系）时自动切到首个支持编辑的模型，
-  // 避免"可选但必失败"。
+  // 只在当前模型或分组确实不支持图生图时选择可用回退项。
   useEffect(() => {
     if (!editModelOptions.some(m => m.id === selectedModelId) && editModelOptions.length > 0) {
       setSelectedModelId(editModelOptions[0].id);

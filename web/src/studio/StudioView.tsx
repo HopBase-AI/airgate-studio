@@ -6,7 +6,7 @@ import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
-import { EDIT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
+import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
 import { VIDEO_MODEL_REGISTRY, videoModelById, useVideoStrings } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
 import { ProjectSidebar, ThemeToggleButton } from './ProjectSidebar';
@@ -1044,7 +1044,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const allSources = [...sourceImages, ...referenceImages];
   const hasSource = allSources.length > 0;
   const isSingleSource = allSources.length === 1;
-  const baseModelOptions = hasSource ? EDIT_MODEL_REGISTRY : MODEL_REGISTRY;
+  const baseModelOptions = hasSource
+    ? (selection ? INPAINT_MODEL_REGISTRY : IMG2IMG_MODEL_REGISTRY)
+    : MODEL_REGISTRY;
   const modelOptions = useMemo(() => {
     if (!imageGroupsLoaded) return baseModelOptions;
     const filtered = baseModelOptions.filter(model => hasImageGroupsForModel(model));

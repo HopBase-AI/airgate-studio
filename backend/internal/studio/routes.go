@@ -150,8 +150,8 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 	}
 	attributes := buildTaskAttributes(req)
 	executorID := generationExecutorPluginID(req.Platform)
-	if !executorSupportsTaskType(executorID, taskType) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该平台暂只支持文生图，请切换到文生图模式或更换模型"})
+	if !executorSupportsTaskType(executorID, taskType) || !executorSupportsOperation(executorID, req.Operation) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该平台不支持当前图片编辑方式，请更换模型或模式"})
 		return
 	}
 

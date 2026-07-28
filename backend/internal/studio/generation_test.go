@@ -177,7 +177,7 @@ func TestExecutorSupportsTaskType(t *testing.T) {
 		want     bool
 	}{
 		{"gateway-gemini", "image.generate", true},
-		{"gateway-gemini", "image.edit", false},
+		{"gateway-gemini", "image.edit", true},
 		{"gateway-seedance", "video.generate", true},
 		{"gateway-seedance", "image.generate", true},
 		{"gateway-seedance", "image.edit", false},
@@ -188,6 +188,18 @@ func TestExecutorSupportsTaskType(t *testing.T) {
 		if got := executorSupportsTaskType(c.executor, c.taskType); got != c.want {
 			t.Errorf("executorSupportsTaskType(%q, %q) = %v, want %v", c.executor, c.taskType, got, c.want)
 		}
+	}
+}
+
+func TestExecutorSupportsOperation(t *testing.T) {
+	if !executorSupportsOperation("gateway-gemini", "edit") {
+		t.Fatal("gateway-gemini should support image-to-image edits")
+	}
+	if executorSupportsOperation("gateway-gemini", "inpaint") {
+		t.Fatal("gateway-gemini must not accept mask-based inpainting")
+	}
+	if !executorSupportsOperation("gateway-openai", "inpaint") {
+		t.Fatal("gateway-openai should retain inpainting support")
 	}
 }
 
