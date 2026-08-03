@@ -477,8 +477,8 @@ export interface StudioContextValue {
 
   // Model config
   currentModel: ModelConfig;
-  selectedModelId: string;
-  setSelectedModelId: (id: string) => void;
+  selectedModelKey: string;
+  setSelectedModelKey: (keyOrModelId: string, preferredPlatform?: string) => void;
   selectedPlatform: string;
   imageSize: string;
   setImageSize: (size: string) => void;
@@ -487,10 +487,12 @@ export interface StudioContextValue {
   // core 自动选最便宜分组，与不传 group_id 的历史行为一致）。
   imageGroups: ImageGroup[];
   availableImagePlatforms: string[];
+  getImageGroupsForModel: (model: ModelConfig) => ImageGroup[];
   hasImageGroupsForModel: (model: ModelConfig) => boolean;
   imageGroupsLoaded: boolean;
   selectedGroupId: number | null;
   setSelectedGroupId: (id: number) => void;
+  selectModelRoute: (modelKey: string, groupId: number) => void;
 
   // Reference images (for img2img / inpaint).
   // Array so multiple gallery items can be added as references; ComposerBar
@@ -611,10 +613,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [mediaType, videoModelId]);
 
   // Model selection (hardcoded registry)
-  const [selectedModelId, setSelectedModelIdRaw] = useState(() => getInitialModel().id);
-  const selectedModelIdRef = useRef(selectedModelId);
+  const [selectedModelKey, setSelectedModelKeyRaw] = useState(() => getInitialModel().routeKey);
+  const selectedModelKeyRef = useRef(selectedModelKey);
   const [imageSize, setImageSizeRaw] = useState(() => {
-    const model = getModelConfig(selectedModelId) ?? getDefaultModel();
+    const model = getModelConfig(selectedModelKey) ?? getDefaultModel();
     return model.defaultSize;
   });
 
@@ -648,30 +650,30 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   useEffect(() => { activeProjectIdRef.current = activeProjectId; }, [activeProjectId]);
 
   // Derived from hardcoded registry
-  const currentModel = getModelConfig(selectedModelId) ?? getDefaultModel();
+  const currentModel = getModelConfig(selectedModelKey) ?? getDefaultModel();
+  const selectedModelId = currentModel.id;
   const selectedPlatform = currentModel.platform;
 
-  const setSelectedModelId = useCallback((id: string) => {
-    selectedModelIdRef.current = id;
-    setSelectedModelIdRaw(id);
+  const setSelectedModelKey = useCallback((keyOrModelId: string, preferredPlatform?: string) => {
+    const currentPlatform = getModelConfig(selectedModelKeyRef.current)?.platform;
+    const newModel = getModelConfig(keyOrModelId, preferredPlatform ?? currentPlatform) ?? getDefaultModel();
+    selectedModelKeyRef.current = newModel.routeKey;
+    setSelectedModelKeyRaw(newModel.routeKey);
     try {
-      window.localStorage.setItem(MODEL_STORE_KEY, id);
+      window.localStorage.setItem(MODEL_STORE_KEY, newModel.routeKey);
     } catch { /* ignore */ }
-    const newModel = getModelConfig(id);
-    if (newModel) {
-      setImageSizeRaw(prev => supportedSizeForModel(newModel, prev));
-    }
+    setImageSizeRaw(prev => supportedSizeForModel(newModel, prev));
   }, []);
 
   const setImageSize = useCallback((size: string) => {
-    const model = getModelConfig(selectedModelIdRef.current) ?? getDefaultModel();
+    const model = getModelConfig(selectedModelKeyRef.current) ?? getDefaultModel();
     setImageSizeRaw(supportedSizeForModel(model, size));
   }, []);
 
   useEffect(() => {
-    selectedModelIdRef.current = selectedModelId;
+    selectedModelKeyRef.current = selectedModelKey;
     setImageSizeRaw(prev => supportedSizeForModel(currentModel, prev));
-  }, [currentModel, selectedModelId]);
+  }, [currentModel, selectedModelKey]);
 
   // ── 计费分组选择 ──────────────────────────────────────────────────────────
   // 平台切换时重新拉取该用户可用的分组（core 已按最便宜优先排序）。
@@ -691,9 +693,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     )),
     [imageGroupsByModel],
   );
-  const hasImageGroupsForModel = useCallback((model: ModelConfig) => (
-    (imageGroupsByModel[imageGroupCacheKey(model.platform, model.id)]?.length ?? 0) > 0
+  const getImageGroupsForModel = useCallback((model: ModelConfig) => (
+    imageGroupsByModel[imageGroupCacheKey(model.platform, model.id)] ?? EMPTY_IMAGE_GROUPS
   ), [imageGroupsByModel]);
+  const hasImageGroupsForModel = useCallback(
+    (model: ModelConfig) => getImageGroupsForModel(model).length > 0,
+    [getImageGroupsForModel],
+  );
 
   useEffect(() => {
     let active = true;
@@ -730,8 +736,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!imageGroupsLoaded || imageGroups.length > 0) return;
     const fallback = MODEL_REGISTRY.find(model => (imageGroupsByModel[imageGroupCacheKey(model.platform, model.id)]?.length ?? 0) > 0);
-    if (fallback && fallback.id !== selectedModelId) setSelectedModelId(fallback.id);
-  }, [imageGroups, imageGroupsByModel, imageGroupsLoaded, selectedModelId, setSelectedModelId]);
+    if (fallback && fallback.routeKey !== selectedModelKey) setSelectedModelKey(fallback.routeKey);
+  }, [imageGroups, imageGroupsByModel, imageGroupsLoaded, selectedModelKey, setSelectedModelKey]);
 
   const setSelectedGroupId = useCallback((id: number) => {
     setSelectedGroupIdRaw(id);
@@ -739,6 +745,16 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       window.localStorage.setItem(GROUP_STORE_PREFIX + selectedPlatform + ':' + selectedModelId, String(id));
     } catch { /* ignore */ }
   }, [selectedModelId, selectedPlatform]);
+
+  const selectModelRoute = useCallback((modelKey: string, groupId: number) => {
+    const model = getModelConfig(modelKey);
+    if (!model || !getImageGroupsForModel(model).some(group => group.id === groupId)) return;
+    setSelectedModelKey(model.routeKey);
+    setSelectedGroupIdRaw(groupId);
+    try {
+      window.localStorage.setItem(GROUP_STORE_PREFIX + imageGroupCacheKey(model.platform, model.id), String(groupId));
+    } catch { /* ignore */ }
+  }, [getImageGroupsForModel, setSelectedModelKey]);
 
   // ── Initialization ────────────────────────────────────────────────────────
 
@@ -1632,7 +1648,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }
     const mode = item.mode === 'batch' ? 'text2img' : item.mode;
     const sourceImage = item.sourceUrl ?? (mode === 'img2img' || mode === 'inpaint' ? item.url : undefined);
-    setSelectedModelId(item.model);
+    setSelectedModelKey(item.model);
     setImageMode(mode);
     if (item.size) setImageSize(item.size);
     // Regenerate resets references to the original source (one item only —
@@ -1644,7 +1660,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         sourceImage,
       });
     }, 0);
-  }, [generate, generateVideo, setVideoModelId, setSelectedModelId, setImageMode, setImageSize]);
+  }, [generate, generateVideo, setVideoModelId, setSelectedModelKey, setImageMode, setImageSize]);
 
   // variations —— 「变体」：同 prompt 出 4 张（gpt-image-2 无固定 seed，自然各异），复用批量路径。
   const variations = useCallback((item: GalleryItem) => {
@@ -1654,14 +1670,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }
     const mode = item.mode === 'batch' ? 'text2img' : item.mode;
     const sourceImage = item.sourceUrl ?? (mode === 'img2img' || mode === 'inpaint' ? item.url : undefined);
-    setSelectedModelId(item.model);
+    setSelectedModelKey(item.model);
     setImageMode(mode);
     if (item.size) setImageSize(item.size);
     setReferenceImages(sourceImage ? [sourceImage] : []);
     setTimeout(() => {
       generate(item.prompt, { mode: 'batch', count: 4, sourceImages: sourceImage ? [sourceImage] : undefined });
     }, 0);
-  }, [generate, regenerate, setSelectedModelId, setImageMode, setImageSize]);
+  }, [generate, regenerate, setSelectedModelKey, setImageMode, setImageSize]);
 
   // editRequest —— 「编辑这张」桥接：GalleryCard 调 requestEdit(url)，ComposerBar 监听后
   // 把该图载入主框并打开蒙版编辑器（局部重绘），用完 clearEditRequest 清空。
@@ -1810,17 +1826,19 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setSelectedVideoGroupId,
     generateVideo,
     currentModel,
-    selectedModelId,
-    setSelectedModelId,
+    selectedModelKey,
+    setSelectedModelKey,
     selectedPlatform,
     imageSize,
     setImageSize,
     imageGroups,
     availableImagePlatforms,
+    getImageGroupsForModel,
     hasImageGroupsForModel,
     imageGroupsLoaded,
     selectedGroupId,
     setSelectedGroupId,
+    selectModelRoute,
     referenceImages,
     setReferenceImages,
     isGenerating,

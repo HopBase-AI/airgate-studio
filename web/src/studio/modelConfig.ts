@@ -8,6 +8,9 @@ export interface SizeOption {
 }
 
 export interface ModelConfig {
+  // routeKey is the stable UI identity. The same upstream model ID can be
+  // offered by more than one platform (for example Adobe relay vs Google).
+  routeKey: string;
   id: string;
   name: string;
   platform: string;
@@ -81,20 +84,12 @@ const SEEDREAM_SIZES: SizeOption[] = [
   { value: '2048x2048', label: '2048×2048', tier: '2K', price: 0.09, aspect: '1:1', showPrice: true },
 ];
 
-export const MODEL_REGISTRY: ModelConfig[] = [
-  {
-    id: 'gpt-image-2',
-    name: 'GPT Image 2',
-    platform: 'openai',
-    defaultSize: 'auto',
-    sizes: GPT_IMAGE_SIZES,
-    supportsImg2Img: true,
-    supportsInpaint: true,
-  },
+type GeminiImageModel = Omit<ModelConfig, 'routeKey' | 'platform'>;
+
+const GEMINI_IMAGE_MODELS: GeminiImageModel[] = [
   {
     id: 'gemini-2.5-flash-image',
     name: 'Nano Banana',
-    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,
     supportsImg2Img: true,
@@ -103,7 +98,6 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   {
     id: 'gemini-3-pro-image',
     name: 'Banana Pro',
-    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_ALL_SIZES,
     supportsImg2Img: true,
@@ -112,7 +106,6 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   {
     id: 'gemini-3-pro-image-preview',
     name: 'Banana Pro Preview',
-    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_ALL_SIZES,
     supportsImg2Img: true,
@@ -121,7 +114,6 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   {
     id: 'gemini-3.1-flash-image',
     name: 'Banana 2',
-    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_UP_TO_2K_SIZES,
     supportsImg2Img: true,
@@ -130,7 +122,6 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   {
     id: 'gemini-3.1-flash-image-preview',
     name: 'Banana 2 Preview',
-    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_UP_TO_2K_SIZES,
     supportsImg2Img: true,
@@ -139,13 +130,43 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   {
     id: 'gemini-3.1-flash-lite-image',
     name: 'Banana 2 Lite',
-    platform: 'openai',
     defaultSize: '1024x1024',
     sizes: GOOGLE_IMAGE_1K_ONLY_SIZES,
     supportsImg2Img: true,
     supportsInpaint: false,
   },
+];
+
+export function modelRouteKey(platform: string, modelId: string): string {
+  return `${platform}:${modelId}`;
+}
+
+function geminiImageRoutes(platform: 'openai' | 'gemini'): ModelConfig[] {
+  return GEMINI_IMAGE_MODELS.map(model => ({
+    ...model,
+    routeKey: modelRouteKey(platform, model.id),
+    platform,
+  }));
+}
+
+export const MODEL_REGISTRY: ModelConfig[] = [
   {
+    routeKey: modelRouteKey('openai', 'gpt-image-2'),
+    id: 'gpt-image-2',
+    name: 'GPT Image 2',
+    platform: 'openai',
+    defaultSize: 'auto',
+    sizes: GPT_IMAGE_SIZES,
+    supportsImg2Img: true,
+    supportsInpaint: true,
+  },
+  // Adobe and other OpenAI-compatible relays use platform=openai. Google
+  // official accounts use platform=gemini. The request model ID stays equal,
+  // while routeKey keeps both choices distinct in Studio.
+  ...geminiImageRoutes('openai'),
+  ...geminiImageRoutes('gemini'),
+  {
+    routeKey: modelRouteKey('seedance', 'seedream-5-0-pro'),
     id: 'seedream-5-0-pro',
     name: 'Seedream 5.0 Pro',
     platform: 'seedance',
@@ -157,8 +178,11 @@ export const MODEL_REGISTRY: ModelConfig[] = [
   },
 ];
 
-export function getModelConfig(id: string): ModelConfig | undefined {
-  return MODEL_REGISTRY.find(m => m.id === id);
+export function getModelConfig(value: string, preferredPlatform?: string): ModelConfig | undefined {
+  const normalized = value.trim();
+  return MODEL_REGISTRY.find(model => model.routeKey === normalized)
+    ?? MODEL_REGISTRY.find(model => model.id === normalized && model.platform === preferredPlatform)
+    ?? MODEL_REGISTRY.find(model => model.id === normalized);
 }
 
 export function getDefaultModel(): ModelConfig {

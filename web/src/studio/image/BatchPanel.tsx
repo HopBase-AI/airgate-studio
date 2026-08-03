@@ -124,8 +124,8 @@ export function BatchPanel() {
   const { t } = useTranslation();
   const {
     currentModel,
-    selectedModelId,
-    setSelectedModelId,
+    selectedModelKey,
+    setSelectedModelKey,
     imageSize,
     setImageSize,
     imageGroupsLoaded,
@@ -145,10 +145,10 @@ export function BatchPanel() {
   const availableModels = (mode === 'multi_image' ? IMG2IMG_MODEL_REGISTRY : MODEL_REGISTRY)
     .filter(model => !imageGroupsLoaded || hasImageGroupsForModel(model));
   useEffect(() => {
-    if (!availableModels.some(m => m.id === selectedModelId) && availableModels.length > 0) {
-      setSelectedModelId(availableModels[0].id);
+    if (!availableModels.some(m => m.routeKey === selectedModelKey) && availableModels.length > 0) {
+      setSelectedModelKey(availableModels[0].routeKey);
     }
-  }, [availableModels, selectedModelId, setSelectedModelId]);
+  }, [availableModels, selectedModelKey, setSelectedModelKey]);
 
   const promptLines = multiPrompts.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
@@ -269,9 +269,9 @@ export function BatchPanel() {
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
         ) : (
           <CustomSelect
-            value={selectedModelId}
-            options={availableModels.map(m => ({ value: m.id, label: m.name }))}
-            onChange={setSelectedModelId}
+            value={selectedModelKey}
+            options={availableModels.map(m => ({ value: m.routeKey, label: m.name }))}
+            onChange={setSelectedModelKey}
           />
         )}
       </div>

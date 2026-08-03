@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useStudio } from './StudioContext';
 import { CustomSelect } from './CustomSelect';
+import { formatImageGroupLabel } from './modelRoutes';
 import { studioStyles as ss } from './studioStyles';
 
 // 计费分组（通道）选择器：让用户在同平台的不同倍率分组间自选（高质量/低价等）。
@@ -13,9 +14,7 @@ export function GroupSelector() {
 
   const options = imageGroups.map(g => ({
     value: String(g.id),
-    label: g.effective_rate === 1
-      ? g.name
-      : `${g.name} ×${trimRate(g.effective_rate)}`,
+    label: formatImageGroupLabel(g),
   }));
 
   return (
@@ -33,8 +32,4 @@ export function GroupSelector() {
       />
     </div>
   );
-}
-
-function trimRate(rate: number): string {
-  return Number.isInteger(rate) ? String(rate) : rate.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
 }

@@ -7,6 +7,7 @@ import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
+import { buildModelRouteOptions, modelRouteOptionValue, parseModelRouteOptionValue } from './modelRoutes';
 import { VIDEO_MODEL_REGISTRY, videoModelById, useVideoStrings } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
 import { ProjectSidebar, ThemeToggleButton } from './ProjectSidebar';
@@ -988,8 +989,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     mediaType, setMediaType,
     setImageMode,
     currentModel,
-    selectedModelId, setSelectedModelId,
-    hasImageGroupsForModel, imageGroupsLoaded,
+    selectedModelKey, setSelectedModelKey,
+    getImageGroupsForModel, hasImageGroupsForModel, imageGroupsLoaded,
+    selectedGroupId, selectModelRoute,
     imageSize, setImageSize,
     generate,
     generateVideo,
@@ -1052,15 +1054,22 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     const filtered = baseModelOptions.filter(model => hasImageGroupsForModel(model));
     return filtered;
   }, [baseModelOptions, hasImageGroupsForModel, imageGroupsLoaded]);
-  const hasSelectableModel = !imageGroupsLoaded || modelOptions.length > 0;
+  const modelRouteOptions = useMemo(
+    () => imageGroupsLoaded ? buildModelRouteOptions(modelOptions, getImageGroupsForModel) : [],
+    [getImageGroupsForModel, imageGroupsLoaded, modelOptions],
+  );
+  const selectedModelRouteValue = selectedGroupId != null
+    ? modelRouteOptionValue(selectedModelKey, selectedGroupId)
+    : '';
+  const hasSelectableModel = !imageGroupsLoaded || modelRouteOptions.length > 0;
   const hasVideoGroup = !videoGroupsLoaded || videoGroups.length > 0;
   const canSend = prompt.trim().length > 0 && (isVideo ? hasVideoGroup : hasSelectableModel);
 
   useEffect(() => {
-    if (!modelOptions.some(m => m.id === selectedModelId) && modelOptions.length > 0) {
-      setSelectedModelId(modelOptions[0].id);
+    if (!modelOptions.some(m => m.routeKey === selectedModelKey) && modelOptions.length > 0) {
+      setSelectedModelKey(modelOptions[0].routeKey);
     }
-  }, [modelOptions, selectedModelId, setSelectedModelId]);
+  }, [modelOptions, selectedModelKey, setSelectedModelKey]);
 
   const handleSend = () => {
     const trimmed = prompt.trim();
@@ -1389,9 +1398,12 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
             <>
               <div style={c.modelSelect}>
                 <CustomSelect
-                  value={selectedModelId}
-                  options={modelOptions.map(m => ({ value: m.id, label: m.name }))}
-                  onChange={setSelectedModelId}
+                  value={selectedModelRouteValue}
+                  options={modelRouteOptions}
+                  onChange={value => {
+                    const route = parseModelRouteOptionValue(value);
+                    if (route) selectModelRoute(route.modelKey, route.groupId);
+                  }}
                   placeholder={imageGroupsLoaded ? t('playground.studio_no_image_model_available') : t('playground.studio_image_models_loading')}
                   compact
                   minDropdownWidth={420}

@@ -81,8 +81,8 @@ export function ImageToImagePanel() {
   const { t } = useTranslation();
   const {
     currentModel,
-    selectedModelId,
-    setSelectedModelId,
+    selectedModelKey,
+    setSelectedModelKey,
     imageSize,
     setImageSize,
     imageGroupsLoaded,
@@ -102,10 +102,10 @@ export function ImageToImagePanel() {
 
   // 只在当前模型或分组确实不支持图生图时选择可用回退项。
   useEffect(() => {
-    if (!editModelOptions.some(m => m.id === selectedModelId) && editModelOptions.length > 0) {
-      setSelectedModelId(editModelOptions[0].id);
+    if (!editModelOptions.some(m => m.routeKey === selectedModelKey) && editModelOptions.length > 0) {
+      setSelectedModelKey(editModelOptions[0].routeKey);
     }
-  }, [editModelOptions, selectedModelId, setSelectedModelId]);
+  }, [editModelOptions, selectedModelKey, setSelectedModelKey]);
 
   const canGenerate = prompt.trim().length > 0 && sourceImage !== null && editModelOptions.length > 0;
 
@@ -210,9 +210,9 @@ export function ImageToImagePanel() {
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
         ) : (
           <CustomSelect
-            value={selectedModelId}
-            options={editModelOptions.map(m => ({ value: m.id, label: m.name }))}
-            onChange={setSelectedModelId}
+            value={selectedModelKey}
+            options={editModelOptions.map(m => ({ value: m.routeKey, label: m.name }))}
+            onChange={setSelectedModelKey}
           />
         )}
       </div>
