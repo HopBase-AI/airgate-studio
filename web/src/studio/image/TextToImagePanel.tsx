@@ -36,8 +36,8 @@ export function TextToImagePanel() {
   const { t } = useTranslation();
   const {
     currentModel,
-    selectedModelId,
-    setSelectedModelId,
+    selectedModelKey,
+    setSelectedModelKey,
     imageSize,
     setImageSize,
     imageGroupsLoaded,
@@ -86,9 +86,9 @@ export function TextToImagePanel() {
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
         ) : (
           <CustomSelect
-            value={selectedModelId}
-            options={modelOptions.map(m => ({ value: m.id, label: m.name }))}
-            onChange={setSelectedModelId}
+            value={selectedModelKey}
+            options={modelOptions.map(m => ({ value: m.routeKey, label: m.name }))}
+            onChange={setSelectedModelKey}
           />
         )}
       </div>

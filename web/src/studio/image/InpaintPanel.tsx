@@ -144,8 +144,8 @@ export function InpaintPanel() {
   const { t } = useTranslation();
   const {
     currentModel,
-    selectedModelId,
-    setSelectedModelId,
+    selectedModelKey,
+    setSelectedModelKey,
     imageSize,
     setImageSize,
     imageGroupsLoaded,
@@ -171,10 +171,10 @@ export function InpaintPanel() {
 
   // 当前模型不支持局部重绘（如 gemini/imagen 系）时自动切到首个支持编辑的模型。
   useEffect(() => {
-    if (!editModelOptions.some(m => m.id === selectedModelId) && editModelOptions.length > 0) {
-      setSelectedModelId(editModelOptions[0].id);
+    if (!editModelOptions.some(m => m.routeKey === selectedModelKey) && editModelOptions.length > 0) {
+      setSelectedModelKey(editModelOptions[0].routeKey);
     }
-  }, [editModelOptions, selectedModelId, setSelectedModelId]);
+  }, [editModelOptions, selectedModelKey, setSelectedModelKey]);
 
   const canGenerate = prompt.trim().length > 0 && sourceImage !== null && editModelOptions.length > 0;
 
@@ -420,9 +420,9 @@ export function InpaintPanel() {
           <div style={modelBadge}><span style={modelDot} />{currentModel.name}</div>
         ) : (
           <CustomSelect
-            value={selectedModelId}
-            options={editModelOptions.map(m => ({ value: m.id, label: m.name }))}
-            onChange={setSelectedModelId}
+            value={selectedModelKey}
+            options={editModelOptions.map(m => ({ value: m.routeKey, label: m.name }))}
+            onChange={setSelectedModelKey}
           />
         )}
       </div>
