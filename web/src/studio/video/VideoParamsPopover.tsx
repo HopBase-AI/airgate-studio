@@ -126,6 +126,7 @@ export function VideoParamsPopover({
       <button
         ref={triggerRef}
         type="button"
+        data-onboarding-target="studio-video-params"
         onClick={handleToggle}
         style={{ ...s.trigger, ...(open ? s.triggerOpen : null) }}
         className="studio-select-trigger"

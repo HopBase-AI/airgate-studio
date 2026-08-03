@@ -1286,7 +1286,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFileInput} />
 
       {/* Prompt textarea */}
-      <div style={c.promptArea}>
+      <div data-onboarding-target="studio-prompt" style={c.promptArea}>
         <button
           type="button"
           style={c.promptUploadBtn}
@@ -1315,11 +1315,16 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
 
       {/* Toolbar row */}
       <div style={c.toolbar}>
-        <div style={c.toolbarLeft} className="studio-composer-toolbar-left">
+        <div
+          data-onboarding-target={!isVideo ? 'studio-image-options' : undefined}
+          style={c.toolbarLeft}
+          className="studio-composer-toolbar-left"
+        >
           {/* 媒体切换：图像 / 视频（图标分段控件，省空间；文案进 title/aria-label） */}
-          <div style={c.mediaToggle} role="tablist">
+          <div data-onboarding-target="studio-media" style={c.mediaToggle} role="tablist">
             <button
               type="button"
+              data-onboarding-target="studio-image"
               style={!isVideo ? c.mediaBtnActive : c.mediaBtn}
               className="studio-media-btn"
               onClick={() => setMediaType('image')}
@@ -1333,6 +1338,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
             </button>
             <button
               type="button"
+              data-onboarding-target="studio-video"
               style={isVideo ? c.mediaBtnActive : c.mediaBtn}
               className="studio-media-btn"
               onClick={() => setMediaType('video')}
@@ -1423,6 +1429,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
         </div>
         <button
           type="button"
+          data-onboarding-target="studio-generate"
           style={{
             ...c.sendBtn,
             ...(canSend ? {} : c.sendBtnDisabled),
