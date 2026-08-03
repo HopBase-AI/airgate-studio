@@ -73,14 +73,11 @@ const GOOGLE_IMAGE_ALL_SIZES: SizeOption[] = [
   ...GOOGLE_IMAGE_4K_SIZES,
 ];
 
-// Seedream（gateway-seedance 文生图）按 1K/2K/4K 三档计费；插件侧接受 "宽x高"
-// 像素格式，这里与后端 imageModelSupportedSizes 的 seedream-5-0-pro 契约一致，
-// 三档各取正方形值。计价按上游像素分档（≤2.36MP / >2.36MP 两档），非面积比例：
-// 1024²≈1.05MP 落低档 $0.038/张；2048² 与 4096² 均 >2.36MP 同为高档 $0.076/张。
+// Seedream 5.0 Pro 仅支持 1K/2K。计价按上游像素分档
+// （≤2.36MP / >2.36MP），与 gateway-seedance 的模型契约保持一致。
 const SEEDREAM_SIZES: SizeOption[] = [
-  { value: '1024x1024', label: '1024×1024', tier: '1K', price: 0.038, aspect: '1:1' },
-  { value: '2048x2048', label: '2048×2048', tier: '2K', price: 0.076, aspect: '1:1' },
-  { value: '4096x4096', label: '4096×4096', tier: '4K', price: 0.076, aspect: '1:1' },
+  { value: '1024x1024', label: '1024×1024', tier: '1K', price: 0.045, aspect: '1:1' },
+  { value: '2048x2048', label: '2048×2048', tier: '2K', price: 0.09, aspect: '1:1' },
 ];
 
 export const MODEL_REGISTRY: ModelConfig[] = [

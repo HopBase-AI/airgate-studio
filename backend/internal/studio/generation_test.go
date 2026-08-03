@@ -1,6 +1,11 @@
 package studio
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
 
 func TestBuildTaskInputKeepsEditImagesAndMask(t *testing.T) {
 	req := createGenerationTaskRequest{
@@ -215,8 +220,9 @@ func TestValidateImageModelSize(t *testing.T) {
 		{name: "banana lite rejects 2k", model: "gemini-3.1-flash-lite-image", size: "2048x2048", wantErr: true},
 		{name: "banana 2 rejects 4k", model: "gemini-3.1-flash-image", size: "3840x2160", wantErr: true},
 		{name: "banana 2 chat variant rejects 4k", model: "gemini-3.1-flash-image-c", size: "3840x2160", wantErr: true},
+		{name: "seedream 1k", model: "seedream-5-0-pro", size: "1024x1024"},
 		{name: "seedream 2k", model: "seedream-5-0-pro", size: "2048x2048"},
-		{name: "seedream 4k", model: "seedream-5-0-pro", size: "4096x4096"},
+		{name: "seedream rejects 4k", model: "seedream-5-0-pro", size: "4096x4096", wantErr: true},
 		{name: "seedream rejects non-tier size", model: "seedream-5-0-pro", size: "1536x1024", wantErr: true},
 		{name: "unknown model passes through", model: "custom-image-model", size: "2048x2048"},
 		{name: "empty size passes through", model: "gemini-3.1-flash-lite-image", size: ""},
@@ -231,5 +237,25 @@ func TestValidateImageModelSize(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestHandleCreateGenerationTaskRejectsSeedream4K(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/generation-tasks", strings.NewReader(`{
+		"kind":"image",
+		"platform":"seedance",
+		"model":"seedream-5-0-pro",
+		"prompt":"a lighthouse in a storm",
+		"parameters":{"size":"4096x4096"}
+	}`))
+	recorder := httptest.NewRecorder()
+
+	(&StudioPlugin{}).handleCreateGenerationTask(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, "不支持尺寸 4096x4096") {
+		t.Fatalf("body = %q, want unsupported-size error", body)
 	}
 }

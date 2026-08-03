@@ -165,11 +165,9 @@ var imageModelSupportedSizes = map[string]map[string]struct{}{
 	"gemini-3.1-flash-lite-image": {
 		"1024x1024": {}, "1536x1024": {}, "1024x1536": {},
 	},
-	// seedream-5-0-pro（gateway-seedance 文生图）按 1K/2K/4K 三档计费，默认 2K。
-	// seedance 插件侧接受 "宽x高" 像素格式，这里沿用本表既有格式，三档各取正方形值，
-	// 与前端 modelConfig.ts 的 SEEDREAM_SIZES 契约一致。
+	// seedream-5-0-pro 仅支持 1K/2K，默认 2K；与 gateway-seedance 和前端契约一致。
 	"seedream-5-0-pro": {
-		"1024x1024": {}, "2048x2048": {}, "4096x4096": {},
+		"1024x1024": {}, "2048x2048": {},
 	},
 }
 
