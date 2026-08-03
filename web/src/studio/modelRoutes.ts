@@ -26,13 +26,18 @@ export function parseModelRouteOptionValue(value: string): { modelKey: string; g
 }
 
 export function formatImageGroupLabel(group: ImageGroup): string {
-  const parts = [group.name.trim() || `Group ${group.id}`];
-  const note = group.note?.trim();
-  if (note && !parts[0].includes(note)) parts.push(note);
+  const parts = imageGroupLabelParts(group);
   if (group.rate_multiplier > 0 && group.effective_rate > 0) {
     parts.push(`×${trimRate(group.effective_rate)}`);
   }
   return parts.join(' · ');
+}
+
+// Model route labels use the configured note as the pricing hint. The generic
+// effective rate is not an image price when a group has per-resolution fixed
+// pricing, so showing it here can misrepresent the amount users will pay.
+export function formatModelRouteGroupLabel(group: ImageGroup): string {
+  return imageGroupLabelParts(group).join(' · ');
 }
 
 export function buildModelRouteOptions(
@@ -41,10 +46,17 @@ export function buildModelRouteOptions(
 ): ModelRouteOption[] {
   return models.flatMap(model => groupsForModel(model).map(group => ({
     value: modelRouteOptionValue(model.routeKey, group.id),
-    label: `${model.name} · ${formatImageGroupLabel(group)}`,
+    label: `${model.name} · ${formatModelRouteGroupLabel(group)}`,
     modelKey: model.routeKey,
     groupId: group.id,
   })));
+}
+
+function imageGroupLabelParts(group: ImageGroup): string[] {
+  const parts = [group.name.trim() || `Group ${group.id}`];
+  const note = group.note?.trim();
+  if (note && !parts[0].includes(note)) parts.push(note);
+  return parts;
 }
 
 function trimRate(rate: number): string {
