@@ -10,6 +10,10 @@ interface SizeSelectorProps {
   compact?: boolean;
 }
 
+export function formatImagePrice(price: number): string {
+  return price.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 function AspectIcon({ aspect, size = 16 }: { aspect?: string; size?: number }) {
   if (!aspect) return null;
   const [aw, ah] = aspect.split(':').map(Number);
@@ -114,7 +118,20 @@ const s: Record<string, CSSProperties> = {
     fontSize: 11,
     color: cssVar('textTertiary'),
     fontFamily: cssVar('fontMono'),
+  },
+  optionMeta: {
     marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 0,
+  },
+  price: {
+    fontSize: 11,
+    color: cssVar('textSecondary'),
+    fontFamily: cssVar('fontMono'),
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
   },
   divider: {
     height: 1,
@@ -212,6 +229,9 @@ export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSe
         <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {triggerLabel}
         </span>
+        {selected?.showPrice && (
+          <span style={s.price}>${formatImagePrice(selected.price)}/张</span>
+        )}
         <svg
           width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -252,7 +272,12 @@ export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSe
                   >
                     {opt.aspect && <AspectIcon aspect={opt.aspect} />}
                     <span>{opt.label}</span>
-                    {opt.aspect && <span style={s.optionAspect}>{opt.aspect}</span>}
+                    {(opt.aspect || opt.showPrice) && (
+                      <span style={s.optionMeta}>
+                        {opt.aspect && <span style={s.optionAspect}>{opt.aspect}</span>}
+                        {opt.showPrice && <span style={s.price}>${formatImagePrice(opt.price)}/张</span>}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>

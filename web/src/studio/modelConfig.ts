@@ -4,6 +4,7 @@ export interface SizeOption {
   tier: '1K' | '2K' | '4K';
   price: number;
   aspect?: string;
+  showPrice?: boolean;
 }
 
 export interface ModelConfig {
@@ -73,11 +74,11 @@ const GOOGLE_IMAGE_ALL_SIZES: SizeOption[] = [
   ...GOOGLE_IMAGE_4K_SIZES,
 ];
 
-// Seedream 5.0 Pro 仅支持 1K/2K。计价按上游像素分档
-// （≤2.36MP / >2.36MP），与 gateway-seedance 的模型契约保持一致。
+// Seedream 5.0 Pro 仅支持 1K/2K。BytePlus 官方按 2.61MP 分档；这两个
+// 固定正方形尺寸分别落入 $0.045 / $0.09 档。
 const SEEDREAM_SIZES: SizeOption[] = [
-  { value: '1024x1024', label: '1024×1024', tier: '1K', price: 0.045, aspect: '1:1' },
-  { value: '2048x2048', label: '2048×2048', tier: '2K', price: 0.09, aspect: '1:1' },
+  { value: '1024x1024', label: '1024×1024', tier: '1K', price: 0.045, aspect: '1:1', showPrice: true },
+  { value: '2048x2048', label: '2048×2048', tier: '2K', price: 0.09, aspect: '1:1', showPrice: true },
 ];
 
 export const MODEL_REGISTRY: ModelConfig[] = [

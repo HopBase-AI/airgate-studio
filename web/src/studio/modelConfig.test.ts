@@ -30,9 +30,9 @@ describe('image editing model capabilities', () => {
     const seedream = MODEL_REGISTRY.find(model => model.id === 'seedream-5-0-pro');
 
     expect(seedream?.defaultSize).toBe('2048x2048');
-    expect(seedream?.sizes.map(({ value, tier, price }) => ({ value, tier, price }))).toEqual([
-      { value: '1024x1024', tier: '1K', price: 0.045 },
-      { value: '2048x2048', tier: '2K', price: 0.09 },
+    expect(seedream?.sizes.map(({ value, tier, price, showPrice }) => ({ value, tier, price, showPrice }))).toEqual([
+      { value: '1024x1024', tier: '1K', price: 0.045, showPrice: true },
+      { value: '2048x2048', tier: '2K', price: 0.09, showPrice: true },
     ]);
   });
 });
