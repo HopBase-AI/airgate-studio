@@ -5,6 +5,7 @@ import { getModelConfig } from './modelConfig';
 import {
   buildModelRouteOptions,
   formatImageGroupLabel,
+  formatModelRouteGroupLabel,
   modelRouteOptionValue,
   parseModelRouteOptionValue,
 } from './modelRoutes';
@@ -53,6 +54,18 @@ describe('model route labels', () => {
       .toBe('Adobe');
   });
 
+  it('does not present a generic multiplier as the model route image price', () => {
+    const group = imageGroup({
+      rate_multiplier: 3,
+      effective_rate: 3,
+      note: '固定价：1K ¥0.08，2K ¥0.12，4K ¥0.15。',
+    });
+
+    expect(formatImageGroupLabel(group)).toContain('×3');
+    expect(formatModelRouteGroupLabel(group))
+      .toBe('Adobe · 固定价：1K ¥0.08，2K ¥0.12，4K ¥0.15。');
+  });
+
   it('builds distinct Adobe and Google official options for the same upstream model ID', () => {
     const adobe = getModelConfig('openai:gemini-3.1-flash-image');
     const official = getModelConfig('gemini:gemini-3.1-flash-image');
@@ -72,8 +85,8 @@ describe('model route labels', () => {
       'gemini:gemini-3.1-flash-image|24',
     ]);
     expect(options.map(option => option.label)).toEqual([
-      'Banana 2 · Adobe · ×0.65',
-      'Banana 2 · Google 官方 · ×1',
+      'Banana 2 · Adobe',
+      'Banana 2 · Google 官方',
     ]);
   });
 });
