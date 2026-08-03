@@ -8,6 +8,7 @@ import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
 import { buildModelRouteOptions, modelRouteOptionValue, parseModelRouteOptionValue } from './modelRoutes';
+import { commitComposerSend, isComposerSubmitKey } from './composerSend';
 import { VIDEO_MODEL_REGISTRY, videoModelById, useVideoStrings } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
 import { ProjectSidebar, ThemeToggleButton } from './ProjectSidebar';
@@ -990,7 +991,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     setImageMode,
     currentModel,
     selectedModelKey, setSelectedModelKey,
-    getImageGroupsForModel, hasImageGroupsForModel, imageGroupsLoaded,
+    getImageGroupsForModel, hasImageGroupsForModel, imageGroupsLoaded, imageRouteReady,
     selectedGroupId, selectModelRoute,
     imageSize, setImageSize,
     generate,
@@ -1000,7 +1001,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     videoResolution, setVideoResolution,
     videoRatio, setVideoRatio,
     videoAudio, setVideoAudio,
-    videoGroups, videoGroupsLoaded,
+    videoGroups, videoRouteReady,
     selectedVideoGroupId, setSelectedVideoGroupId,
     referenceImages, setReferenceImages,
     editRequest, clearEditRequest,
@@ -1055,15 +1056,14 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     return filtered;
   }, [baseModelOptions, hasImageGroupsForModel, imageGroupsLoaded]);
   const modelRouteOptions = useMemo(
-    () => imageGroupsLoaded ? buildModelRouteOptions(modelOptions, getImageGroupsForModel) : [],
-    [getImageGroupsForModel, imageGroupsLoaded, modelOptions],
+    () => buildModelRouteOptions(modelOptions, getImageGroupsForModel),
+    [getImageGroupsForModel, modelOptions],
   );
   const selectedModelRouteValue = selectedGroupId != null
     ? modelRouteOptionValue(selectedModelKey, selectedGroupId)
     : '';
-  const hasSelectableModel = !imageGroupsLoaded || modelRouteOptions.length > 0;
-  const hasVideoGroup = !videoGroupsLoaded || videoGroups.length > 0;
-  const canSend = prompt.trim().length > 0 && (isVideo ? hasVideoGroup : hasSelectableModel);
+  const hasSelectableModel = modelRouteOptions.length > 0;
+  const canSend = prompt.trim().length > 0 && (isVideo ? videoRouteReady : (hasSelectableModel && imageRouteReady));
 
   useEffect(() => {
     if (!modelOptions.some(m => m.routeKey === selectedModelKey) && modelOptions.length > 0) {
@@ -1071,40 +1071,40 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     }
   }, [modelOptions, selectedModelKey, setSelectedModelKey]);
 
-  const handleSend = () => {
+  const handleSend = (): boolean => {
     const trimmed = prompt.trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
 
-    if (isVideo) {
-      void generateVideo(trimmed, { sourceImages: hasSource ? allSources : undefined });
-      setPrompt('');
-      return;
-    }
+    return commitComposerSend(canSend, () => {
+      if (isVideo) {
+        return generateVideo(trimmed, { sourceImages: hasSource ? allSources : undefined });
+      }
 
-    if (isSingleSource && selection) {
-      // 局部重绘：单图单次，count 不适用
-      setImageMode('inpaint');
-      void generate(trimmed, { mode: 'inpaint', sourceImage: allSources[0], maskRegion: selection });
-    } else if (count > 1) {
-      // 批量：N 张聚成一个任务组（batch 模式）。带参考图则每张走 img2img，否则 text2img。
-      setImageMode(hasSource ? 'img2img' : 'text2img');
-      void generate(trimmed, {
-        mode: 'batch',
-        count,
-        sourceImages: hasSource ? allSources : undefined,
-      });
-    } else if (hasSource) {
-      setImageMode('img2img');
-      void generate(trimmed, { mode: 'img2img', sourceImages: allSources, count: 1 });
-    } else {
+      if (isSingleSource && selection) {
+        // 局部重绘：单图单次，count 不适用
+        setImageMode('inpaint');
+        return generate(trimmed, { mode: 'inpaint', sourceImage: allSources[0], maskRegion: selection });
+      }
+      if (count > 1) {
+        // 批量：N 张聚成一个任务组（batch 模式）。带参考图则每张走 img2img，否则 text2img。
+        setImageMode(hasSource ? 'img2img' : 'text2img');
+        return generate(trimmed, {
+          mode: 'batch',
+          count,
+          sourceImages: hasSource ? allSources : undefined,
+        });
+      }
+      if (hasSource) {
+        setImageMode('img2img');
+        return generate(trimmed, { mode: 'img2img', sourceImages: allSources, count: 1 });
+      }
       setImageMode('text2img');
-      void generate(trimmed, { mode: 'text2img', count: 1 });
-    }
-    setPrompt('');
+      return generate(trimmed, { mode: 'text2img', count: 1 });
+    }, () => setPrompt(''));
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (isComposerSubmitKey(e.key, e.shiftKey, canSend)) {
       e.preventDefault();
       handleSend();
     }

@@ -233,7 +233,7 @@ const batchCardStyles: Record<string, CSSProperties> = {
 
 function TaskCard({ task }: { task: StudioGenerationTask }) {
   const { t } = useTranslation();
-  const { deleteTask, generate, generateVideo, setSelectedModelKey, setImageSize, setImageMode, setMediaType, retryBatchFailures, tasks } = useStudio();
+  const { deleteTask, generate, generateVideo, selectModelRoute, setSelectedModelKey, setImageSize, setImageMode, setMediaType, setVideoModelId, retryBatchFailures, tasks } = useStudio();
   const { copied, copy } = useCopyOnClick(task.prompt);
 
   // 生成反馈：已用时计时（每秒）、队列位置、按尺寸档的 ETA 估算。
@@ -273,17 +273,31 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
 
   const handleRetry = () => {
     if (!task.prompt) return;
-    void deleteTask(task.id).catch(() => {});
+    const retryRoute = task.platform && task.model && task.groupId && task.size
+      ? {
+          routeKey: task.routeKey || `${task.platform}:${task.model}`,
+          platform: task.platform,
+          model: task.model,
+          groupId: task.groupId,
+          size: task.size,
+        }
+      : null;
     if (task.mode === 'video') {
       setMediaType('video');
-      setTimeout(() => generateVideo(task.prompt), 0);
+      if (retryRoute) setVideoModelId(retryRoute.model);
+      if (generateVideo(task.prompt, { route: retryRoute })) {
+        void deleteTask(task.id).catch(() => {});
+      }
       return;
     }
     const mode = task.mode;
-    if (task.model) setSelectedModelKey(task.model, task.platform);
+    if (retryRoute) selectModelRoute(retryRoute.routeKey, retryRoute.groupId);
+    else if (task.model) setSelectedModelKey(task.routeKey ?? task.model, task.platform);
     if (task.size) setImageSize(task.size);
     setImageMode(mode);
-    setTimeout(() => generate(task.prompt, { mode }), 0);
+    if (generate(task.prompt, { mode, route: retryRoute })) {
+      void deleteTask(task.id).catch(() => {});
+    }
   };
 
   const handleDelete = async () => {

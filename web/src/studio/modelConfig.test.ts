@@ -15,7 +15,7 @@ describe('image model routes', () => {
     expect(new Set(routeKeys).size).toBe(routeKeys.length);
   });
 
-  it('registers Adobe-compatible and Google official routes for each Gemini model', () => {
+  it('registers OpenAI-compatible and Google official routes for each Gemini model', () => {
     const geminiModelIds = new Set(
       MODEL_REGISTRY
         .filter(model => model.id.startsWith('gemini-'))

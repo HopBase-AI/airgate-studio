@@ -83,7 +83,8 @@ func TestServiceIntegration(t *testing.T) {
 	// AddAsset + ListAssets
 	for i := 0; i < 3; i++ {
 		if _, err := svc.AddAsset(ctx, uid, proj.ID, AssetRecord{
-			URL: "/assets-runtime/img" + string(rune('a'+i)) + ".png", Prompt: "p", Model: "gpt-image-2", Mode: "text2img", Size: "auto",
+			URL: "/assets-runtime/img" + string(rune('a'+i)) + ".png", Prompt: "p", Platform: "openai", Model: "gpt-image-2",
+			GroupID: 42, RouteKey: "openai:gpt-image-2", Mode: "text2img", Size: "auto",
 		}); err != nil {
 			t.Fatalf("AddAsset[%d]: %v", i, err)
 		}
@@ -97,6 +98,11 @@ func TestServiceIntegration(t *testing.T) {
 	}
 	if len(assets) != 2 {
 		t.Errorf("分页 limit=2 返回 %d 条, want 2", len(assets))
+	}
+	for _, asset := range assets {
+		if asset.Platform != "openai" || asset.Model != "gpt-image-2" || asset.GroupID != 42 || asset.RouteKey != "openai:gpt-image-2" || asset.Size != "auto" {
+			t.Fatalf("asset route snapshot did not round-trip: %+v", asset)
+		}
 	}
 
 	// AddAsset 到不存在的项目应 ErrNoRows

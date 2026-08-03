@@ -51,8 +51,9 @@ func TestBuildGenerationTaskResponseReturnsInputImages(t *testing.T) {
 		Status:   "completed",
 		Progress: 100,
 		Input: map[string]interface{}{
-			"prompt": "turn it into anime",
-			"model":  "gpt-image-2",
+			"prompt":   "turn it into anime",
+			"model":    "gpt-image-2",
+			"group_id": float64(42),
 			"images": []interface{}{
 				"data:image/png;base64,source",
 			},
@@ -60,7 +61,12 @@ func TestBuildGenerationTaskResponseReturnsInputImages(t *testing.T) {
 		},
 		Attributes: map[string]interface{}{
 			"operation": "edit",
+			"platform":  "openai",
+			"model":     "gpt-image-2",
 			"size":      "1024x1024",
+		},
+		Output: map[string]interface{}{
+			"model": "gpt-image-2-1k",
 		},
 	}
 
@@ -74,6 +80,65 @@ func TestBuildGenerationTaskResponseReturnsInputImages(t *testing.T) {
 	}
 	if got := resp["input_mask"]; got != "data:image/png;base64,mask" {
 		t.Fatalf("input_mask = %v", got)
+	}
+	if got := resp["platform"]; got != "openai" {
+		t.Fatalf("platform = %v, want openai", got)
+	}
+	if got := resp["group_id"]; got != 42 {
+		t.Fatalf("group_id = %v (%T), want 42", got, got)
+	}
+	if got := resp["route_key"]; got != "openai:gpt-image-2" {
+		t.Fatalf("route_key = %v, want openai:gpt-image-2", got)
+	}
+	if got := resp["model"]; got != "gpt-image-2" {
+		t.Fatalf("model = %v, want requested public model", got)
+	}
+}
+
+func TestBuildGenerationTaskResponseDoesNotInventMissingGroup(t *testing.T) {
+	task := &hostTask{
+		ID:       13,
+		PluginID: "gateway-openai",
+		Status:   "completed",
+		Input: map[string]interface{}{
+			"model": "gpt-image-2",
+		},
+		Attributes: map[string]interface{}{},
+	}
+
+	resp := buildGenerationTaskResponse(task)
+	if _, ok := resp["group_id"]; ok {
+		t.Fatalf("legacy task must not receive an invented group_id: %v", resp["group_id"])
+	}
+	if got := resp["route_key"]; got != "openai:gpt-image-2" {
+		t.Fatalf("route_key = %v, want derived legacy route key", got)
+	}
+	if got := resp["platform"]; got != "openai" {
+		t.Fatalf("platform = %v, want plugin fallback", got)
+	}
+}
+
+func TestBuildTaskAttributesPersistsCanonicalRouteKey(t *testing.T) {
+	attrs := buildTaskAttributes(createGenerationTaskRequest{
+		Kind:     "image",
+		Platform: "openai",
+		Model:    "gpt-image-2",
+	})
+	if got := attrs["route_key"]; got != "openai:gpt-image-2" {
+		t.Fatalf("route_key = %v", got)
+	}
+}
+
+func TestBuildGenerationTaskResponseDoesNotCreateNilRoute(t *testing.T) {
+	resp := buildGenerationTaskResponse(&hostTask{
+		ID:         14,
+		PluginID:   "gateway-openai",
+		Status:     "processing",
+		Input:      map[string]interface{}{},
+		Attributes: map[string]interface{}{},
+	})
+	if _, ok := resp["route_key"]; ok {
+		t.Fatalf("task without model must not expose a synthetic route: %v", resp["route_key"])
 	}
 }
 

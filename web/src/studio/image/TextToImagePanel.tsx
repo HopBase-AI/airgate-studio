@@ -41,6 +41,7 @@ export function TextToImagePanel() {
     imageSize,
     setImageSize,
     imageGroupsLoaded,
+    imageRouteReady,
     hasImageGroupsForModel,
     isGenerating,
     generate,
@@ -52,7 +53,7 @@ export function TextToImagePanel() {
     ? MODEL_REGISTRY.filter(model => hasImageGroupsForModel(model))
     : MODEL_REGISTRY;
 
-  const canGenerate = prompt.trim().length > 0 && modelOptions.length > 0;
+  const canGenerate = prompt.trim().length > 0 && modelOptions.length > 0 && imageRouteReady;
 
   const handleGenerate = () => {
     const trimmed = prompt.trim();

@@ -42,6 +42,12 @@ type captionImageRequest struct {
 	Model       string `json:"model,omitempty"`
 }
 
+// Keep the disabled skills endpoints type-checked until their routes are enabled.
+var (
+	_ = (*StudioPlugin).handleRewritePrompt
+	_ = (*StudioPlugin).handleCaptionImage
+)
+
 func (p *StudioPlugin) handleRewritePrompt(w http.ResponseWriter, r *http.Request) {
 	userID := parseUserIDInt64(r)
 	if userID <= 0 {

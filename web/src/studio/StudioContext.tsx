@@ -11,8 +11,11 @@ import {
 import { useTranslation } from 'react-i18next';
 import { api, ApiRequestError } from '../api';
 import type { GenerationTask, ImageGroup, Project, ProjectAsset } from '../api';
-import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType, StudioMode } from './types';
-import { getModelConfig, getDefaultModel, MODEL_REGISTRY, type ModelConfig } from './modelConfig';
+import type { GalleryItem, StudioGenerationTask, BatchSubtask, GenerationRouteSnapshot, ImageMode, MediaType, StudioMode } from './types';
+import { getModelConfig, getDefaultModel, MODEL_REGISTRY, modelRouteKey, type ModelConfig } from './modelConfig';
+import { withImageGroupPrices } from './modelRoutes';
+import { buildGenerationRouteSnapshot } from './generationRoute';
+import { startImageGroupDiscovery } from './imageGroupDiscovery';
 import { VIDEO_MODEL_REGISTRY, videoModelById, useVideoStrings } from './video/videoConfig';
 import { recordRemoteTaskSample } from './etaStats';
 
@@ -26,7 +29,10 @@ const POLL_TRANSIENT_ERROR_ATTEMPTS = 2;
 const MODEL_STORE_KEY = 'studio.selectedModelId';
 const DELETED_TASK_STORE_KEY = 'studio.deletedGenerationTaskIds';
 const DELETED_TASK_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const IMAGE_GROUP_DISCOVERY_TIMEOUT_MS = 8000;
 const EMPTY_IMAGE_GROUPS: ImageGroup[] = [];
+
+type ImageGroupDiscoveryStatus = 'pending' | 'loaded' | 'failed';
 
 interface PollErrorMessages {
   failed: string;
@@ -105,6 +111,22 @@ interface GenerateOptions {
   maskRegion?: { x: number; y: number; width: number; height: number };
   count?: number;
   prompts?: string[];
+  // undefined uses the current validated selection. null deliberately fails
+  // closed for historical items whose original route cannot be reconstructed.
+  route?: GenerationRouteSnapshot | null;
+}
+
+interface GenerateVideoOptions {
+  sourceImages?: string[];
+  route?: GenerationRouteSnapshot | null;
+}
+
+function galleryItemRoute(item: GalleryItem): GenerationRouteSnapshot | null {
+  return buildGenerationRouteSnapshot(item.routeKey, item.platform, item.model, item.groupId, item.size);
+}
+
+function studioTaskRoute(task: StudioGenerationTask): GenerationRouteSnapshot | null {
+  return buildGenerationRouteSnapshot(task.routeKey, task.platform, task.model, task.groupId, task.size);
 }
 
 // projectAssetToGallery 把后端持久化的项目资产记录映射成画廊条目。
@@ -118,7 +140,10 @@ function projectAssetToGallery(a: ProjectAsset): GalleryItem {
     url: a.url,
     alt: a.prompt || '',
     prompt: a.prompt || '',
+    platform: a.platform || undefined,
     model: a.model || '',
+    groupId: a.group_id || undefined,
+    routeKey: a.route_key || undefined,
     mode: (a.mode as StudioMode) || 'text2img',
     mediaType: a.mode === 'video' ? 'video' : 'image',
     size: a.size || undefined,
@@ -298,8 +323,13 @@ async function deleteGenerationTaskIfPresent(taskId: number): Promise<void> {
 
 function galleryItemsFromCompletedTask(
   task: GenerationTask,
-  fallback: Pick<GalleryItem, 'prompt' | 'model' | 'mode'>,
+  fallback: Pick<GalleryItem, 'prompt' | 'model' | 'mode'> & Partial<Pick<GalleryItem, 'platform' | 'groupId' | 'routeKey' | 'size'>>,
 ): GalleryItem[] {
+  const platform = task.platform ?? fallback.platform;
+  const model = task.model ?? fallback.model;
+  const groupId = task.group_id ?? fallback.groupId;
+  const routeKey = task.route_key ?? fallback.routeKey;
+  const size = taskSize(task) ?? fallback.size;
   // 视频任务:产物是单条视频 URL(中继地址),不走 markdown 图片解析。
   if (remoteTaskMediaType(task) === 'video') {
     const url = task.video_urls?.[0] || (task.result_content || '').trim();
@@ -310,10 +340,13 @@ function galleryItemsFromCompletedTask(
       url,
       alt: task.prompt || fallback.prompt,
       prompt: task.prompt || fallback.prompt,
-      model: task.model ?? fallback.model,
+      platform,
+      model,
+      groupId,
+      routeKey,
       mode: 'video',
       mediaType: 'video',
-      size: taskSize(task),
+      size,
       createdAt: taskAssetCreatedAt(task),
       sourceUrl: taskSourceUrl(task),
       sourceVideoUrl: taskSourceVideoUrl(task),
@@ -325,9 +358,12 @@ function galleryItemsFromCompletedTask(
     url: img.url,
     alt: img.alt,
     prompt: task.prompt || fallback.prompt,
-    model: task.model ?? fallback.model,
+    platform,
+    model,
+    groupId,
+    routeKey,
     mode: operationToImageMode(task.operation ?? 'generate') || fallback.mode,
-    size: taskSize(task),
+    size,
     createdAt: taskAssetCreatedAt(task),
     sourceUrl: taskSourceUrl(task),
   }));
@@ -483,13 +519,13 @@ export interface StudioContextValue {
   imageSize: string;
   setImageSize: (size: string) => void;
 
-  // 计费分组选择（按当前平台拉取，用户可自选高/低倍率通道；null = 交给
-  // core 自动选最便宜分组，与不传 group_id 的历史行为一致）。
+  // 计费分组选择（按当前模型线路拉取；null 表示尚未得到有效选择，禁止生成）。
   imageGroups: ImageGroup[];
   availableImagePlatforms: string[];
   getImageGroupsForModel: (model: ModelConfig) => ImageGroup[];
   hasImageGroupsForModel: (model: ModelConfig) => boolean;
   imageGroupsLoaded: boolean;
+  imageRouteReady: boolean;
   selectedGroupId: number | null;
   setSelectedGroupId: (id: number) => void;
   selectModelRoute: (modelKey: string, groupId: number) => void;
@@ -503,7 +539,7 @@ export interface StudioContextValue {
   // Generation
   isGenerating: boolean;
   tasks: StudioGenerationTask[];
-  generate: (prompt: string, options?: GenerateOptions) => void;
+  generate: (prompt: string, options?: GenerateOptions) => boolean;
   cancelGeneration: () => void;
 
   // Video generation（Seedance；与图像互不影响的独立参数域）
@@ -519,9 +555,10 @@ export interface StudioContextValue {
   setVideoAudio: (enabled: boolean) => void;
   videoGroups: ImageGroup[];
   videoGroupsLoaded: boolean;
+  videoRouteReady: boolean;
   selectedVideoGroupId: number | null;
   setSelectedVideoGroupId: (id: number) => void;
-  generateVideo: (prompt: string, options?: { sourceImages?: string[] }) => void;
+  generateVideo: (prompt: string, options?: GenerateVideoOptions) => boolean;
 
   // Gallery
   gallery: GalleryItem[];
@@ -585,6 +622,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [videoGroups, setVideoGroups] = useState<ImageGroup[]>([]);
   const [videoGroupsLoaded, setVideoGroupsLoaded] = useState(false);
   const [selectedVideoGroupId, setSelectedVideoGroupId] = useState<number | null>(null);
+  const videoRouteReady = videoGroupsLoaded
+    && selectedVideoGroupId != null
+    && videoGroups.some(group => group.id === selectedVideoGroupId);
 
   // 换档时收敛分辨率到该档支持范围（fast/mini 无 1080p/4k）。
   const setVideoModelId = useCallback((id: string) => {
@@ -596,8 +636,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (mediaType !== 'video') return;
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), IMAGE_GROUP_DISCOVERY_TIMEOUT_MS);
     setVideoGroupsLoaded(false);
-    api.listImageGroups('seedance', videoModelId, 'video')
+    api.listImageGroups('seedance', videoModelId, 'video', controller.signal)
       .then(groups => {
         if (cancelled) return;
         setVideoGroups(groups);
@@ -608,8 +650,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setVideoGroups([]);
         setVideoGroupsLoaded(true);
-      });
-    return () => { cancelled = true; };
+      })
+      .finally(() => window.clearTimeout(timeout));
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [mediaType, videoModelId]);
 
   // Model selection (hardcoded registry)
@@ -650,9 +697,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   useEffect(() => { activeProjectIdRef.current = activeProjectId; }, [activeProjectId]);
 
   // Derived from hardcoded registry
-  const currentModel = getModelConfig(selectedModelKey) ?? getDefaultModel();
-  const selectedModelId = currentModel.id;
-  const selectedPlatform = currentModel.platform;
+  const selectedModelConfig = getModelConfig(selectedModelKey) ?? getDefaultModel();
+  const selectedModelId = selectedModelConfig.id;
+  const selectedPlatform = selectedModelConfig.platform;
 
   const setSelectedModelKey = useCallback((keyOrModelId: string, preferredPlatform?: string) => {
     const currentPlatform = getModelConfig(selectedModelKeyRef.current)?.platform;
@@ -672,19 +719,28 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     selectedModelKeyRef.current = selectedModelKey;
-    setImageSizeRaw(prev => supportedSizeForModel(currentModel, prev));
-  }, [currentModel, selectedModelKey]);
+    setImageSizeRaw(prev => supportedSizeForModel(selectedModelConfig, prev));
+  }, [selectedModelConfig, selectedModelKey]);
 
   // ── 计费分组选择 ──────────────────────────────────────────────────────────
   // 平台切换时重新拉取该用户可用的分组（core 已按最便宜优先排序）。
-  // 用户的选择按平台记在 localStorage；拉取失败或没有分组时回到 null，
-  // 请求不带 group_id，由 core 自动选组（兼容历史行为）。
+  // 用户的选择按模型线路记在 localStorage；只有发现成功且选中分组仍可用时
+  // 才允许发起请求，避免缺 group_id 时意外落入 core 自动路由。
 
   const GROUP_STORE_PREFIX = 'studio.imageGroup.';
   const [imageGroupsByModel, setImageGroupsByModel] = useState<Record<string, ImageGroup[]>>({});
+  const [imageGroupStatusByModel, setImageGroupStatusByModel] = useState<Record<string, ImageGroupDiscoveryStatus>>({});
   const [imageGroupsLoaded, setImageGroupsLoaded] = useState(false);
   const [selectedGroupId, setSelectedGroupIdRaw] = useState<number | null>(null);
-  const imageGroups = imageGroupsByModel[imageGroupCacheKey(selectedPlatform, selectedModelId)] ?? EMPTY_IMAGE_GROUPS;
+  const selectedImageGroupKey = imageGroupCacheKey(selectedPlatform, selectedModelId);
+  const imageGroups = imageGroupsByModel[selectedImageGroupKey] ?? EMPTY_IMAGE_GROUPS;
+  const selectedImageGroupStatus = imageGroupStatusByModel[selectedImageGroupKey] ?? 'pending';
+  const selectedImageGroup = imageGroups.find(group => group.id === selectedGroupId);
+  const imageRouteReady = selectedImageGroupStatus === 'loaded' && selectedImageGroup != null;
+  const currentModel = useMemo(
+    () => withImageGroupPrices(selectedModelConfig, selectedImageGroup),
+    [selectedImageGroup, selectedModelConfig],
+  );
   const availableImagePlatforms = useMemo(
     () => Array.from(new Set(
       MODEL_REGISTRY
@@ -703,27 +759,40 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    const routes = Array.from(new Map(MODEL_REGISTRY.map(model => {
+      const route = {
+        key: imageGroupCacheKey(model.platform, model.id),
+        platform: model.platform,
+        model: model.id,
+      };
+      return [route.key, route] as const;
+    })).values());
+    const keys = Array.from(new Set(routes.map(route => route.key)));
     setImageGroupsLoaded(false);
-    void Promise.all(MODEL_REGISTRY.map(async (model) => {
-      try {
-        const groups = await api.listImageGroups(model.platform, model.id);
-        return [imageGroupCacheKey(model.platform, model.id), groups] as const;
-      } catch {
-        return [imageGroupCacheKey(model.platform, model.id), [] as ImageGroup[]] as const;
-      }
-    })).then((entries) => {
+    setImageGroupStatusByModel(Object.fromEntries(keys.map(key => [key, 'pending' as const])));
+    const discovery = startImageGroupDiscovery<ImageGroup[]>(
+      routes,
+      (route, signal) => api.listImageGroups(route.platform, route.model, undefined, signal),
+      result => {
+        if (!active) return;
+        setImageGroupsByModel(prev => ({ ...prev, [result.key]: result.value ?? [] }));
+        setImageGroupStatusByModel(prev => ({ ...prev, [result.key]: result.status }));
+      },
+      IMAGE_GROUP_DISCOVERY_TIMEOUT_MS,
+    );
+    void discovery.done.then(() => {
       if (!active) return;
-      const next: Record<string, ImageGroup[]> = {};
-      for (const [key, groups] of entries) next[key] = groups;
-      setImageGroupsByModel(next);
       setImageGroupsLoaded(true);
     });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      discovery.cancel();
+    };
   }, []);
 
   useEffect(() => {
     setSelectedGroupIdRaw(null);
-    if (!imageGroupsLoaded || imageGroups.length === 0) return;
+    if (selectedImageGroupStatus !== 'loaded' || imageGroups.length === 0) return;
     let preferred: number | null = null;
     try {
       const raw = window.localStorage.getItem(GROUP_STORE_PREFIX + selectedPlatform + ':' + selectedModelId);
@@ -731,7 +800,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
     const match = imageGroups.find(g => g.id === preferred);
     setSelectedGroupIdRaw((match ?? imageGroups[0]).id);
-  }, [imageGroups, imageGroupsLoaded, selectedModelId, selectedPlatform]);
+  }, [imageGroups, selectedImageGroupStatus, selectedModelId, selectedPlatform]);
 
   useEffect(() => {
     if (!imageGroupsLoaded || imageGroups.length > 0) return;
@@ -740,11 +809,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [imageGroups, imageGroupsByModel, imageGroupsLoaded, selectedModelKey, setSelectedModelKey]);
 
   const setSelectedGroupId = useCallback((id: number) => {
+    if (!imageGroups.some(group => group.id === id)) return;
     setSelectedGroupIdRaw(id);
     try {
       window.localStorage.setItem(GROUP_STORE_PREFIX + selectedPlatform + ':' + selectedModelId, String(id));
     } catch { /* ignore */ }
-  }, [selectedModelId, selectedPlatform]);
+  }, [imageGroups, selectedModelId, selectedPlatform]);
 
   const selectModelRoute = useCallback((modelKey: string, groupId: number) => {
     const model = getModelConfig(modelKey);
@@ -791,7 +861,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           url,
           alt: t.prompt,
           prompt: t.prompt,
+          platform: t.platform,
           model: t.model ?? '',
+          groupId: t.group_id,
+          routeKey: t.route_key,
           mode: 'video',
           mediaType: 'video',
           size: taskSize(t),
@@ -809,7 +882,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           url: img.url,
           alt: img.alt,
           prompt: t.prompt,
+          platform: t.platform,
           model: t.model ?? '',
+          groupId: t.group_id,
+          routeKey: t.route_key,
           mode: operationToImageMode(t.operation ?? 'generate'),
           size: taskSize(t),
           createdAt: taskAssetCreatedAt(t),
@@ -857,7 +933,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           status: 'failed' as const,
           error: t.error_message || pollErrorMessages.failed,
           createdAt: t.created_at,
+          platform: t.platform,
           model: t.model,
+          groupId: t.group_id,
+          routeKey: t.route_key,
           size: t.size,
           durationSeconds: t.duration,
           remoteTaskIds: [t.id],
@@ -868,7 +947,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           mode: remoteTaskMode(t),
           status: 'processing' as const,
           createdAt: t.created_at,
+          platform: t.platform,
           model: t.model,
+          groupId: t.group_id,
+          routeKey: t.route_key,
           size: t.size,
           durationSeconds: t.duration,
           remoteTaskIds: [t.id],
@@ -902,7 +984,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             recordRemoteTaskSample(done);
             const items = galleryItemsFromCompletedTask(done, {
               prompt: t.prompt,
+              platform: t.platform,
               model: t.model ?? '',
+              groupId: t.group_id,
+              routeKey: t.route_key,
+              size: t.size,
               mode: remoteTaskMode(t),
             });
             if (items.length === 0) {
@@ -1006,7 +1092,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           task_id: item.taskId,
           url: item.url,
           prompt: item.prompt,
+          platform: item.platform,
           model: item.model,
+          group_id: item.groupId,
+          route_key: item.routeKey,
           mode: item.mode,
           size: item.size,
           // 视频官方直链一并落库,重载会话后 24h 内仍能显示「官方源链接」。
@@ -1071,7 +1160,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             });
             const items = galleryItemsFromCompletedTask(remote, {
               prompt: uiTask.prompt,
+              platform: uiTask.platform,
               model: uiTask.model ?? '',
+              groupId: uiTask.groupId,
+              routeKey: uiTask.routeKey,
+              size: uiTask.size,
               mode: uiTask.mode,
             });
             if (items.length === 0) {
@@ -1137,8 +1230,16 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       prompt: string,
       options?: GenerateOptions,
     ) => {
-      if (!prompt.trim()) return;
+      if (!prompt.trim()) return false;
       const mode = resolveGenerationMode(imageMode, options);
+      const selectedRoute = buildGenerationRouteSnapshot(
+        selectedModelKey,
+        selectedPlatform,
+        selectedModelId,
+        selectedGroupId ?? undefined,
+        imageSize,
+      );
+      const route = options?.route === undefined ? selectedRoute : options.route;
 
       const failLocalTask = (message: string) => {
         setTasks(prev => [{
@@ -1148,36 +1249,52 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           status: 'failed',
           error: message,
           createdAt: new Date().toISOString(),
-          platform: selectedPlatform,
-          model: selectedModelId,
-          size: imageSize,
+          platform: route?.platform ?? selectedPlatform,
+          model: route?.model ?? selectedModelId,
+          groupId: route?.groupId,
+          routeKey: route?.routeKey,
+          size: route?.size ?? imageSize,
           remoteTaskIds: [],
         }, ...prev]);
       };
 
-      if (!imageGroupsLoaded) {
-        failLocalTask(t('playground.studio_error_image_groups_loading'));
-        return;
+      if (!route) {
+        failLocalTask(t('playground.studio_error_no_image_group', { platform: selectedPlatform }));
+        return false;
       }
 
-      if (imageGroups.length === 0) {
-        const platformLabel = selectedPlatform === 'gemini'
+      const routeModel = getModelConfig(route.routeKey, route.platform);
+      if (!routeModel || routeModel.platform !== route.platform || routeModel.id !== route.model || !routeModel.sizes.some(size => size.value === route.size)) {
+        failLocalTask(t('playground.studio_error_no_image_group', { platform: route.platform }));
+        return false;
+      }
+      const routeGroupKey = imageGroupCacheKey(route.platform, route.model);
+      const routeGroupStatus = imageGroupStatusByModel[routeGroupKey] ?? 'pending';
+      const routeGroups = imageGroupsByModel[routeGroupKey] ?? EMPTY_IMAGE_GROUPS;
+      if (routeGroupStatus === 'pending') {
+        failLocalTask(t('playground.studio_error_image_groups_loading'));
+        return false;
+      }
+
+      if (routeGroupStatus !== 'loaded' || !routeGroups.some(group => group.id === route.groupId)) {
+        const platformLabel = route.platform === 'gemini'
           ? 'Gemini'
-          : selectedPlatform === 'openai'
+          : route.platform === 'openai'
           ? 'OpenAI'
-          : selectedPlatform;
+          : route.platform;
         failLocalTask(t('playground.studio_error_no_image_group', { platform: platformLabel }));
-        return;
+        return false;
       }
 
       const controller = new AbortController();
       const signal = controller.signal;
+      abortRef.current = controller;
 
       const taskId = uid();
       const now = new Date().toISOString();
       const remoteTaskIds: number[] = [];
       // 发起时刻的分组选择：写进 task 供「全部重试」沿用，避免用户中途切组导致错扣。
-      const groupId = selectedGroupId ?? undefined;
+      const groupId = route.groupId;
 
       const task: StudioGenerationTask = {
         id: taskId,
@@ -1185,10 +1302,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         mode,
         status: 'queued',
         createdAt: now,
-        platform: selectedPlatform,
-        model: selectedModelId,
+        platform: route.platform,
+        model: route.model,
         groupId,
-        size: imageSize,
+        routeKey: route.routeKey,
+        size: route.size,
         remoteTaskIds: [],
       };
 
@@ -1248,11 +1366,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               const created = await api.createGenerationTask({
                 kind: 'image',
                 operation: batchOperation,
-                platform: selectedPlatform,
-                model: selectedModelId,
+                platform: route.platform,
+                model: route.model,
                 prompt: sub.prompt,
                 group_id: groupId,
-                parameters: imageSize ? { size: imageSize } : undefined,
+                parameters: { size: route.size },
                 inputs: batchSources.length > 0
                   ? batchSources.map(url => ({ type: 'image' as const, role: 'source' as const, url }))
                   : undefined,
@@ -1261,10 +1379,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               patchSubtask(sub.id, { remoteTaskId: created.id });
               updateTask({ remoteTaskIds: [...remoteTaskIds] });
               const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, undefined, pollErrorMessages);
-              recordRemoteTaskSample(completed, { mediaType: 'image', model: selectedModelId, size: imageSize });
+              recordRemoteTaskSample(completed, { mediaType: 'image', model: route.model, size: route.size });
               const items = galleryItemsFromCompletedTask(completed, {
                 prompt: sub.prompt,
-                model: selectedModelId,
+                platform: route.platform,
+                model: route.model,
+                groupId: route.groupId,
+                routeKey: route.routeKey,
+                size: route.size,
                 mode,
               }).map(item => ({
                 ...item,
@@ -1311,11 +1433,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             const taskData: Parameters<typeof api.createGenerationTask>[0] = {
               kind: 'image',
               operation: modeToOperation(mode),
-              platform: selectedPlatform,
-              model: selectedModelId,
+              platform: route.platform,
+              model: route.model,
               prompt,
               group_id: groupId,
-              parameters: imageSize ? { size: imageSize } : undefined,
+              parameters: { size: route.size },
             };
 
             if (mode === 'img2img' || mode === 'inpaint') {
@@ -1364,7 +1486,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               updateTask(failedTaskPatchFromRemote(completed, pollErrorMessages.failed));
               return;
             }
-            recordRemoteTaskSample(completed, { mediaType: 'image', model: selectedModelId, size: imageSize });
+            recordRemoteTaskSample(completed, { mediaType: 'image', model: route.model, size: route.size });
             const images = parseMarkdownImages(completed.result_content || '');
             if (images.length === 0) {
               updateTask({ status: 'failed', error: t('playground.studio_error_no_result_image'), remoteTaskIds: [created.id] });
@@ -1377,9 +1499,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               url: img.url,
               alt: img.alt,
               prompt,
-              model: selectedModelId,
+              platform: route.platform,
+              model: route.model,
+              groupId: route.groupId,
+              routeKey: route.routeKey,
               mode,
-              size: imageSize,
+              size: route.size,
               createdAt: taskAssetCreatedAt(completed),
               // GalleryItem.sourceUrl is single-valued; record the first source
               // so "regenerate" can seed at least one reference. Multi-ref recall
@@ -1401,6 +1526,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask({ status: 'failed', error: msg });
           }
         } finally {
+          if (abortRef.current === controller) abortRef.current = null;
           activeCountRef.current -= 1;
           if (activeCountRef.current <= 0) {
             activeCountRef.current = 0;
@@ -1410,13 +1536,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       };
 
       void runTask();
+      return true;
     },
     [
       imageMode,
       imageSize,
-      imageGroups,
-      imageGroupsLoaded,
+      imageGroupsByModel,
+      imageGroupStatusByModel,
       referenceImages,
+      selectedModelKey,
       selectedPlatform,
       selectedModelId,
       selectedGroupId,
@@ -1429,12 +1557,39 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // generateVideo 视频生成（Seedance）：单任务直达 task 系统，
   // 轮询窗口放宽到 60 分钟；产物是网关签发的中继地址，不落 core 资产库。
   const generateVideo = useCallback(
-    (prompt: string, options?: { sourceImages?: string[] }) => {
-      if (!prompt.trim()) return;
-      const model = videoModelId;
+    (prompt: string, options?: GenerateVideoOptions) => {
+      if (!prompt.trim()) return false;
+      const selectedRoute = buildGenerationRouteSnapshot(
+        modelRouteKey('seedance', videoModelId),
+        'seedance',
+        videoModelId,
+        selectedVideoGroupId ?? undefined,
+        videoResolution,
+      );
+      const route = options?.route === undefined ? selectedRoute : options.route;
+      const model = route?.model ?? videoModelId;
+      const routeModel = route && VIDEO_MODEL_REGISTRY.find(candidate => candidate.id === route.model);
+      if (!route || route.platform !== 'seedance' || !routeModel || !routeModel.resolutions.includes(route.size)) {
+        setTasks(prev => [{
+          id: uid(),
+          prompt,
+          mode: 'video',
+          status: 'failed',
+          error: vs('no_group'),
+          createdAt: new Date().toISOString(),
+          platform: route?.platform ?? 'seedance',
+          model,
+          groupId: route?.groupId,
+          routeKey: route?.routeKey,
+          size: route?.size ?? videoResolution,
+          durationSeconds: videoDuration,
+          remoteTaskIds: [],
+        }, ...prev]);
+        return false;
+      }
       const taskId = uid();
       const now = new Date().toISOString();
-      const groupId = selectedVideoGroupId ?? undefined;
+      const groupId = route?.groupId;
       const sources = options?.sourceImages ?? [];
 
       const task: StudioGenerationTask = {
@@ -1443,10 +1598,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         mode: 'video',
         status: 'queued',
         createdAt: now,
-        platform: 'seedance',
+        platform: route?.platform ?? 'seedance',
         model,
         groupId,
-        size: videoResolution,
+        routeKey: route?.routeKey,
+        size: route?.size ?? videoResolution,
         durationSeconds: videoDuration,
         remoteTaskIds: [],
       };
@@ -1468,20 +1624,30 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const runTask = async () => {
         try {
           updateTask({ status: 'processing' });
-          if (videoGroupsLoaded && videoGroups.length === 0) {
+          let eligibleGroups = videoGroups;
+          if (route.model !== videoModelId || !videoGroupsLoaded) {
+            const discoveryController = new AbortController();
+            const timeout = window.setTimeout(() => discoveryController.abort(), IMAGE_GROUP_DISCOVERY_TIMEOUT_MS);
+            try {
+              eligibleGroups = await api.listImageGroups('seedance', route.model, 'video', discoveryController.signal);
+            } finally {
+              window.clearTimeout(timeout);
+            }
+          }
+          if (!eligibleGroups.some(group => group.id === route.groupId)) {
             updateTask({ status: 'failed', error: vs('no_group') });
             return;
           }
           const created = await api.createGenerationTask({
             kind: 'video',
             operation: 'generate',
-            platform: 'seedance',
-            model,
+            platform: route.platform,
+            model: route.model,
             prompt,
             group_id: groupId,
             parameters: {
               duration: videoDuration,
-              resolution: videoResolution,
+              resolution: route.size,
               ratio: videoRatio,
               generate_audio: videoAudio,
             },
@@ -1502,7 +1668,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask(failedTaskPatchFromRemote(completed, pollErrorMessages.failed));
             return;
           }
-          recordRemoteTaskSample(completed, { mediaType: 'video', model, size: videoResolution, durationSeconds: videoDuration });
+          recordRemoteTaskSample(completed, { mediaType: 'video', model: route.model, size: route.size, durationSeconds: videoDuration });
           const videoUrl = completed.video_urls?.[0] || (completed.result_content || '').trim();
           if (!videoUrl) {
             updateTask({ status: 'failed', error: vs('no_result'), remoteTaskIds: [created.id] });
@@ -1514,10 +1680,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             url: videoUrl,
             alt: prompt,
             prompt,
-            model,
+            platform: route.platform,
+            model: route.model,
+            groupId: route.groupId,
+            routeKey: route.routeKey,
             mode: 'video',
             mediaType: 'video',
-            size: videoResolution,
+            size: route.size,
             createdAt: taskAssetCreatedAt(completed),
             sourceUrl: sources[0],
             sourceVideoUrl: taskSourceVideoUrl(completed),
@@ -1540,6 +1709,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         }
       };
       void runTask();
+      return true;
     },
     [
       videoModelId,
@@ -1638,29 +1808,31 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const regenerate = useCallback((item: GalleryItem) => {
+    const route = galleryItemRoute(item);
     if (item.mediaType === 'video' || item.mode === 'video') {
       setMediaType('video');
-      if (VIDEO_MODEL_REGISTRY.some(m => m.id === item.model)) setVideoModelId(item.model);
-      setTimeout(() => {
-        generateVideo(item.prompt, { sourceImages: item.sourceUrl ? [item.sourceUrl] : undefined });
-      }, 0);
+      if (route && VIDEO_MODEL_REGISTRY.some(m => m.id === route.model)) setVideoModelId(route.model);
+      generateVideo(item.prompt, {
+        route,
+        sourceImages: item.sourceUrl ? [item.sourceUrl] : undefined,
+      });
       return;
     }
     const mode = item.mode === 'batch' ? 'text2img' : item.mode;
     const sourceImage = item.sourceUrl ?? (mode === 'img2img' || mode === 'inpaint' ? item.url : undefined);
-    setSelectedModelKey(item.model);
+    if (route) selectModelRoute(route.routeKey, route.groupId);
+    else setSelectedModelKey(item.routeKey ?? item.model, item.platform);
     setImageMode(mode);
     if (item.size) setImageSize(item.size);
     // Regenerate resets references to the original source (one item only —
     // GalleryItem.sourceUrl can't carry multiple references today).
     setReferenceImages(sourceImage ? [sourceImage] : []);
-    setTimeout(() => {
-      generate(item.prompt, {
-        mode,
-        sourceImage,
-      });
-    }, 0);
-  }, [generate, generateVideo, setVideoModelId, setSelectedModelKey, setImageMode, setImageSize]);
+    generate(item.prompt, {
+      mode,
+      route,
+      sourceImage,
+    });
+  }, [generate, generateVideo, selectModelRoute, setVideoModelId, setSelectedModelKey, setImageMode, setImageSize]);
 
   // variations —— 「变体」：同 prompt 出 4 张（gpt-image-2 无固定 seed，自然各异），复用批量路径。
   const variations = useCallback((item: GalleryItem) => {
@@ -1670,14 +1842,19 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }
     const mode = item.mode === 'batch' ? 'text2img' : item.mode;
     const sourceImage = item.sourceUrl ?? (mode === 'img2img' || mode === 'inpaint' ? item.url : undefined);
-    setSelectedModelKey(item.model);
+    const route = galleryItemRoute(item);
+    if (route) selectModelRoute(route.routeKey, route.groupId);
+    else setSelectedModelKey(item.routeKey ?? item.model, item.platform);
     setImageMode(mode);
     if (item.size) setImageSize(item.size);
     setReferenceImages(sourceImage ? [sourceImage] : []);
-    setTimeout(() => {
-      generate(item.prompt, { mode: 'batch', count: 4, sourceImages: sourceImage ? [sourceImage] : undefined });
-    }, 0);
-  }, [generate, regenerate, setSelectedModelKey, setImageMode, setImageSize]);
+    generate(item.prompt, {
+      mode: 'batch',
+      count: 4,
+      route,
+      sourceImages: sourceImage ? [sourceImage] : undefined,
+    });
+  }, [generate, regenerate, selectModelRoute, setSelectedModelKey, setImageMode, setImageSize]);
 
   // editRequest —— 「编辑这张」桥接：GalleryCard 调 requestEdit(url)，ComposerBar 监听后
   // 把该图载入主框并打开蒙版编辑器（局部重绘），用完 clearEditRequest 清空。
@@ -1694,12 +1871,22 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const failed = task.subtasks.filter(s => s.status === 'failed');
     if (failed.length === 0) return;
 
+    const route = studioTaskRoute(task);
+    const routeKey = route ? imageGroupCacheKey(route.platform, route.model) : '';
+    const routeGroups = routeKey ? imageGroupsByModel[routeKey] ?? EMPTY_IMAGE_GROUPS : EMPTY_IMAGE_GROUPS;
+    if (!route || imageGroupStatusByModel[routeKey] !== 'loaded' || !routeGroups.some(group => group.id === route.groupId)) {
+      setTasks(prev => prev.map(item => item.id === uiId
+        ? { ...item, status: 'failed', error: t('playground.studio_error_no_image_group', { platform: task.platform ?? '' }) }
+        : item));
+      return;
+    }
+
     const controller = new AbortController();
     const signal = controller.signal;
-    const model = task.model || selectedModelId;
-    const platform = task.platform || selectedPlatform;
-    const size = task.size;
-    const groupId = task.groupId;
+    const model = route.model;
+    const platform = route.platform;
+    const size = route.size;
+    const groupId = route.groupId;
     const sources = task.batchSources ?? [];
     const operation: 'generate' | 'edit' = sources.length > 0 ? 'edit' : 'generate';
 
@@ -1742,7 +1929,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, undefined, pollErrorMessages);
           const items = galleryItemsFromCompletedTask(completed, {
             prompt: sub.prompt,
+            platform,
             model,
+            groupId,
+            routeKey: route.routeKey,
+            size,
             mode: 'batch',
           }).map(item => ({
             ...item,
@@ -1773,7 +1964,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       }
     };
     void runRetry();
-  }, [persistActiveProjectAssets, pollErrorMessages, selectedModelId, selectedPlatform, t, tasks]);
+  }, [imageGroupsByModel, imageGroupStatusByModel, persistActiveProjectAssets, pollErrorMessages, t, tasks]);
 
   // ── Project CRUD ──────────────────────────────────────────────────────────
 
@@ -1822,6 +2013,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setVideoAudio,
     videoGroups,
     videoGroupsLoaded,
+    videoRouteReady,
     selectedVideoGroupId,
     setSelectedVideoGroupId,
     generateVideo,
@@ -1836,6 +2028,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     getImageGroupsForModel,
     hasImageGroupsForModel,
     imageGroupsLoaded,
+    imageRouteReady,
     selectedGroupId,
     setSelectedGroupId,
     selectModelRoute,

@@ -170,10 +170,10 @@ func (s *Service) AddAsset(ctx context.Context, userID int, projectID int64, rec
 	out.UserID = userID
 	out.ProjectID = projectID
 	if err := s.db.QueryRowContext(ctx,
-		`INSERT INTO studio_assets (user_id, project_id, task_id, url, prompt, model, mode, size, source_video_url)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		 RETURNING id, created_at`,
-		userID, projectID, rec.TaskID, rec.URL, rec.Prompt, rec.Model, rec.Mode, rec.Size, rec.SourceVideoURL,
+		`INSERT INTO studio_assets (user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			 RETURNING id, created_at`,
+		userID, projectID, rec.TaskID, rec.URL, rec.Prompt, rec.Platform, rec.Model, rec.GroupID, rec.RouteKey, rec.Mode, rec.Size, rec.SourceVideoURL,
 	).Scan(&out.ID, &out.CreatedAt); err != nil {
 		return nil, fmt.Errorf("写入资产失败: %w", err)
 	}
@@ -193,7 +193,7 @@ func (s *Service) ListAssets(ctx context.Context, userID int, projectID int64, l
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, user_id, project_id, task_id, url, prompt, model, mode, size, source_video_url, created_at
+		`SELECT id, user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url, created_at
 		 FROM studio_assets
 		 WHERE project_id = $1 AND user_id = $2
 		 ORDER BY created_at DESC, id DESC
@@ -208,7 +208,7 @@ func (s *Service) ListAssets(ctx context.Context, userID int, projectID int64, l
 	assets := make([]AssetRecord, 0, limit)
 	for rows.Next() {
 		var a AssetRecord
-		if err := rows.Scan(&a.ID, &a.UserID, &a.ProjectID, &a.TaskID, &a.URL, &a.Prompt, &a.Model, &a.Mode, &a.Size, &a.SourceVideoURL, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.UserID, &a.ProjectID, &a.TaskID, &a.URL, &a.Prompt, &a.Platform, &a.Model, &a.GroupID, &a.RouteKey, &a.Mode, &a.Size, &a.SourceVideoURL, &a.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		assets = append(assets, a)
@@ -233,6 +233,6 @@ func (s *Service) DeleteAsset(ctx context.Context, userID int, assetID int64) er
 // defaultProjectLockKey 把 userID 映射成 advisory lock 的 key，命名空间用 fnv 哈希避免与其他锁冲突。
 func defaultProjectLockKey(userID int) int64 {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(fmt.Sprintf("studio-default-project:%d", userID)))
+	_, _ = fmt.Fprintf(h, "studio-default-project:%d", userID)
 	return int64(h.Sum64())
 }
