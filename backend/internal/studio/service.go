@@ -3,6 +3,7 @@ package studio
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"log/slog"
@@ -12,6 +13,8 @@ import (
 )
 
 const defaultProjectName = "未命名项目"
+
+var ErrAssetDeleted = errors.New("asset was deleted")
 
 // Service 承载项目与资产的持久化逻辑。db 为 nil 时（未配置 plugin_dsn）所有方法返回错误，
 // 由 handler 层转成 503，保证插件「未配置态」不崩溃。
@@ -153,6 +156,27 @@ func (s *Service) projectExists(ctx context.Context, userID int, projectID int64
 
 // ── Asset CRUD ──
 
+func (s *Service) assetByTaskURL(ctx context.Context, userID int, projectID, taskID int64, url string) (*AssetRecord, error) {
+	var out AssetRecord
+	var deletedAt sql.NullTime
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, project_id, task_id, url, prompt, model, mode, size, source_video_url, created_at, deleted_at
+		 FROM studio_assets
+		 WHERE user_id = $1 AND project_id = $2 AND task_id = $3 AND url = $4`,
+		userID, projectID, taskID, url,
+	).Scan(
+		&out.ID, &out.UserID, &out.ProjectID, &out.TaskID, &out.URL, &out.Prompt,
+		&out.Model, &out.Mode, &out.Size, &out.SourceVideoURL, &out.CreatedAt, &deletedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if deletedAt.Valid {
+		return nil, ErrAssetDeleted
+	}
+	return &out, nil
+}
+
 // AddAsset 把一张已生成图的持久 URL + 元数据写入项目。仅记引用，不调用任何 host assets 方法。
 func (s *Service) AddAsset(ctx context.Context, userID int, projectID int64, rec AssetRecord) (*AssetRecord, error) {
 	if strings.TrimSpace(rec.URL) == "" {
@@ -165,6 +189,15 @@ func (s *Service) AddAsset(ctx context.Context, userID int, projectID int64, rec
 	if !ok {
 		return nil, sql.ErrNoRows
 	}
+	if rec.TaskID > 0 {
+		existing, lookupErr := s.assetByTaskURL(ctx, userID, projectID, rec.TaskID, rec.URL)
+		if lookupErr == nil || errors.Is(lookupErr, ErrAssetDeleted) {
+			return existing, lookupErr
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return nil, lookupErr
+		}
+	}
 
 	out := rec
 	out.UserID = userID
@@ -172,9 +205,14 @@ func (s *Service) AddAsset(ctx context.Context, userID int, projectID int64, rec
 	if err := s.db.QueryRowContext(ctx,
 		`INSERT INTO studio_assets (user_id, project_id, task_id, url, prompt, model, mode, size, source_video_url)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		 ON CONFLICT (project_id, task_id, url) WHERE task_id > 0
+		 DO NOTHING
 		 RETURNING id, created_at`,
 		userID, projectID, rec.TaskID, rec.URL, rec.Prompt, rec.Model, rec.Mode, rec.Size, rec.SourceVideoURL,
 	).Scan(&out.ID, &out.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) && rec.TaskID > 0 {
+			return s.assetByTaskURL(ctx, userID, projectID, rec.TaskID, rec.URL)
+		}
 		return nil, fmt.Errorf("写入资产失败: %w", err)
 	}
 	// 触碰项目 updated_at，让最近活跃的项目排在前面
@@ -186,7 +224,7 @@ func (s *Service) AddAsset(ctx context.Context, userID int, projectID int64, rec
 func (s *Service) ListAssets(ctx context.Context, userID int, projectID int64, limit, offset int) ([]AssetRecord, int, error) {
 	var total int
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM studio_assets WHERE project_id = $1 AND user_id = $2`,
+		`SELECT COUNT(*) FROM studio_assets WHERE project_id = $1 AND user_id = $2 AND deleted_at IS NULL`,
 		projectID, userID,
 	).Scan(&total); err != nil {
 		return nil, 0, err
@@ -195,7 +233,7 @@ func (s *Service) ListAssets(ctx context.Context, userID int, projectID int64, l
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, user_id, project_id, task_id, url, prompt, model, mode, size, source_video_url, created_at
 		 FROM studio_assets
-		 WHERE project_id = $1 AND user_id = $2
+		 WHERE project_id = $1 AND user_id = $2 AND deleted_at IS NULL
 		 ORDER BY created_at DESC, id DESC
 		 LIMIT $3 OFFSET $4`,
 		projectID, userID, limit, offset,
@@ -218,7 +256,8 @@ func (s *Service) ListAssets(ctx context.Context, userID int, projectID int64, l
 
 func (s *Service) DeleteAsset(ctx context.Context, userID int, assetID int64) error {
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM studio_assets WHERE id = $1 AND user_id = $2`,
+		`UPDATE studio_assets SET deleted_at = NOW()
+		 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
 		assetID, userID,
 	)
 	if err != nil {
@@ -228,6 +267,20 @@ func (s *Service) DeleteAsset(ctx context.Context, userID int, assetID int64) er
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// DeleteAssetsByTask removes project references after the owning user deletes
+// a generation task. The host task and Studio DB are separate stores, so this
+// cleanup prevents deleted outputs from reappearing in project history.
+func (s *Service) DeleteAssetsByTask(ctx context.Context, userID int, taskID int64) error {
+	if userID <= 0 || taskID <= 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM studio_assets WHERE user_id = $1 AND task_id = $2`,
+		userID, taskID,
+	)
+	return err
 }
 
 // defaultProjectLockKey 把 userID 映射成 advisory lock 的 key，命名空间用 fnv 哈希避免与其他锁冲突。

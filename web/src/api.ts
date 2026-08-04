@@ -73,6 +73,9 @@ async function requestCore<T>(path: string): Promise<T> {
 export interface GenerationTask {
   id: number;
   task_id: number;
+  // Studio project captured when the task was created. Missing/0 means the
+  // aggregate "all works" view and keeps older tasks backward-compatible.
+  project_id?: number;
   status: string;
   progress: number;
   prompt: string;
@@ -180,6 +183,7 @@ export const api = {
     model: string;
     prompt: string;
     group_id?: number;
+    project_id?: number;
     parameters?: Record<string, unknown>;
     inputs?: Array<{ type: string; role: string; url: string }>;
     mask?: { type: string; role: string; url: string };

@@ -63,8 +63,34 @@ func migrate(db *sql.DB) error {
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_studio_assets_project ON studio_assets(project_id, created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_studio_assets_user_task ON studio_assets(user_id, task_id);
 
 		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS source_video_url TEXT NOT NULL DEFAULT '';
+		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+		-- Run the legacy cleanup only during the upgrade that creates the unique
+		-- index. Normal process restarts must not scan the full asset table.
+		DO $migration$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_indexes
+				WHERE schemaname = current_schema()
+				  AND indexname = 'idx_studio_assets_project_task_url'
+			) THEN
+				DELETE FROM studio_assets newer
+				USING studio_assets older
+				WHERE newer.id > older.id
+				  AND newer.project_id = older.project_id
+				  AND newer.task_id = older.task_id
+				  AND newer.url = older.url
+				  AND newer.task_id > 0;
+			END IF;
+		END
+		$migration$;
+
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_assets_project_task_url
+			ON studio_assets(project_id, task_id, url)
+			WHERE task_id > 0;
 	`)
 	return err
 }

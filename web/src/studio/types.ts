@@ -37,6 +37,8 @@ export interface BatchSubtask {
 
 export interface StudioGenerationTask {
   id: string;
+  // 任务发起时的项目。0 表示“全部作品”；用于防止长任务完成后串入当前项目。
+  projectId?: number;
   prompt: string;
   mode: StudioMode;
   status: 'queued' | 'processing' | 'completed' | 'failed';

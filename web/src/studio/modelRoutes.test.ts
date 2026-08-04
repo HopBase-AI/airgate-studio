@@ -44,9 +44,9 @@ describe('model route option values', () => {
 });
 
 describe('model route labels', () => {
-  it('shows the configured group note and effective multiplier', () => {
+  it('keeps configured group notes out of the visible label', () => {
     expect(formatImageGroupLabel(imageGroup({ note: '低价线路' })))
-      .toBe('Adobe · 低价线路 · ×0.65');
+      .toBe('Adobe · ×0.65');
   });
 
   it('does not invent a token multiplier for fixed-price image groups', () => {
@@ -63,7 +63,7 @@ describe('model route labels', () => {
 
     expect(formatImageGroupLabel(group)).toContain('×3');
     expect(formatModelRouteGroupLabel(group))
-      .toBe('Adobe · 固定价：1K ¥0.08，2K ¥0.12，4K ¥0.15。');
+      .toBe('Adobe');
   });
 
   it('builds distinct Adobe and Google official options for the same upstream model ID', () => {
@@ -88,5 +88,18 @@ describe('model route labels', () => {
       'Banana 2 · Adobe',
       'Banana 2 · Google 官方',
     ]);
+  });
+
+  it('keeps a long group note available as option metadata', () => {
+    const model = getModelConfig('openai:gpt-image-2');
+    expect(model).toBeDefined();
+    if (!model) throw new Error('expected GPT Image route');
+    const note = 'Azure Gemini 主线路; Banana 2 / Pro 生图备用。';
+
+    const [option] = buildModelRouteOptions([model], () => [imageGroup({ note })]);
+
+    expect(option.label).toBe('GPT Image 2 · Adobe');
+    expect(option.description).toBe(note);
+    expect(option.label).not.toContain(note);
   });
 });

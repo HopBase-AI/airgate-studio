@@ -3,6 +3,7 @@ package studio
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -97,6 +98,25 @@ func toInt(v interface{}) (int, bool) {
 	}
 }
 
+func toPositiveInt64(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), n > 0
+	case int64:
+		return n, n > 0
+	case float64:
+		if n <= 0 || math.Trunc(n) != n || n >= float64(uint64(1)<<63) {
+			return 0, false
+		}
+		return int64(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil && i > 0
+	default:
+		return 0, false
+	}
+}
+
 type createGenerationTaskRequest struct {
 	Kind       string                 `json:"kind"`
 	Operation  string                 `json:"operation"`
@@ -104,6 +124,7 @@ type createGenerationTaskRequest struct {
 	Model      string                 `json:"model"`
 	Prompt     string                 `json:"prompt"`
 	GroupID    int64                  `json:"group_id,omitempty"`
+	ProjectID  int64                  `json:"project_id,omitempty"`
 	Parameters map[string]interface{} `json:"parameters,omitempty"`
 	Inputs     []generationInput      `json:"inputs,omitempty"`
 	Mask       *generationInput       `json:"mask,omitempty"`
@@ -259,6 +280,9 @@ func buildTaskAttributes(req createGenerationTaskRequest) map[string]interface{}
 		"platform":  req.Platform,
 		"model":     req.Model,
 	}
+	if req.ProjectID > 0 {
+		attrs["project_id"] = req.ProjectID
+	}
 	for _, key := range []string{"size", "quality"} {
 		if value, ok := req.Parameters[key]; ok && value != nil && fmt.Sprint(value) != "" {
 			attrs[key] = fmt.Sprint(value)
@@ -331,6 +355,9 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 	}
 	if v, ok := task.Attributes["kind"]; ok && fmt.Sprint(v) != "" {
 		resp["kind"] = v
+	}
+	if projectID, ok := toPositiveInt64(task.Attributes["project_id"]); ok {
+		resp["project_id"] = projectID
 	}
 	if v, ok := task.Input["duration"]; ok {
 		if d, ok2 := toInt(v); ok2 && d > 0 {

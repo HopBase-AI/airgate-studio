@@ -3,6 +3,7 @@ package studio
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -142,8 +143,12 @@ func (p *StudioPlugin) handleAddProjectAsset(w http.ResponseWriter, r *http.Requ
 		SourceVideoURL: req.SourceVideoURL,
 	})
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "项目不存在"})
+			return
+		}
+		if errors.Is(err, ErrAssetDeleted) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "资产已被删除"})
 			return
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

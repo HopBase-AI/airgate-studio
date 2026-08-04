@@ -6,6 +6,7 @@ const ROUTE_VALUE_SEPARATOR = '|';
 export interface ModelRouteOption {
   value: string;
   label: string;
+  description?: string;
   modelKey: string;
   groupId: number;
 }
@@ -26,18 +27,19 @@ export function parseModelRouteOptionValue(value: string): { modelKey: string; g
 }
 
 export function formatImageGroupLabel(group: ImageGroup): string {
-  const parts = imageGroupLabelParts(group);
+  const parts = [imageGroupDisplayName(group)];
   if (group.rate_multiplier > 0 && group.effective_rate > 0) {
     parts.push(`×${trimRate(group.effective_rate)}`);
   }
   return parts.join(' · ');
 }
 
-// Model route labels use the configured note as the pricing hint. The generic
-// effective rate is not an image price when a group has per-resolution fixed
-// pricing, so showing it here can misrepresent the amount users will pay.
+// Keep route labels compact. Group notes can contain full model catalogs and
+// pricing prose; CustomSelect exposes that text as a tooltip instead of putting
+// it in every option. The generic effective rate is also not an image price
+// when a group uses per-resolution fixed pricing.
 export function formatModelRouteGroupLabel(group: ImageGroup): string {
-  return imageGroupLabelParts(group).join(' · ');
+  return imageGroupDisplayName(group);
 }
 
 export function buildModelRouteOptions(
@@ -47,16 +49,14 @@ export function buildModelRouteOptions(
   return models.flatMap(model => groupsForModel(model).map(group => ({
     value: modelRouteOptionValue(model.routeKey, group.id),
     label: `${model.name} · ${formatModelRouteGroupLabel(group)}`,
+    description: group.note?.trim() || undefined,
     modelKey: model.routeKey,
     groupId: group.id,
   })));
 }
 
-function imageGroupLabelParts(group: ImageGroup): string[] {
-  const parts = [group.name.trim() || `Group ${group.id}`];
-  const note = group.note?.trim();
-  if (note && !parts[0].includes(note)) parts.push(note);
-  return parts;
+function imageGroupDisplayName(group: ImageGroup): string {
+  return group.name.trim() || `Group ${group.id}`;
 }
 
 function trimRate(rate: number): string {

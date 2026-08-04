@@ -3,6 +3,7 @@ package studio
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
 
@@ -32,7 +33,28 @@ func TestServiceIntegration(t *testing.T) {
 	if err := migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	// 幂等性：重复 migrate 不应报错
+	// 模拟从没有唯一索引的旧版本升级：重复任务资产应被清成一条，
+	// 然后创建幂等索引。
+	if _, err := db.Exec(`
+		DROP INDEX idx_studio_assets_project_task_url;
+		INSERT INTO studio_projects (id, user_id, name) VALUES (900001, 700, 'upgrade fixture');
+		INSERT INTO studio_assets (user_id, project_id, task_id, url) VALUES
+			(700, 900001, 800001, '/upgrade.png'),
+			(700, 900001, 800001, '/upgrade.png');
+	`); err != nil {
+		t.Fatalf("prepare upgrade fixture: %v", err)
+	}
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate legacy duplicates: %v", err)
+	}
+	var upgradeRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM studio_assets WHERE project_id = 900001`).Scan(&upgradeRows); err != nil {
+		t.Fatalf("count upgraded assets: %v", err)
+	}
+	if upgradeRows != 1 {
+		t.Fatalf("legacy duplicate rows = %d, want 1", upgradeRows)
+	}
+	// 幂等性：索引已经存在时重复 migrate 不应报错，也不再执行清理扫描。
 	if err := migrate(db); err != nil {
 		t.Fatalf("migrate (2nd): %v", err)
 	}
@@ -81,12 +103,42 @@ func TestServiceIntegration(t *testing.T) {
 	}
 
 	// AddAsset + ListAssets
+	var firstAssetID int64
 	for i := 0; i < 3; i++ {
-		if _, err := svc.AddAsset(ctx, uid, proj.ID, AssetRecord{
-			URL: "/assets-runtime/img" + string(rune('a'+i)) + ".png", Prompt: "p", Model: "gpt-image-2", Mode: "text2img", Size: "auto",
-		}); err != nil {
+		added, err := svc.AddAsset(ctx, uid, proj.ID, AssetRecord{
+			TaskID: int64(100 + i), URL: "/assets-runtime/img" + string(rune('a'+i)) + ".png", Prompt: "p", Model: "gpt-image-2", Mode: "text2img", Size: "auto",
+		})
+		if err != nil {
 			t.Fatalf("AddAsset[%d]: %v", i, err)
 		}
+		if i == 0 {
+			firstAssetID = added.ID
+		}
+	}
+	if _, err := db.Exec(`UPDATE studio_projects SET updated_at = TIMESTAMPTZ '2000-01-01 00:00:00+00' WHERE id = $1`, proj.ID); err != nil {
+		t.Fatalf("pin project updated_at: %v", err)
+	}
+	duplicate, err := svc.AddAsset(ctx, uid, proj.ID, AssetRecord{
+		TaskID: 100, URL: "/assets-runtime/imga.png", Prompt: "updated", Model: "gpt-image-2", Mode: "text2img", Size: "auto",
+	})
+	if err != nil {
+		t.Fatalf("AddAsset duplicate: %v", err)
+	}
+	if duplicate.ID != firstAssetID {
+		t.Errorf("duplicate task asset id = %d, want existing id %d", duplicate.ID, firstAssetID)
+	}
+	if duplicate.Prompt != "p" {
+		t.Errorf("duplicate task asset rewrote metadata: prompt = %q, want p", duplicate.Prompt)
+	}
+	var projectOrderUnchanged bool
+	if err := db.QueryRow(
+		`SELECT updated_at = TIMESTAMPTZ '2000-01-01 00:00:00+00' FROM studio_projects WHERE id = $1`,
+		proj.ID,
+	).Scan(&projectOrderUnchanged); err != nil {
+		t.Fatalf("read project updated_at: %v", err)
+	}
+	if !projectOrderUnchanged {
+		t.Error("idempotent AddAsset unexpectedly touched project updated_at")
 	}
 	assets, total, err := svc.ListAssets(ctx, uid, proj.ID, 2, 0)
 	if err != nil {
@@ -97,6 +149,49 @@ func TestServiceIntegration(t *testing.T) {
 	}
 	if len(assets) != 2 {
 		t.Errorf("分页 limit=2 返回 %d 条, want 2", len(assets))
+	}
+
+	// 项目内删除使用持久墓碑：列表立即隐藏，恢复轮询也不能把同一任务重新插回。
+	if err := svc.DeleteAsset(ctx, uid, firstAssetID); err != nil {
+		t.Fatalf("DeleteAsset: %v", err)
+	}
+	if _, err := svc.AddAsset(ctx, uid, proj.ID, AssetRecord{
+		TaskID: 100, URL: "/assets-runtime/imga.png", Prompt: "recovered",
+	}); !errors.Is(err, ErrAssetDeleted) {
+		t.Fatalf("re-add tombstoned asset err = %v, want ErrAssetDeleted", err)
+	}
+	_, total, err = svc.ListAssets(ctx, uid, proj.ID, 10, 0)
+	if err != nil {
+		t.Fatalf("ListAssets after soft delete: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("soft delete visible total = %d, want 2", total)
+	}
+
+	// 删除生成任务时同步清掉该用户的项目资产引用。
+	otherProject, err := svc.EnsureDefaultProject(ctx, 999)
+	if err != nil {
+		t.Fatalf("EnsureDefaultProject(other): %v", err)
+	}
+	if _, err := svc.AddAsset(ctx, 999, otherProject.ID, AssetRecord{TaskID: 101, URL: "/other-user.png"}); err != nil {
+		t.Fatalf("AddAsset(other): %v", err)
+	}
+	if err := svc.DeleteAssetsByTask(ctx, uid, 101); err != nil {
+		t.Fatalf("DeleteAssetsByTask: %v", err)
+	}
+	_, total, err = svc.ListAssets(ctx, uid, proj.ID, 10, 0)
+	if err != nil {
+		t.Fatalf("ListAssets after task cleanup: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("任务资产清理后 total = %d, want 1", total)
+	}
+	_, otherTotal, err := svc.ListAssets(ctx, 999, otherProject.ID, 10, 0)
+	if err != nil {
+		t.Fatalf("ListAssets(other): %v", err)
+	}
+	if otherTotal != 1 {
+		t.Errorf("任务资产清理影响其他用户: total = %d, want 1", otherTotal)
 	}
 
 	// AddAsset 到不存在的项目应 ErrNoRows

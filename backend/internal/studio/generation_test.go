@@ -45,6 +45,29 @@ func TestBuildTaskInputKeepsEditImagesAndMask(t *testing.T) {
 	}
 }
 
+func TestBuildTaskAttributesKeepsPositiveProjectID(t *testing.T) {
+	attrs := buildTaskAttributes(createGenerationTaskRequest{
+		Kind:      "video",
+		Operation: "generate",
+		Platform:  "seedance",
+		Model:     "dreamina-seedance-2-0-mini-hc",
+		ProjectID: 42,
+	})
+	if got := attrs["project_id"]; got != int64(42) {
+		t.Fatalf("project_id = %v (%T), want int64(42)", got, got)
+	}
+
+	legacy := buildTaskAttributes(createGenerationTaskRequest{
+		Kind:      "image",
+		Operation: "generate",
+		Platform:  "openai",
+		Model:     "gpt-image-2",
+	})
+	if _, ok := legacy["project_id"]; ok {
+		t.Fatalf("zero project_id should be omitted, got %v", legacy["project_id"])
+	}
+}
+
 func TestBuildGenerationTaskResponseReturnsInputImages(t *testing.T) {
 	task := &hostTask{
 		ID:       12,
@@ -88,9 +111,10 @@ func TestBuildGenerationTaskResponseReturnsKindAndDuration(t *testing.T) {
 			"duration": float64(5), // JSON 反序列化后的数值形态
 		},
 		Attributes: map[string]interface{}{
-			"kind":      "video",
-			"operation": "generate",
-			"size":      "720p",
+			"kind":       "video",
+			"operation":  "generate",
+			"size":       "720p",
+			"project_id": float64(42),
 		},
 	}
 	resp := buildGenerationTaskResponse(video)
@@ -99,6 +123,9 @@ func TestBuildGenerationTaskResponseReturnsKindAndDuration(t *testing.T) {
 	}
 	if got := resp["duration"]; got != 5 {
 		t.Fatalf("duration = %v (%T), want 5", got, got)
+	}
+	if got := resp["project_id"]; got != int64(42) {
+		t.Fatalf("project_id = %v (%T), want 42", got, got)
 	}
 
 	image := &hostTask{
@@ -119,6 +146,14 @@ func TestBuildGenerationTaskResponseReturnsKindAndDuration(t *testing.T) {
 	}
 	if _, ok := imgResp["duration"]; ok {
 		t.Fatalf("image task should not return duration, got %v", imgResp["duration"])
+	}
+	if _, ok := imgResp["project_id"]; ok {
+		t.Fatalf("legacy task should not return project_id, got %v", imgResp["project_id"])
+	}
+
+	fractional := &hostTask{Attributes: map[string]interface{}{"project_id": float64(1.5)}}
+	if _, ok := buildGenerationTaskResponse(fractional)["project_id"]; ok {
+		t.Fatalf("fractional project_id must be omitted")
 	}
 }
 

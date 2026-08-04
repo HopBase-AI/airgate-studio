@@ -423,14 +423,16 @@ export const studioStyles: Record<string, CSSProperties> = {
     width: '100%',
     overflowY: 'auto',
     overflowX: 'hidden',
-    padding: '20px 20px 220px',
+    padding: '12px 20px 220px',
     boxSizing: 'border-box',
     background: cssVar('bgElevated'),
   },
 
   galleryGrid: {
-    columns: '200px',
-    columnGap: 14,
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(min(240px, 100%), 1fr))',
+    alignItems: 'start',
+    gap: 14,
     width: '100%',
   },
 
@@ -449,7 +451,8 @@ export const studioStyles: Record<string, CSSProperties> = {
 
   galleryCard: {
     position: 'relative',
-    borderRadius: 14,
+    minWidth: 0,
+    borderRadius: 8,
     overflow: 'hidden',
     background: cssVar('bgElevated'),
     border: `1px solid ${cssVar('borderSubtle')}`,
@@ -457,13 +460,15 @@ export const studioStyles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     display: 'flex',
     flexDirection: 'column',
-    marginBottom: 14,
-    breakInside: 'avoid',
+    contentVisibility: 'auto',
+    containIntrinsicSize: 'auto 340px',
+    contain: 'layout paint style',
     transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
   },
 
   galleryCardImg: {
     width: '100%',
+    aspectRatio: '4 / 3',
     objectFit: 'cover',
     display: 'block',
   },
@@ -478,6 +483,7 @@ export const studioStyles: Record<string, CSSProperties> = {
   galleryVideoPreview: {
     position: 'relative',
     width: '100%',
+    aspectRatio: '4 / 3',
     display: 'block',
     padding: 0,
     border: 0,
@@ -540,7 +546,9 @@ export const studioStyles: Record<string, CSSProperties> = {
     fontSize: 10,
     lineHeight: 1.2,
     fontWeight: 600,
-    whiteSpace: 'nowrap',
+    maxWidth: '100%',
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
     letterSpacing: '0.01em',
   },
 
@@ -569,6 +577,7 @@ export const studioStyles: Record<string, CSSProperties> = {
 
   galleryCardActions: {
     display: 'flex',
+    flexWrap: 'wrap',
     gap: 6,
   },
 
@@ -980,10 +989,21 @@ export const studioCSS = `
   }
 
   .studio-gallery {
-    scrollbar-width: none;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, ${cssVar('textTertiary')} 42%, transparent) transparent;
   }
   .studio-gallery::-webkit-scrollbar {
-    display: none;
+    width: 7px;
+  }
+  .studio-gallery::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .studio-gallery::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, ${cssVar('textTertiary')} 34%, transparent);
+    border-radius: 6px;
+  }
+  .studio-gallery::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, ${cssVar('textSecondary')} 52%, transparent);
   }
 
   .studio-panel-projects {
@@ -1061,6 +1081,17 @@ export const studioCSS = `
     }
     .studio-mobile-corner-controls {
       display: flex !important;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .studio-gallery {
+      padding-left: 10px !important;
+      padding-right: 10px !important;
+    }
+    .studio-gallery-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 8px !important;
     }
   }
 `;
