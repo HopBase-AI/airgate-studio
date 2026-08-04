@@ -31,7 +31,9 @@ func TestParseProjectID(t *testing.T) {
 
 func TestDefaultProjectLockKeyStable(t *testing.T) {
 	// 同一 userID 必须得到稳定 key（advisory lock 依赖此性质），不同 userID 应不同。
-	if defaultProjectLockKey(42) != defaultProjectLockKey(42) {
+	first := defaultProjectLockKey(42)
+	second := defaultProjectLockKey(42)
+	if first != second {
 		t.Error("lock key 对同一 userID 不稳定")
 	}
 	if defaultProjectLockKey(1) == defaultProjectLockKey(2) {
