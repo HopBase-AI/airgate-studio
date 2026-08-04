@@ -50,6 +50,77 @@ function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function remoteGalleryItemID(taskID: number, outputIndex: number): string {
+  return `r-${taskID}-${outputIndex}`;
+}
+
+function galleryItemIdentity(item: GalleryItem): string {
+  if (item.taskId) return `task:${item.taskId}:url:${item.url}`;
+  if (item.assetId) return `asset:${item.assetId}`;
+  return `item:${item.id}`;
+}
+
+export function mergeGalleryItems(
+  current: GalleryItem[],
+  incoming: GalleryItem[],
+  placement: 'append' | 'prepend',
+): GalleryItem[] {
+  const ordered = placement === 'prepend'
+    ? [...incoming, ...current]
+    : [...current, ...incoming];
+  const result: GalleryItem[] = [];
+  const indexByIdentity = new Map<string, number>();
+  for (const item of ordered) {
+    // A freshly completed output starts as r-{task}-{index}; after project
+    // persistence the same output is returned as a-{asset}.  Task + URL keeps
+    // those two representations from rendering as duplicate cards.
+    const identity = galleryItemIdentity(item);
+    const existingIndex = indexByIdentity.get(identity);
+    if (existingIndex === undefined) {
+      indexByIdentity.set(identity, result.length);
+      result.push(item);
+      continue;
+    }
+    const existing = result[existingIndex];
+    // Preserve the ordering and display fields of the higher-priority copy,
+    // but never discard persistence metadata carried by the duplicate. Without
+    // assetId, deleting a project card would incorrectly delete its host task.
+    result[existingIndex] = {
+      ...item,
+      ...existing,
+      taskId: existing.taskId ?? item.taskId,
+      assetId: existing.assetId ?? item.assetId,
+      sourceUrl: existing.sourceUrl ?? item.sourceUrl,
+      sourceVideoUrl: existing.sourceVideoUrl ?? item.sourceVideoUrl,
+    };
+  }
+  return result;
+}
+
+export function filterDeletedGalleryItems(
+  items: GalleryItem[],
+  deletedTaskRecords: Record<string, number>,
+  deletedAssetIDs: ReadonlySet<number> = new Set<number>(),
+): GalleryItem[] {
+  return items.filter(item => (
+    !hasDeletedRemoteTaskId(deletedTaskRecords, item.taskId) &&
+    (!item.assetId || !deletedAssetIDs.has(item.assetId))
+  ));
+}
+
+export function isGalleryTargetVisible(targetProjectID: number, activeProjectID: number): boolean {
+  return activeProjectID === ALL_VIEW_ID || activeProjectID === targetProjectID;
+}
+
+export function isExpectedGalleryView(
+  expectedViewEpoch: number,
+  expectedProjectID: number,
+  currentViewEpoch: number,
+  currentProjectID: number,
+): boolean {
+  return expectedViewEpoch === currentViewEpoch && expectedProjectID === currentProjectID;
+}
+
 function parseMarkdownImages(text: string): Array<{ url: string; alt: string }> {
   const regex = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
   const results: Array<{ url: string; alt: string }> = [];
@@ -90,6 +161,13 @@ function remoteTaskMediaType(t: GenerationTask): 'video' | 'image' {
 
 function remoteTaskMode(t: GenerationTask): StudioMode {
   return remoteTaskMediaType(t) === 'video' ? 'video' : operationToImageMode(t.operation ?? 'generate');
+}
+
+export function remoteTaskProjectID(task: GenerationTask): number {
+  const projectID = task.project_id;
+  return typeof projectID === 'number' && Number.isSafeInteger(projectID) && projectID > ALL_VIEW_ID
+    ? projectID
+    : ALL_VIEW_ID;
 }
 
 function modeToOperation(mode: ImageMode): 'generate' | 'edit' | 'inpaint' {
@@ -305,7 +383,7 @@ function galleryItemsFromCompletedTask(
     const url = task.video_urls?.[0] || (task.result_content || '').trim();
     if (!url) return [];
     return [{
-      id: uid(),
+      id: remoteGalleryItemID(task.id, 0),
       taskId: task.id,
       url,
       alt: task.prompt || fallback.prompt,
@@ -319,8 +397,8 @@ function galleryItemsFromCompletedTask(
       sourceVideoUrl: taskSourceVideoUrl(task),
     }];
   }
-  return parseMarkdownImages(task.result_content || '').map(img => ({
-    id: uid(),
+  return parseMarkdownImages(task.result_content || '').map((img, index) => ({
+    id: remoteGalleryItemID(task.id, index),
     taskId: task.id,
     url: img.url,
     alt: img.alt,
@@ -527,7 +605,8 @@ export interface StudioContextValue {
   gallery: GalleryItem[];
   hasMore: boolean;
   loadingMore: boolean;
-  loadMore: () => void;
+  loadMoreError: boolean;
+  loadMore: () => Promise<void>;
   generatedAssetRetentionDays: number | null;
   previewItem: GalleryItem | null;
   setPreviewItem: (item: GalleryItem | null) => void;
@@ -628,14 +707,21 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<StudioGenerationTask[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const deletedTaskRecordsRef = useRef<Record<string, number>>(readDeletedTaskRecords());
+  const deletedLocalTaskIDsRef = useRef<Set<string>>(new Set());
+  const deletedProjectAssetIDsRef = useRef<Set<number>>(new Set());
 
   // Gallery
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [previewItem, setPreviewItem] = useState<GalleryItem | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
   const [generatedAssetRetentionDays, setGeneratedAssetRetentionDays] = useState<number | null>(null);
   const galleryOffsetRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const galleryViewEpochRef = useRef(0);
+  const galleryRequestIDRef = useRef(0);
+  const recoveryControllerRef = useRef<AbortController | null>(null);
 
   const recoveryPromiseRef = useRef<Promise<void> | null>(null);
   const [galleryRecovered, setGalleryRecovered] = useState(false);
@@ -648,6 +734,67 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // activeProjectId 的 ref 副本，供 generate 的异步回调读取最新值（避免闭包捕获旧值）。
   const activeProjectIdRef = useRef<number>(ALL_VIEW_ID);
   useEffect(() => { activeProjectIdRef.current = activeProjectId; }, [activeProjectId]);
+
+  const markRemoteTaskIDsDeleted = useCallback((remoteIDs: number[]) => {
+    const ids = uniqueNumbers(remoteIDs);
+    const marker = Date.now();
+    const previous = new Map<string, number | undefined>();
+    if (ids.length === 0) return { marker, previous };
+    const next = { ...deletedTaskRecordsRef.current };
+    for (const remoteID of ids) {
+      const key = String(remoteID);
+      previous.set(key, next[key]);
+      next[key] = marker;
+    }
+    deletedTaskRecordsRef.current = next;
+    writeDeletedTaskRecords(next);
+    return { marker, previous };
+  }, []);
+
+  const restoreRemoteTaskDeletion = useCallback((snapshot: {
+    marker: number;
+    previous: Map<string, number | undefined>;
+  }) => {
+    if (snapshot.previous.size === 0) return;
+    const restored = { ...deletedTaskRecordsRef.current };
+    for (const [remoteID, previousValue] of snapshot.previous) {
+      // Do not undo a newer delete request for the same remote task.
+      if (restored[remoteID] !== snapshot.marker) continue;
+      if (previousValue === undefined) delete restored[remoteID];
+      else restored[remoteID] = previousValue;
+    }
+    deletedTaskRecordsRef.current = restored;
+    writeDeletedTaskRecords(restored);
+  }, []);
+
+  const stopCreatedTaskIfDeleted = useCallback(async (localTaskID: string, remoteTaskID: number): Promise<boolean> => {
+    if (
+      !deletedLocalTaskIDsRef.current.has(localTaskID) &&
+      !hasDeletedRemoteTaskId(deletedTaskRecordsRef.current, remoteTaskID)
+    ) return false;
+    markRemoteTaskIDsDeleted([remoteTaskID]);
+    setTasks(prev => prev.filter(task => (
+      task.id !== localTaskID && !taskMatchesRemoteIds(task, [remoteTaskID])
+    )));
+    setGallery(prev => prev.filter(item => item.taskId !== remoteTaskID));
+    try {
+      await deleteGenerationTaskIfPresent(remoteTaskID);
+    } catch {
+      // Keep the tombstone even when upstream cancellation fails. The user
+      // explicitly deleted the task, so late responses must remain hidden.
+    }
+    return true;
+  }, [markRemoteTaskIDsDeleted]);
+
+  const visibleGeneratedItems = useCallback((localTaskID: string | undefined, items: GalleryItem[]): GalleryItem[] => {
+    if (localTaskID && deletedLocalTaskIDsRef.current.has(localTaskID)) {
+      const remoteIDs = uniqueNumbers(items.map(item => item.taskId));
+      markRemoteTaskIDsDeleted(remoteIDs);
+      void Promise.all(remoteIDs.map(deleteGenerationTaskIfPresent)).catch(() => {});
+      return [];
+    }
+    return filterDeletedGalleryItems(items, deletedTaskRecordsRef.current, deletedProjectAssetIDsRef.current);
+  }, [markRemoteTaskIDsDeleted]);
 
   // Derived from hardcoded registry
   const currentModel = getModelConfig(selectedModelKey) ?? getDefaultModel();
@@ -777,50 +924,82 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Persist generated output in the project captured when its host task was
+  // created. The backend treats task/project/url as an idempotency key, so
+  // recovery polling and the foreground poller may safely converge here.
+  const persistProjectAssets = useCallback(async (
+    projectId: number,
+    items: GalleryItem[],
+    localTaskID?: string,
+  ): Promise<void> => {
+    if (projectId < 1 || items.length === 0) return;
+    const itemsToPersist = visibleGeneratedItems(localTaskID, items);
+    await Promise.all(itemsToPersist.map(async (item) => {
+      try {
+        const saved = await api.addProjectAsset(projectId, {
+          task_id: item.taskId,
+          url: item.url,
+          prompt: item.prompt,
+          model: item.model,
+          mode: item.mode,
+          size: item.size,
+          // 视频官方直链一并落库,重载会话后 24h 内仍能显示「官方源链接」。
+          source_video_url: item.sourceVideoUrl,
+        });
+        if (visibleGeneratedItems(localTaskID, [item]).length === 0) {
+          // The user deleted the task while addProjectAsset was in flight.
+          // Remove the row that just committed and never put it back on screen.
+          deletedProjectAssetIDsRef.current.add(saved.id);
+          try {
+            await api.deleteProjectAsset(projectId, saved.id);
+          } catch { /* the task tombstone still keeps a late row hidden */ }
+          return;
+        }
+        // 回填 assetId；若持久化期间刚切回目标项目且列表请求尚未包含该条，则补进当前视图。
+        setGallery(prev => {
+          const identity = galleryItemIdentity(item);
+          if (prev.some(g => galleryItemIdentity(g) === identity)) {
+            return prev.map(g => (galleryItemIdentity(g) === identity ? { ...g, assetId: saved.id } : g));
+          }
+          if (activeProjectIdRef.current === projectId) {
+            const savedItems = filterDeletedGalleryItems(
+              [projectAssetToGallery(saved)],
+              deletedTaskRecordsRef.current,
+              deletedProjectAssetIDsRef.current,
+            );
+            return mergeGalleryItems(prev, savedItems, 'prepend');
+          }
+          return prev;
+        });
+      } catch { /* 持久化失败不阻塞展示 */ }
+    }));
+  }, [visibleGeneratedItems]);
+
+  const prependGalleryForTarget = useCallback((
+    targetProjectID: number,
+    items: GalleryItem[],
+    localTaskID?: string,
+  ) => {
+    if (!isGalleryTargetVisible(targetProjectID, activeProjectIdRef.current)) return;
+    const visibleItems = visibleGeneratedItems(localTaskID, items);
+    if (visibleItems.length === 0) return;
+    setGallery(prev => mergeGalleryItems(prev, visibleItems, 'prepend'));
+  }, [visibleGeneratedItems]);
+
   function tasksToGallery(taskList: GenerationTask[]): GalleryItem[] {
     const items: GalleryItem[] = [];
-    for (const t of taskList) {
-      if (t.status !== 'completed') continue;
-      // 视频任务:产物是视频 URL,单独成卡(修复「全部」视图里历史视频消失)。
-      if (remoteTaskMediaType(t) === 'video') {
-        const url = t.video_urls?.[0] || (t.result_content || '').trim();
-        if (!url) continue;
-        items.push({
-          id: uid(),
-          taskId: t.id,
-          url,
-          alt: t.prompt,
-          prompt: t.prompt,
-          model: t.model ?? '',
-          mode: 'video',
-          mediaType: 'video',
-          size: taskSize(t),
-          createdAt: taskAssetCreatedAt(t),
-          sourceUrl: taskSourceUrl(t),
-          sourceVideoUrl: taskSourceVideoUrl(t),
-        });
-        continue;
-      }
-      if (!t.result_content) continue;
-      for (const img of parseMarkdownImages(t.result_content)) {
-        items.push({
-          id: uid(),
-          taskId: t.id,
-          url: img.url,
-          alt: img.alt,
-          prompt: t.prompt,
-          model: t.model ?? '',
-          mode: operationToImageMode(t.operation ?? 'generate'),
-          size: taskSize(t),
-          createdAt: taskAssetCreatedAt(t),
-          sourceUrl: taskSourceUrl(t),
-        });
-      }
+    for (const task of taskList) {
+      if (task.status !== 'completed') continue;
+      items.push(...galleryItemsFromCompletedTask(task, {
+        prompt: task.prompt,
+        model: task.model ?? '',
+        mode: remoteTaskMode(task),
+      }));
     }
     return items;
   }
 
-  const recoverTasks = useCallback(async (signal: AbortSignal) => {
+  const recoverTasks = useCallback(async (signal: AbortSignal, expectedViewEpoch = galleryViewEpochRef.current) => {
     try {
       // 历史图(completed)与「进行中/失败卡恢复」(recent)是两件独立的事,却共用一次
       // 拉取。用 allSettled 让二者解耦:任一请求瞬时抖动都不再把成功那半的结果一起丢掉
@@ -829,7 +1008,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         api.listGenerationTasks({ limit: PAGE_SIZE, offset: 0, status: 'completed' }),
         api.listGenerationTasks({ limit: PAGE_SIZE, offset: 0 }),
       ]);
-      if (signal.aborted) return;
+      if (
+        signal.aborted ||
+        expectedViewEpoch !== galleryViewEpochRef.current ||
+        activeProjectIdRef.current !== ALL_VIEW_ID
+      ) return;
 
       const deletedTaskRecords = deletedTaskRecordsRef.current;
 
@@ -837,9 +1020,28 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       if (completedRes.status === 'fulfilled') {
         const { tasks: completedTasks, total: completedTotal } = completedRes.value;
         const visibleCompletedTasks = filterDeletedRemoteTasks(completedTasks, deletedTaskRecords);
-        setGallery(tasksToGallery(visibleCompletedTasks));
+        const completedItems = tasksToGallery(visibleCompletedTasks);
+        // Preserve results that completed after this list request took its
+        // snapshot. The request epoch only protects against project switches;
+        // a functional merge also protects writes within the same view.
+        setGallery(prev => mergeGalleryItems(prev, completedItems, 'append'));
+        // A task may have completed while the tab was closed. Reconcile its
+        // project reference on startup; AddAsset is idempotent for this tuple.
+        for (const completedTask of visibleCompletedTasks) {
+          const targetProjectID = remoteTaskProjectID(completedTask);
+          if (targetProjectID < 1) continue;
+          const taskItems = galleryItemsFromCompletedTask(completedTask, {
+            prompt: completedTask.prompt,
+            model: completedTask.model ?? '',
+            mode: remoteTaskMode(completedTask),
+          });
+          void persistProjectAssets(targetProjectID, taskItems, `r-${completedTask.id}`);
+        }
         galleryOffsetRef.current = completedTasks.length;
         setHasMore(completedTasks.length < completedTotal);
+        setLoadMoreError(false);
+      } else {
+        setLoadMoreError(true);
       }
 
       // 进行中/失败卡恢复:recent 请求失败就跳过(历史图已独立渲染)。
@@ -852,6 +1054,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const recoveredTasks: StudioGenerationTask[] = [
         ...failed.map(t => ({
           id: `r-${t.id}`,
+          projectId: remoteTaskProjectID(t),
           prompt: t.prompt,
           mode: remoteTaskMode(t),
           status: 'failed' as const,
@@ -864,6 +1067,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         })),
         ...inFlight.map(t => ({
           id: `r-${t.id}`,
+          projectId: remoteTaskProjectID(t),
           prompt: t.prompt,
           mode: remoteTaskMode(t),
           status: 'processing' as const,
@@ -875,14 +1079,22 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         })),
       ];
       setTasks(prev => {
-        const merged = recoveredTasks.map(remote => {
+        const currentDeletedTaskRecords = deletedTaskRecordsRef.current;
+        const visibleRecoveredTasks = recoveredTasks.filter(remote => (
+          !taskRemoteIds(remote).some(id => hasDeletedRemoteTaskId(currentDeletedTaskRecords, id))
+        ));
+        const merged = visibleRecoveredTasks.map(remote => {
           const local = prev.find(item => tasksShareRemoteIdentity(item, remote));
           if (!local) return remote;
-          return mergeTaskPatch(local, { ...remote, id: local.id }, taskRemoteIds(remote));
+          return mergeTaskPatch(local, {
+            ...remote,
+            id: local.id,
+            projectId: local.projectId ?? remote.projectId,
+          }, taskRemoteIds(remote));
         });
         const localOnly = prev.filter(local =>
-          !recoveredTasks.some(remote => tasksShareRemoteIdentity(local, remote)) &&
-          !taskRemoteIds(local).some(id => hasDeletedRemoteTaskId(deletedTaskRecords, id)),
+          !visibleRecoveredTasks.some(remote => tasksShareRemoteIdentity(local, remote)) &&
+          !taskRemoteIds(local).some(id => hasDeletedRemoteTaskId(currentDeletedTaskRecords, id)),
         );
         return [...merged, ...localOnly];
       });
@@ -898,8 +1110,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         const isVideoTask = remoteTaskMediaType(t) === 'video';
         pollGenerationTask(t.id, signal, isVideoTask ? VIDEO_POLL_MAX_ATTEMPTS : POLL_MAX_ATTEMPTS, undefined, pollErrorMessages)
           .then(done => {
-            if (signal.aborted) return;
+            if (
+              signal.aborted ||
+              expectedViewEpoch !== galleryViewEpochRef.current ||
+              activeProjectIdRef.current !== ALL_VIEW_ID ||
+              hasDeletedRemoteTaskId(deletedTaskRecordsRef.current, done.id)
+            ) return;
             recordRemoteTaskSample(done);
+            const targetProjectID = remoteTaskProjectID(done) || remoteTaskProjectID(t);
             const items = galleryItemsFromCompletedTask(done, {
               prompt: t.prompt,
               model: t.model ?? '',
@@ -911,13 +1129,26 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 : gt));
               return;
             }
-            setGallery(prev => [...items, ...prev]);
+            const visibleItems = filterDeletedGalleryItems(
+              items,
+              deletedTaskRecordsRef.current,
+              deletedProjectAssetIDsRef.current,
+            );
+            if (visibleItems.length > 0) {
+              prependGalleryForTarget(targetProjectID, visibleItems, taskUiId);
+              void persistProjectAssets(targetProjectID, visibleItems, taskUiId);
+            }
             setTasks(prev => prev.map(gt => gt.id === taskUiId
-              ? mergeTaskPatch(gt, { status: 'completed', result: items }, [done.id])
+              ? mergeTaskPatch(gt, { status: 'completed', result: items, projectId: targetProjectID }, [done.id])
               : gt));
           })
           .catch(err => {
-            if (signal.aborted) return;
+            if (
+              signal.aborted ||
+              expectedViewEpoch !== galleryViewEpochRef.current ||
+              activeProjectIdRef.current !== ALL_VIEW_ID ||
+              hasDeletedRemoteTaskId(deletedTaskRecordsRef.current, t.id)
+            ) return;
             const msg = errorMessageFromUnknown(err, recoveryFailedError);
             setTasks(prev =>
               prev.map(gt =>
@@ -928,7 +1159,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             );
           })
           .finally(() => {
-            if (signal.aborted) return;
             activeCountRef.current -= 1;
             if (activeCountRef.current <= 0) {
               activeCountRef.current = 0;
@@ -939,20 +1169,35 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     } catch {
       // task recovery is non-fatal
     }
-  }, [pollErrorMessages, t, vs]);
+  }, [persistProjectAssets, pollErrorMessages, prependGalleryForTarget, t, vs]);
 
   const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMore) return;
+    if (loadingMoreRef.current || !hasMore) return;
+    const expectedViewEpoch = galleryViewEpochRef.current;
+    const expectedProjectID = activeProjectIdRef.current;
+    const requestID = ++galleryRequestIDRef.current;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
+    setLoadMoreError(false);
     try {
-      if (activeProjectIdRef.current >= 1) {
+      if (expectedProjectID >= 1) {
         // 项目视图：分页读 studio_assets
-        const projectId = activeProjectIdRef.current;
-        const { assets, total } = await api.listProjectAssets(projectId, {
+        const { assets, total } = await api.listProjectAssets(expectedProjectID, {
           limit: PAGE_SIZE,
           offset: galleryOffsetRef.current,
         });
-        setGallery(prev => [...prev, ...assets.map(projectAssetToGallery)]);
+        if (!isExpectedGalleryView(
+          expectedViewEpoch,
+          expectedProjectID,
+          galleryViewEpochRef.current,
+          activeProjectIdRef.current,
+        )) return;
+        const visibleAssets = filterDeletedGalleryItems(
+          assets.map(projectAssetToGallery),
+          deletedTaskRecordsRef.current,
+          deletedProjectAssetIDsRef.current,
+        );
+        setGallery(prev => mergeGalleryItems(prev, visibleAssets, 'append'));
         galleryOffsetRef.current += assets.length;
         setHasMore(galleryOffsetRef.current < total);
       } else {
@@ -962,61 +1207,101 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           offset: galleryOffsetRef.current,
           status: 'completed',
         });
+        if (!isExpectedGalleryView(
+          expectedViewEpoch,
+          expectedProjectID,
+          galleryViewEpochRef.current,
+          activeProjectIdRef.current,
+        )) return;
         const visibleMoreTasks = filterDeletedRemoteTasks(moreTasks, deletedTaskRecordsRef.current);
         const newItems = tasksToGallery(visibleMoreTasks);
-        setGallery(prev => [...prev, ...newItems]);
+        setGallery(prev => mergeGalleryItems(prev, newItems, 'append'));
+        for (const completedTask of visibleMoreTasks) {
+          const targetProjectID = remoteTaskProjectID(completedTask);
+          if (targetProjectID < 1) continue;
+          const taskItems = galleryItemsFromCompletedTask(completedTask, {
+            prompt: completedTask.prompt,
+            model: completedTask.model ?? '',
+            mode: remoteTaskMode(completedTask),
+          });
+          void persistProjectAssets(targetProjectID, taskItems, `r-${completedTask.id}`);
+        }
         galleryOffsetRef.current += moreTasks.length;
         setHasMore(galleryOffsetRef.current < total);
       }
-    } catch { /* non-fatal */ }
-    setLoadingMore(false);
-  }, [loadingMore, hasMore]);
+    } catch {
+      if (isExpectedGalleryView(
+        expectedViewEpoch,
+        expectedProjectID,
+        galleryViewEpochRef.current,
+        activeProjectIdRef.current,
+      )) setLoadMoreError(true);
+    } finally {
+      if (requestID === galleryRequestIDRef.current) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
+    }
+  }, [hasMore, persistProjectAssets]);
 
   // selectProject 切换当前项目并重载画廊。id=0 → 全部视图（host tasks）；id>=1 → 项目资产。
   const selectProject = useCallback((id: number) => {
+    recoveryControllerRef.current?.abort();
+    recoveryControllerRef.current = null;
+    const expectedViewEpoch = ++galleryViewEpochRef.current;
+    const requestID = ++galleryRequestIDRef.current;
     setActiveProjectId(id);
     activeProjectIdRef.current = id;
     galleryOffsetRef.current = 0;
+    loadingMoreRef.current = true;
     setGallery([]);
     setHasMore(true);
+    setLoadingMore(true);
+    setLoadMoreError(false);
     if (id >= 1) {
       void (async () => {
         try {
           const { assets, total } = await api.listProjectAssets(id, { limit: PAGE_SIZE, offset: 0 });
-          setGallery(assets.map(projectAssetToGallery));
+          if (!isExpectedGalleryView(
+            expectedViewEpoch,
+            id,
+            galleryViewEpochRef.current,
+            activeProjectIdRef.current,
+          )) return;
+          const visibleAssets = filterDeletedGalleryItems(
+            assets.map(projectAssetToGallery),
+            deletedTaskRecordsRef.current,
+            deletedProjectAssetIDsRef.current,
+          );
+          setGallery(prev => mergeGalleryItems(prev, visibleAssets, 'append'));
           galleryOffsetRef.current = assets.length;
           setHasMore(assets.length < total);
-        } catch { /* non-fatal */ }
+        } catch {
+          if (isExpectedGalleryView(
+            expectedViewEpoch,
+            id,
+            galleryViewEpochRef.current,
+            activeProjectIdRef.current,
+          )) setLoadMoreError(true);
+        } finally {
+          if (requestID === galleryRequestIDRef.current) {
+            loadingMoreRef.current = false;
+            setLoadingMore(false);
+          }
+        }
       })();
     } else {
       // 全部视图：重新拉 host tasks 历史
       const controller = new AbortController();
-      void recoverTasks(controller.signal);
+      recoveryControllerRef.current = controller;
+      void recoverTasks(controller.signal, expectedViewEpoch).finally(() => {
+        if (requestID === galleryRequestIDRef.current) {
+          loadingMoreRef.current = false;
+          setLoadingMore(false);
+        }
+      });
     }
   }, [recoverTasks]);
-
-  // persistActiveProjectAssets 把新生成的图写入当前项目（仅项目视图）。返回带 assetId 的副本，
-  // 失败时静默降级（图仍在画廊里，只是没持久化到项目）。
-  const persistActiveProjectAssets = useCallback(async (items: GalleryItem[]): Promise<void> => {
-    const projectId = activeProjectIdRef.current;
-    if (projectId < 1 || items.length === 0) return;
-    await Promise.all(items.map(async (item) => {
-      try {
-        const saved = await api.addProjectAsset(projectId, {
-          task_id: item.taskId,
-          url: item.url,
-          prompt: item.prompt,
-          model: item.model,
-          mode: item.mode,
-          size: item.size,
-          // 视频官方直链一并落库,重载会话后 24h 内仍能显示「官方源链接」。
-          source_video_url: item.sourceVideoUrl,
-        });
-        // 回填 assetId，让删除走项目资产删除而非 host task 删除
-        setGallery(prev => prev.map(g => (g.id === item.id ? { ...g, assetId: saved.id } : g)));
-      } catch { /* 持久化失败不阻塞展示 */ }
-    }));
-  }, []);
 
   // 历史恢复只跑一次:recoverTasks 的身份会随 i18n 的 t/vs 变化,effect 会重跑,
   // 用 ref 兜住只发一次请求。
@@ -1028,10 +1313,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (recoveryPromiseRef.current) return;
     const controller = new AbortController();
+    recoveryControllerRef.current = controller;
     recoveryPromiseRef.current = recoverTasks(controller.signal).finally(() => {
       setGalleryRecovered(true);
     });
   }, [recoverTasks]);
+
+  useEffect(() => () => {
+    recoveryControllerRef.current?.abort();
+  }, []);
 
   // 加载项目列表（探测后端是否启用了项目功能）。后端 /projects 在首次访问时会自动
   // 确保有一个默认项目；若返回 503（未配置 DB）则 projectsEnabled 保持 false，退回全部视图。
@@ -1060,9 +1350,17 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const checks = processing.map(async (uiTask) => {
         const remoteId = taskRemoteIds(uiTask)[0] ?? null;
         if (!remoteId) return;
+        if (
+          deletedLocalTaskIDsRef.current.has(uiTask.id) ||
+          hasDeletedRemoteTaskId(deletedTaskRecordsRef.current, remoteId)
+        ) {
+          setTasks(prev => prev.filter(task => task.id !== uiTask.id));
+          return;
+        }
         try {
           const remote = await api.getGenerationTask(remoteId);
           if (remote.status === 'completed') {
+            const targetProjectID = remoteTaskProjectID(remote) || uiTask.projectId || ALL_VIEW_ID;
             recordRemoteTaskSample(remote, {
               mediaType: uiTask.mode === 'video' ? 'video' : 'image',
               model: uiTask.model,
@@ -1080,9 +1378,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 : gt));
               return;
             }
-            setGallery(prev => [...items, ...prev]);
+            prependGalleryForTarget(targetProjectID, items, uiTask.id);
+            void persistProjectAssets(targetProjectID, items, uiTask.id);
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? mergeTaskPatch(gt, { status: 'completed', result: items }, [remote.id])
+              ? mergeTaskPatch(gt, { status: 'completed', result: items, projectId: targetProjectID }, [remote.id])
               : gt));
           } else if (isRemoteTaskFailed(remote.status) || hasTerminalRemoteError(remote)) {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
@@ -1122,7 +1421,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', onFocus);
       window.clearInterval(timer);
     };
-  }, [pollErrorMessages, t, tasks, vs]);
+  }, [persistProjectAssets, pollErrorMessages, prependGalleryForTarget, t, tasks, vs]);
 
   // ── Generation ────────────────────────────────────────────────────────────
 
@@ -1139,10 +1438,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     ) => {
       if (!prompt.trim()) return;
       const mode = resolveGenerationMode(imageMode, options);
+      const targetProjectID = activeProjectIdRef.current;
 
       const failLocalTask = (message: string) => {
         setTasks(prev => [{
           id: uid(),
+          projectId: targetProjectID,
           prompt,
           mode,
           status: 'failed',
@@ -1181,6 +1482,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
       const task: StudioGenerationTask = {
         id: taskId,
+        projectId: targetProjectID,
         prompt,
         mode,
         status: 'queued',
@@ -1197,6 +1499,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setIsGenerating(true);
 
       const updateTask = (patch: Partial<StudioGenerationTask>) => {
+        if (deletedLocalTaskIDsRef.current.has(taskId)) return;
         const patchRemoteIds = uniqueNumbers(patch.remoteTaskIds || []);
         setTasks(prev => prev.map(t => (
           t.id === taskId || taskMatchesRemoteIds(t, patchRemoteIds)
@@ -1236,6 +1539,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
             // patchSubtask 局部更新单个子任务状态（实时反映到聚合卡）。
             const patchSubtask = (subId: string, patch: Partial<BatchSubtask>) => {
+              if (deletedLocalTaskIDsRef.current.has(taskId)) return;
               const subRemoteId = patch.remoteTaskId;
               setTasks(prev => prev.map(t => {
                 if (t.id !== taskId && (!subRemoteId || !taskMatchesRemoteIds(t, [subRemoteId]))) return t;
@@ -1252,12 +1556,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 model: selectedModelId,
                 prompt: sub.prompt,
                 group_id: groupId,
+                project_id: targetProjectID > ALL_VIEW_ID ? targetProjectID : undefined,
                 parameters: imageSize ? { size: imageSize } : undefined,
                 inputs: batchSources.length > 0
                   ? batchSources.map(url => ({ type: 'image' as const, role: 'source' as const, url }))
                   : undefined,
               });
               remoteTaskIds.push(created.id);
+              if (await stopCreatedTaskIfDeleted(taskId, created.id)) return [];
               patchSubtask(sub.id, { remoteTaskId: created.id });
               updateTask({ remoteTaskIds: [...remoteTaskIds] });
               const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, undefined, pollErrorMessages);
@@ -1274,8 +1580,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 throw new Error(t('playground.studio_error_no_result_image'));
               }
               // 成功一张立即进画廊 + 落项目（不等整组完成）。
-              setGallery(prev => [...items, ...prev]);
-              void persistActiveProjectAssets(items);
+              prependGalleryForTarget(targetProjectID, items, taskId);
+              void persistProjectAssets(targetProjectID, items, taskId);
               patchSubtask(sub.id, { status: 'completed' });
               return items;
             };
@@ -1315,6 +1621,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               model: selectedModelId,
               prompt,
               group_id: groupId,
+              project_id: targetProjectID > ALL_VIEW_ID ? targetProjectID : undefined,
               parameters: imageSize ? { size: imageSize } : undefined,
             };
 
@@ -1352,6 +1659,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
             const created = await api.createGenerationTask(taskData);
             if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+            if (await stopCreatedTaskIfDeleted(taskId, created.id)) return;
             updateTask({ remoteTaskIds: [created.id] });
             const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, (t) => {
               if (isRemoteTaskFailed(t.status) || hasTerminalRemoteError(t)) {
@@ -1371,8 +1679,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               return;
             }
 
-            const galleryItems: GalleryItem[] = images.map(img => ({
-              id: uid(),
+            const galleryItems: GalleryItem[] = images.map((img, index) => ({
+              id: remoteGalleryItemID(created.id, index),
               taskId: created.id,
               url: img.url,
               alt: img.alt,
@@ -1389,9 +1697,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 : undefined,
             }));
 
-            setGallery(prev => [...galleryItems, ...prev]);
+            prependGalleryForTarget(targetProjectID, galleryItems, taskId);
             updateTask({ status: 'completed', result: galleryItems, remoteTaskIds: [created.id] });
-            void persistActiveProjectAssets(galleryItems);
+            void persistProjectAssets(targetProjectID, galleryItems, taskId);
           }
         } catch (err) {
           if (signal.aborted) {
@@ -1420,8 +1728,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       selectedPlatform,
       selectedModelId,
       selectedGroupId,
-      persistActiveProjectAssets,
+      persistProjectAssets,
       pollErrorMessages,
+      prependGalleryForTarget,
+      stopCreatedTaskIfDeleted,
       t,
     ],
   );
@@ -1436,9 +1746,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const now = new Date().toISOString();
       const groupId = selectedVideoGroupId ?? undefined;
       const sources = options?.sourceImages ?? [];
+      const targetProjectID = activeProjectIdRef.current;
 
       const task: StudioGenerationTask = {
         id: taskId,
+        projectId: targetProjectID,
         prompt,
         mode: 'video',
         status: 'queued',
@@ -1457,6 +1769,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const controller = new AbortController();
       const signal = controller.signal;
       const updateTask = (patch: Partial<StudioGenerationTask>) => {
+        if (deletedLocalTaskIDsRef.current.has(taskId)) return;
         const patchRemoteIds = uniqueNumbers(patch.remoteTaskIds || []);
         setTasks(prev => prev.map(item => (
           item.id === taskId || taskMatchesRemoteIds(item, patchRemoteIds)
@@ -1479,6 +1792,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             model,
             prompt,
             group_id: groupId,
+            project_id: targetProjectID > ALL_VIEW_ID ? targetProjectID : undefined,
             parameters: {
               duration: videoDuration,
               resolution: videoResolution,
@@ -1490,6 +1804,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               : undefined,
           });
           if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+          if (await stopCreatedTaskIfDeleted(taskId, created.id)) return;
           updateTask({ remoteTaskIds: [created.id] });
           const completed = await waitForGenerationTask(created, signal, VIDEO_POLL_MAX_ATTEMPTS, (remote) => {
             if (isRemoteTaskFailed(remote.status) || hasTerminalRemoteError(remote)) {
@@ -1509,7 +1824,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             return;
           }
           const item: GalleryItem = {
-            id: uid(),
+            id: remoteGalleryItemID(created.id, 0),
             taskId: created.id,
             url: videoUrl,
             alt: prompt,
@@ -1522,9 +1837,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             sourceUrl: sources[0],
             sourceVideoUrl: taskSourceVideoUrl(completed),
           };
-          setGallery(prev => [item, ...prev]);
+          prependGalleryForTarget(targetProjectID, [item], taskId);
           updateTask({ status: 'completed', result: [item], remoteTaskIds: [created.id] });
-          void persistActiveProjectAssets([item]);
+          void persistProjectAssets(targetProjectID, [item], taskId);
         } catch (err) {
           if (signal.aborted) {
             updateTask({ status: 'failed', error: t('playground.studio_error_generation_cancelled') });
@@ -1550,8 +1865,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       videoGroups,
       videoGroupsLoaded,
       selectedVideoGroupId,
-      persistActiveProjectAssets,
+      persistProjectAssets,
       pollErrorMessages,
+      prependGalleryForTarget,
+      stopCreatedTaskIfDeleted,
       t,
       vs,
     ],
@@ -1561,49 +1878,74 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const deleteTask = useCallback(async (uiId: string): Promise<void> => {
     const task = tasks.find(t => t.id === uiId);
+    const expectedViewEpoch = galleryViewEpochRef.current;
+    const expectedProjectID = activeProjectIdRef.current;
     const remoteIds = uniqueNumbers([
       ...(task ? taskRemoteIds(task) : []),
       ...((uiId.startsWith('r-') ? [Number(uiId.slice(2))] : [])),
     ]);
-    const previousTasks = tasks;
-    const previousGallery = gallery;
-    const previousDeletedTaskRecords = { ...deletedTaskRecordsRef.current };
-    if (remoteIds.length > 0) {
-      const now = Date.now();
-      const nextDeletedTaskRecords = { ...deletedTaskRecordsRef.current };
-      for (const remoteId of remoteIds) nextDeletedTaskRecords[String(remoteId)] = now;
-      deletedTaskRecordsRef.current = nextDeletedTaskRecords;
-      writeDeletedTaskRecords(nextDeletedTaskRecords);
-    }
+    const removedGalleryItems = gallery.filter(item => item.taskId && remoteIds.includes(item.taskId));
+    const hadLocalTombstone = deletedLocalTaskIDsRef.current.has(uiId);
+    deletedLocalTaskIDsRef.current.add(uiId);
+    const deletionSnapshot = markRemoteTaskIDsDeleted(remoteIds);
     setTasks(prev => prev.filter(t => t.id !== uiId));
     if (remoteIds.length > 0) {
       setGallery(prev => prev.filter(item => !item.taskId || !remoteIds.includes(item.taskId)));
     }
     try {
       await Promise.all(remoteIds.map(remoteId => deleteGenerationTaskIfPresent(remoteId)));
+      const projectID = (task?.projectId ?? expectedProjectID) >= 1
+        ? (task?.projectId ?? expectedProjectID)
+        : null;
+      const assetIDs = uniqueNumbers(removedGalleryItems.map(item => item.assetId));
+      if (projectID) {
+        await Promise.allSettled(assetIDs.map(assetID => api.deleteProjectAsset(projectID, assetID)));
+      }
     } catch (err) {
-      deletedTaskRecordsRef.current = previousDeletedTaskRecords;
-      writeDeletedTaskRecords(previousDeletedTaskRecords);
-      setTasks(previousTasks);
-      setGallery(previousGallery);
+      restoreRemoteTaskDeletion(deletionSnapshot);
+      if (!hadLocalTombstone) deletedLocalTaskIDsRef.current.delete(uiId);
       const msg = errorMessageFromUnknown(err, t('playground.studio_error_delete_failed'));
-      setTasks(prev => prev.map(t => t.id === uiId ? { ...t, status: 'failed', error: msg } : t));
+      if (task) {
+        setTasks(prev => {
+          const failedTask: StudioGenerationTask = { ...task, status: 'failed', error: msg };
+          return prev.some(item => item.id === uiId)
+            ? prev.map(item => item.id === uiId ? failedTask : item)
+            : [failedTask, ...prev];
+        });
+      }
+      if (isExpectedGalleryView(
+        expectedViewEpoch,
+        expectedProjectID,
+        galleryViewEpochRef.current,
+        activeProjectIdRef.current,
+      )) {
+        setGallery(prev => mergeGalleryItems(prev, removedGalleryItems, 'prepend'));
+      }
       throw err;
     }
-  }, [gallery, t, tasks]);
+  }, [gallery, markRemoteTaskIDsDeleted, restoreRemoteTaskDeletion, t, tasks]);
 
   const deleteGalleryItem = useCallback(async (id: string): Promise<void> => {
     const item = gallery.find(g => g.id === id);
     if (!item) return;
+    const expectedViewEpoch = galleryViewEpochRef.current;
+    const expectedProjectID = activeProjectIdRef.current;
     // 项目视图条目：删 studio_assets 记录（不动底层 host task / 资产对象，可能被「全部」视图共享）。
     if (item.assetId && activeProjectIdRef.current >= 1) {
       const projectId = activeProjectIdRef.current;
-      const previousGallery = gallery;
+      const hadAssetTombstone = deletedProjectAssetIDsRef.current.has(item.assetId);
+      deletedProjectAssetIDsRef.current.add(item.assetId);
       setGallery(prev => prev.filter(g => g.id !== id));
       try {
         await api.deleteProjectAsset(projectId, item.assetId);
       } catch (err) {
-        setGallery(previousGallery);
+        if (!hadAssetTombstone) deletedProjectAssetIDsRef.current.delete(item.assetId);
+        if (isExpectedGalleryView(
+          expectedViewEpoch,
+          expectedProjectID,
+          galleryViewEpochRef.current,
+          activeProjectIdRef.current,
+        )) setGallery(prev => mergeGalleryItems(prev, [item], 'prepend'));
         throw err;
       }
       return;
@@ -1615,19 +1957,28 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       await deleteTask(matchingTask.id);
       return;
     }
-    const previousGallery = gallery;
+    const removedGalleryItems = item.taskId
+      ? gallery.filter(g => g.taskId === item.taskId)
+      : [item];
     setGallery(prev => (item.taskId
       ? prev.filter(g => g.taskId !== item.taskId)
       : prev.filter(g => g.id !== id)));
     if (item.taskId) {
+      const deletionSnapshot = markRemoteTaskIDsDeleted([item.taskId]);
       try {
         await deleteGenerationTaskIfPresent(item.taskId);
       } catch (err) {
-        setGallery(previousGallery);
+        restoreRemoteTaskDeletion(deletionSnapshot);
+        if (isExpectedGalleryView(
+          expectedViewEpoch,
+          expectedProjectID,
+          galleryViewEpochRef.current,
+          activeProjectIdRef.current,
+        )) setGallery(prev => mergeGalleryItems(prev, removedGalleryItems, 'prepend'));
         throw err;
       }
     }
-  }, [deleteTask, gallery, tasks]);
+  }, [deleteTask, gallery, markRemoteTaskIDsDeleted, restoreRemoteTaskDeletion, tasks]);
 
   const applyAsReference = useCallback((item: GalleryItem) => {
     // 视频不能作图像参考。
@@ -1700,10 +2051,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const platform = task.platform || selectedPlatform;
     const size = task.size;
     const groupId = task.groupId;
+    const targetProjectID = task.projectId ?? ALL_VIEW_ID;
     const sources = task.batchSources ?? [];
     const operation: 'generate' | 'edit' = sources.length > 0 ? 'edit' : 'generate';
 
     const patchSubtask = (subId: string, patch: Partial<BatchSubtask>) => {
+      if (deletedLocalTaskIDsRef.current.has(uiId)) return;
       setTasks(prev => prev.map(t => {
         if (t.id !== uiId || !t.subtasks) return t;
         return { ...t, subtasks: t.subtasks.map(s => (s.id === subId ? { ...s, ...patch } : s)) };
@@ -1733,11 +2086,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             model,
             prompt: sub.prompt,
             group_id: groupId,
+            project_id: targetProjectID > ALL_VIEW_ID ? targetProjectID : undefined,
             parameters: size ? { size } : undefined,
             inputs: sources.length > 0
               ? sources.map(url => ({ type: 'image' as const, role: 'source' as const, url }))
               : undefined,
           });
+          if (await stopCreatedTaskIfDeleted(uiId, created.id)) return;
           patchSubtask(sub.id, { remoteTaskId: created.id });
           const completed = await waitForGenerationTask(created, signal, POLL_MAX_ATTEMPTS, undefined, pollErrorMessages);
           const items = galleryItemsFromCompletedTask(completed, {
@@ -1751,8 +2106,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           if (items.length === 0) {
             throw new Error(t('playground.studio_error_no_result_image'));
           }
-          setGallery(prev => [...items, ...prev]);
-          void persistActiveProjectAssets(items);
+          prependGalleryForTarget(targetProjectID, items, uiId);
+          void persistProjectAssets(targetProjectID, items, uiId);
           patchSubtask(sub.id, { status: 'completed' });
         } catch (err) {
           const msg = errorMessageFromUnknown(err, t('playground.studio_error_generation_failed'));
@@ -1773,7 +2128,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       }
     };
     void runRetry();
-  }, [persistActiveProjectAssets, pollErrorMessages, selectedModelId, selectedPlatform, t, tasks]);
+  }, [persistProjectAssets, pollErrorMessages, prependGalleryForTarget, selectedModelId, selectedPlatform, stopCreatedTaskIfDeleted, t, tasks]);
 
   // ── Project CRUD ──────────────────────────────────────────────────────────
 
@@ -1848,6 +2203,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     gallery,
     hasMore,
     loadingMore,
+    loadMoreError,
     loadMore,
     generatedAssetRetentionDays,
     previewItem,

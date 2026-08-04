@@ -12,10 +12,14 @@ import (
 const headerUserID = "X-Airgate-User-Id"
 
 func registerRoutes(p *StudioPlugin, r sdk.RouteRegistrar) {
-	r.Handle(http.MethodPost, "/generation-tasks", p.handleCreateGenerationTask)
-	r.Handle(http.MethodGet, "/generation-tasks", p.handleListGenerationTasks)
-	r.Handle(http.MethodGet, "/generation-tasks/", p.handleGetGenerationTask)
-	r.Handle(http.MethodDelete, "/generation-tasks/", p.handleDeleteGenerationTask)
+	// Generation history and task operations are user-owned.  Keep the guard at
+	// the plugin boundary as well as in the Core task query: the admin extension
+	// entry can otherwise arrive with user id 0, which Core intentionally treats
+	// as an internal, unscoped caller.
+	r.Handle(http.MethodPost, "/generation-tasks", p.requireUser(p.handleCreateGenerationTask))
+	r.Handle(http.MethodGet, "/generation-tasks", p.requireUser(p.handleListGenerationTasks))
+	r.Handle(http.MethodGet, "/generation-tasks/", p.requireUser(p.handleGetGenerationTask))
+	r.Handle(http.MethodDelete, "/generation-tasks/", p.requireUser(p.handleDeleteGenerationTask))
 	r.Handle(http.MethodGet, "/platforms", p.handleListPlatforms)
 	r.Handle(http.MethodGet, "/models", p.handleListModels)
 	r.Handle(http.MethodGet, "/image-groups", p.requireUser(p.handleListImageGroups))
@@ -39,8 +43,8 @@ func registerRoutes(p *StudioPlugin, r sdk.RouteRegistrar) {
 // requireUser 守护需要用户身份但不依赖 DB 的路由（如 skills）。
 func (p *StudioPlugin) requireUser(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get(headerUserID) == "" {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing user identity"})
+		if parseUserIDInt64(r) <= 0 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing or invalid user identity"})
 			return
 		}
 		next(w, r)
@@ -50,12 +54,12 @@ func (p *StudioPlugin) requireUser(next http.HandlerFunc) http.HandlerFunc {
 // requireProjectService 守护需要持久化的路由：DB 未配置时返回 503，缺用户身份时返回 401。
 func (p *StudioPlugin) requireProjectService(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !p.Configured() {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "studio 项目功能未配置（缺少数据库）"})
+		if parseUserIDInt64(r) <= 0 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing or invalid user identity"})
 			return
 		}
-		if r.Header.Get(headerUserID) == "" {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing user identity"})
+		if !p.Configured() {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "studio 项目功能未配置（缺少数据库）"})
 			return
 		}
 		next(w, r)
@@ -113,6 +117,10 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 	}
 	if req.Model == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model is required"})
+		return
+	}
+	if req.ProjectID < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project_id must be non-negative"})
 		return
 	}
 	isVideo := req.Kind == "video"
@@ -199,6 +207,14 @@ func (p *StudioPlugin) handleDeleteGenerationTask(w http.ResponseWriter, r *http
 	if err := hostDeleteTaskFromPlugins(r.Context(), p.host, generationExecutorPluginIDs(), userID, taskID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "删除任务失败: " + err.Error()})
 		return
+	}
+	if p.svc != nil {
+		if err := p.svc.DeleteAssetsByTask(r.Context(), int(userID), taskID); err != nil && p.logger != nil {
+			// The host task is already deleted. Keep the API successful and let the
+			// frontend tombstone hide any late/stale project row while we retain the
+			// cleanup failure in logs for repair.
+			p.logger.Error("delete_generation_task_project_assets_failed", "user_id", userID, "task_id", taskID, "error", err)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})

@@ -43,6 +43,9 @@ export const VIDEO_STRINGS = {
   zh: {
     media_image: '图像',
     media_video: '视频',
+    gallery_load_more: '加载更多',
+    gallery_empty_image: '暂无图像作品',
+    gallery_empty_video: '暂无视频作品',
     model_standard: 'Seedance 2.0 标准',
     model_fast: 'Seedance 2.0 快速',
     model_mini: 'Seedance 2.0 迷你',
@@ -68,6 +71,9 @@ export const VIDEO_STRINGS = {
   en: {
     media_image: 'Image',
     media_video: 'Video',
+    gallery_load_more: 'Load more',
+    gallery_empty_image: 'No image works',
+    gallery_empty_video: 'No video works',
     model_standard: 'Seedance 2.0 Standard',
     model_fast: 'Seedance 2.0 Fast',
     model_mini: 'Seedance 2.0 Mini',
@@ -93,6 +99,9 @@ export const VIDEO_STRINGS = {
   ja: {
     media_image: '画像',
     media_video: '動画',
+    gallery_load_more: 'さらに読み込む',
+    gallery_empty_image: '画像作品はありません',
+    gallery_empty_video: '動画作品はありません',
     model_standard: 'Seedance 2.0 標準',
     model_fast: 'Seedance 2.0 高速',
     model_mini: 'Seedance 2.0 ミニ',
@@ -118,6 +127,9 @@ export const VIDEO_STRINGS = {
   'zh-HK': {
     media_image: '圖像',
     media_video: '影片',
+    gallery_load_more: '載入更多',
+    gallery_empty_image: '暫無圖像作品',
+    gallery_empty_video: '暫無影片作品',
     model_standard: 'Seedance 2.0 標準',
     model_fast: 'Seedance 2.0 快速',
     model_mini: 'Seedance 2.0 迷你',

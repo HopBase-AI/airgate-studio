@@ -9,32 +9,49 @@ import { getExpiryNotice, isVideoExpired, VIDEO_URL_TTL_MS } from './expiry';
 import { estimateEtaSeconds, etaDisplayState, formatElapsedCompact, formatEtaLabel } from './etaStats';
 import { useVideoStrings } from './video/videoConfig';
 
-function useNearViewport(rootMargin = '600px', estimatedHeight = 0) {
+type NearViewportListener = (near: boolean) => void;
+
+const nearViewportListeners = new Map<Element, NearViewportListener>();
+let nearViewportObserver: IntersectionObserver | null = null;
+
+function observeNearViewport(element: Element, listener: NearViewportListener): () => void {
+  if (!nearViewportObserver) {
+    nearViewportObserver = new IntersectionObserver(
+      entries => {
+        for (const entry of entries) {
+          nearViewportListeners.get(entry.target)?.(entry.isIntersecting);
+        }
+      },
+      { rootMargin: '800px 0px' },
+    );
+  }
+  nearViewportListeners.set(element, listener);
+  nearViewportObserver.observe(element);
+  return () => {
+    nearViewportObserver?.unobserve(element);
+    nearViewportListeners.delete(element);
+    if (nearViewportListeners.size === 0) {
+      nearViewportObserver?.disconnect();
+      nearViewportObserver = null;
+    }
+  };
+}
+
+function useNearViewport(estimatedHeight = 340) {
   const ref = useRef<HTMLDivElement>(null);
-  const [near, setNear] = useState(false);
-  const heightRef = useRef<number>(0);
+  const [near, setNear] = useState(() => typeof IntersectionObserver === 'undefined');
+  const [placeholderHeight, setPlaceholderHeight] = useState(estimatedHeight);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setNear(true);
-        } else {
-          if (el.offsetHeight > 0) heightRef.current = el.offsetHeight;
-          setNear(false);
-        }
-      },
-      { rootMargin },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [rootMargin]);
+    if (typeof IntersectionObserver === 'undefined') return;
+    return observeNearViewport(el, isNear => {
+      if (!isNear && el.offsetHeight > 0) setPlaceholderHeight(el.offsetHeight);
+      setNear(isNear);
+    });
+  }, []);
 
-  // Real measurement wins; estimate is only a fallback so the off-screen slot
-  // has a reservable height before the card has rendered once.
-  const placeholderHeight = heightRef.current || estimatedHeight;
   return { ref, near, placeholderHeight };
 }
 
@@ -63,18 +80,6 @@ function formatCreatedAt(value: string): string {
   if (Number.isNaN(date.getTime())) return value;
   const pad = (n: number): string => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-// Parse "1024x1024" → 1, "1024x768" → 0.75. Returns undefined if unparseable
-// so callers can fall back to letting the image define its own aspect ratio.
-function parseAspectRatio(size: string | undefined): number | undefined {
-  if (!size) return undefined;
-  const m = /^(\d+)x(\d+)$/.exec(size);
-  if (!m) return undefined;
-  const w = Number(m[1]);
-  const h = Number(m[2]);
-  if (!w || !h) return undefined;
-  return w / h;
 }
 
 function useCopyOnClick(text: string | undefined | null) {
@@ -114,7 +119,8 @@ function useCopyOnClick(text: string | undefined | null) {
 const taskCardStyles: Record<string, CSSProperties> = {
   card: {
     position: 'relative',
-    borderRadius: 14,
+    minWidth: 0,
+    borderRadius: 8,
     overflow: 'hidden',
     background: cssVar('bgElevated'),
     border: `1px solid ${cssVar('borderSubtle')}`,
@@ -124,8 +130,6 @@ const taskCardStyles: Record<string, CSSProperties> = {
     justifyContent: 'center',
     gap: 10,
     padding: 16,
-    marginBottom: 14,
-    breakInside: 'avoid',
     backdropFilter: 'blur(8px)',
     WebkitBackdropFilter: 'blur(8px)',
   },
@@ -183,6 +187,8 @@ const taskCardStyles: Record<string, CSSProperties> = {
   failedActions: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 4,
   },
@@ -454,8 +460,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
 
 // ── GalleryCard ─────────────────────────────────────────────────────────────
 
-const GALLERY_COL_WIDTH = 200;
-const GALLERY_OVERLAY_HEIGHT = 104;
+const GALLERY_ESTIMATED_CARD_HEIGHT = 340;
 
 // 过期/加载失败的媒体占位（视频 24h 后上游签名必然失效，不再渲染注定 410 的
 // <video>；图片则只在真实加载失败时兜底）。
@@ -517,13 +522,9 @@ function GalleryCard({ item, index }: GalleryCardProps) {
   const { setPreviewItem, deleteGalleryItem, applyAsReference, regenerate, requestEdit, generatedAssetRetentionDays } = useStudio();
   const { copied, copy } = useCopyOnClick(item.prompt);
   const { copied: sourceCopied, copy: copySourceLink } = useCopyOnClick(item.sourceVideoUrl);
-  const aspectRatio = parseAspectRatio(item.size);
   const createdAtLabel = formatCreatedAt(item.createdAt);
   const expiryNotice = getExpiryNotice(t, item, generatedAssetRetentionDays);
-  const estimatedHeight = aspectRatio
-    ? Math.round(GALLERY_COL_WIDTH / aspectRatio) + GALLERY_OVERLAY_HEIGHT
-    : 0;
-  const { ref, near, placeholderHeight } = useNearViewport('800px', estimatedHeight);
+  const { ref, near, placeholderHeight } = useNearViewport(GALLERY_ESTIMATED_CARD_HEIGHT);
 
   // 视频到点自动翻转为过期占位；媒体加载失败（提前失效/网络问题）由 onError 兜底。
   const [mediaError, setMediaError] = useState(false);
@@ -596,7 +597,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
       className="studio-gallery-card"
     >
       {item.mediaType === 'video' && (expired || mediaError) ? (
-        <div style={{ ...mediaPlaceholderStyles.wrap, aspectRatio: '16/9' }}>
+        <div style={{ ...mediaPlaceholderStyles.wrap, aspectRatio: '4/3' }}>
           <MediaPlaceholderIcon />
           <div style={mediaPlaceholderStyles.title}>{vs(expired ? 'expired_title' : 'load_failed')}</div>
           <div style={mediaPlaceholderStyles.hint}>{vs('expired_hint')}</div>
@@ -612,7 +613,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
       ) : item.mediaType === 'video' ? (
         <button
           type="button"
-          style={{ ...ss.galleryVideoPreview, aspectRatio: String(aspectRatio ?? (16 / 9)) }}
+          style={ss.galleryVideoPreview}
           className="studio-gallery-video-preview"
           onClick={handlePreview}
           aria-label={vs('preview_video')}
@@ -634,7 +635,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
           </span>
         </button>
       ) : mediaError ? (
-        <div style={{ ...mediaPlaceholderStyles.wrap, aspectRatio: aspectRatio !== undefined ? String(aspectRatio) : '1/1' }}>
+        <div style={{ ...mediaPlaceholderStyles.wrap, aspectRatio: '4/3' }}>
           <MediaPlaceholderIcon />
           <div style={mediaPlaceholderStyles.title}>
             {t('playground.studio_image_unavailable', { defaultValue: 'Image failed to load — it may have expired' })}
@@ -652,9 +653,9 @@ function GalleryCard({ item, index }: GalleryCardProps) {
         <img
           src={item.url}
           srcSet={buildThumbSrcSet(item.url)}
-          sizes="(max-width: 1023px) 50vw, 200px"
+          sizes="(max-width: 640px) 50vw, (max-width: 1023px) 50vw, 280px"
           alt={item.alt || item.prompt}
-          style={aspectRatio !== undefined ? { ...ss.galleryCardImg, aspectRatio: String(aspectRatio) } : ss.galleryCardImg}
+          style={ss.galleryCardImg}
           loading="lazy"
           decoding="async"
           fetchPriority="low"
@@ -1109,41 +1110,200 @@ function EmptyState() {
 
 // ── GalleryView ─────────────────────────────────────────────────────────────
 
+type GalleryMediaFilter = 'all' | 'image' | 'video';
+
+const galleryToolbarStyles: Record<string, CSSProperties> = {
+  bar: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 12,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    padding: '6px 0 10px',
+    marginBottom: 4,
+    background: cssVar('bgElevated'),
+  },
+  segmented: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 2,
+    padding: 2,
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 8,
+    background: cssVar('bgDeep'),
+  },
+  button: {
+    width: 30,
+    height: 26,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    border: 0,
+    borderRadius: 6,
+    background: 'transparent',
+    color: cssVar('textTertiary'),
+    cursor: 'pointer',
+  },
+  buttonActive: {
+    background: cssVar('bgHover'),
+    color: cssVar('text'),
+    boxShadow: `inset 0 0 0 1px ${cssVar('borderSubtle')}`,
+  },
+  count: {
+    minWidth: 24,
+    fontSize: 11,
+    color: cssVar('textTertiary'),
+    fontFamily: cssVar('fontMono'),
+    textAlign: 'right',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  paginationAction: {
+    display: 'flex',
+    justifyContent: 'center',
+    padding: '14px 0 2px',
+  },
+  paginationButton: {
+    minHeight: 30,
+    padding: '0 14px',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 7,
+    background: 'transparent',
+    color: cssVar('textSecondary'),
+    cursor: 'pointer',
+    font: 'inherit',
+    fontSize: 11,
+  },
+  filteredEmpty: {
+    minHeight: 220,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    color: cssVar('textTertiary'),
+    fontSize: 12,
+  },
+};
+
+function GalleryFilterIcon({ filter }: { filter: GalleryMediaFilter }) {
+  if (filter === 'video') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="5" width="14" height="14" rx="2" /><path d="M22 8.5l-6 3.5 6 3.5z" />
+      </svg>
+    );
+  }
+  if (filter === 'image') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  );
+}
+
+function FilteredEmptyState({ filter }: { filter: Exclude<GalleryMediaFilter, 'all'> }) {
+  const vs = useVideoStrings();
+  return (
+    <div style={galleryToolbarStyles.filteredEmpty}>
+      <GalleryFilterIcon filter={filter} />
+      <span>{vs(filter === 'video' ? 'gallery_empty_video' : 'gallery_empty_image')}</span>
+    </div>
+  );
+}
+
 export function GalleryView() {
   const { t } = useTranslation();
-  const { gallery, tasks, previewItem, hasMore, loadingMore, loadMore } = useStudio();
+  const vs = useVideoStrings();
+  const { gallery, tasks, previewItem, hasMore, loadingMore, loadMoreError, loadMore, activeProjectId } = useStudio();
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el || loadingMore || !hasMore) return;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
-      loadMore();
-    }
-  }, [loadMore, loadingMore, hasMore]);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const [mediaFilter, setMediaFilter] = useState<GalleryMediaFilter>('all');
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.addEventListener('scroll', handleScroll, { passive: true });
-    return () => el.removeEventListener('scroll', handleScroll);
-  }, [handleScroll]);
+    const root = scrollRef.current;
+    const sentinel = loadMoreSentinelRef.current;
+    if (
+      !root ||
+      !sentinel ||
+      !hasMore ||
+      loadMoreError ||
+      mediaFilter !== 'all' ||
+      typeof IntersectionObserver === 'undefined'
+    ) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !loadingMore) void loadMore();
+      },
+      { root, rootMargin: '600px 0px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore, loadMoreError, loadingMore, mediaFilter]);
 
-  const visibleTasks = tasks.filter(t => t.status !== 'completed');
-  const isEmpty = gallery.length === 0 && visibleTasks.length === 0;
+  const activeTasks = tasks.filter(task => (
+    task.status !== 'completed' &&
+    (activeProjectId === 0 || task.projectId === activeProjectId)
+  ));
+  const visibleTasks = activeTasks.filter(task =>
+    (mediaFilter === 'all' || (task.mode === 'video' ? 'video' : 'image') === mediaFilter),
+  );
+  const visibleGallery = gallery.filter(item =>
+    mediaFilter === 'all' || (item.mediaType === 'video' ? 'video' : 'image') === mediaFilter,
+  );
+  const isEmpty = visibleGallery.length === 0 && visibleTasks.length === 0 && !hasMore && !loadingMore;
+  const filterLabels: Record<GalleryMediaFilter, string> = {
+    all: t('playground.studio_all_works'),
+    image: vs('media_image'),
+    video: vs('media_video'),
+  };
 
   return (
     <div ref={scrollRef} style={ss.gallery} className="studio-gallery">
       {previewItem && <PreviewOverlay />}
 
+      <div style={galleryToolbarStyles.bar}>
+        <div style={galleryToolbarStyles.segmented} role="tablist" aria-label={t('playground.studio_all_works')}>
+          {(['all', 'image', 'video'] as GalleryMediaFilter[]).map(filter => (
+            <button
+              key={filter}
+              type="button"
+              role="tab"
+              aria-selected={mediaFilter === filter}
+              aria-label={filterLabels[filter]}
+              title={filterLabels[filter]}
+              style={{
+                ...galleryToolbarStyles.button,
+                ...(mediaFilter === filter ? galleryToolbarStyles.buttonActive : {}),
+              }}
+              className="studio-gallery-action"
+              onClick={() => setMediaFilter(filter)}
+            >
+              <GalleryFilterIcon filter={filter} />
+            </button>
+          ))}
+        </div>
+        <span style={galleryToolbarStyles.count} aria-live="polite">
+          {visibleGallery.length + visibleTasks.length}
+        </span>
+      </div>
+
       {isEmpty ? (
-        <EmptyState />
+        mediaFilter === 'all' ? <EmptyState /> : <FilteredEmptyState filter={mediaFilter} />
       ) : (
-        <div style={ss.galleryGrid}>
+        <div style={ss.galleryGrid} className="studio-gallery-grid">
           {visibleTasks.map(task => (
             <TaskCard key={task.id} task={task} />
           ))}
-          {gallery.map((item, i) => (
+          {visibleGallery.map((item, i) => (
             <GalleryCard
               key={item.id}
               item={item}
@@ -1152,8 +1312,21 @@ export function GalleryView() {
           ))}
         </div>
       )}
+      <div ref={loadMoreSentinelRef} style={{ height: hasMore ? 1 : 0 }} aria-hidden="true" />
       {loadingMore && (
         <div style={{ textAlign: 'center', padding: '16px 0', color: cssVar('textTertiary'), fontSize: 12 }}>{t('playground.studio_loading')}</div>
+      )}
+      {!loadingMore && hasMore && (loadMoreError || mediaFilter !== 'all') && (
+        <div style={galleryToolbarStyles.paginationAction} aria-live="polite">
+          <button
+            type="button"
+            style={galleryToolbarStyles.paginationButton}
+            className="studio-gallery-action"
+            onClick={() => { void loadMore(); }}
+          >
+            {loadMoreError ? t('playground.studio_retry') : vs('gallery_load_more')}
+          </button>
+        </div>
       )}
     </div>
   );

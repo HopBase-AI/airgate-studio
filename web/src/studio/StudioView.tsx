@@ -1963,13 +1963,31 @@ const mobileTabStyle: Record<string, CSSProperties> = {
 
 function StudioLayout() {
   const { t } = useTranslation();
-  const { gallery, tasks, projectsEnabled, initialLoadComplete } = useStudio();
+  const {
+    gallery,
+    tasks,
+    projectsEnabled,
+    initialLoadComplete,
+    activeProjectId,
+    hasMore,
+    loadingMore,
+    loadMoreError,
+  } = useStudio();
   const promptRef = useRef<{ set: (v: string) => void } | null>(null);
   const [mobileTab, setMobileTab] = useState<'projects' | 'create'>('create');
   const [inspirationOpen, setInspirationOpen] = useState(false);
 
-  const visibleTasks = tasks.filter(tk => tk.status !== 'completed');
-  const isEmpty = gallery.length === 0 && visibleTasks.length === 0;
+  const visibleTasks = tasks.filter(task => (
+    task.status !== 'completed' &&
+    (activeProjectId === 0 || task.projectId === activeProjectId)
+  ));
+  const isEmpty = (
+    gallery.length === 0 &&
+    visibleTasks.length === 0 &&
+    !hasMore &&
+    !loadingMore &&
+    !loadMoreError
+  );
 
   const handleTemplate = (prompt: string) => {
     promptRef.current?.set(prompt);

@@ -15,6 +15,7 @@ export function GroupSelector() {
   const options = imageGroups.map(g => ({
     value: String(g.id),
     label: formatImageGroupLabel(g),
+    description: g.note?.trim() || undefined,
   }));
 
   return (

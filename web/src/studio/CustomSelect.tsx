@@ -2,7 +2,11 @@ import { useState, useRef, useEffect, useCallback, useMemo, type CSSProperties }
 import { createPortal } from 'react-dom';
 import { cssVar } from '@doudou-start/airgate-theme';
 
-interface Option { value: string; label: string }
+interface Option {
+  value: string;
+  label: string;
+  description?: string;
+}
 interface CustomSelectProps {
   value: string;
   options: Option[];
@@ -28,6 +32,7 @@ const triggerStyle: CSSProperties = {
   fontSize: 13,
   transition: 'border-color 0.2s, box-shadow 0.2s',
   boxSizing: 'border-box',
+  minWidth: 0,
 };
 
 const triggerOpenStyle: CSSProperties = {
@@ -76,8 +81,9 @@ const optionStyle: CSSProperties = {
   font: 'inherit',
   transition: 'background 0.12s',
   boxSizing: 'border-box',
-  overflowWrap: 'anywhere',
-  whiteSpace: 'normal',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 };
 
 const optionCompactStyle: CSSProperties = {
@@ -193,6 +199,9 @@ export function CustomSelect({
 
   const selected = uniqueOptions.find(o => o.value === value);
   const selectedLabel = selected?.label || placeholder || value;
+  const selectedTitle = selected?.description
+    ? `${selectedLabel}\n${selected.description}`
+    : selectedLabel;
   const renderedDropdown = open
     ? createPortal(
         <div
@@ -216,7 +225,7 @@ export function CustomSelect({
                 ...(opt.value === value ? activeOptionStyle : {}),
               }}
               className={opt.value === value ? '' : 'studio-select-option'}
-              title={opt.label}
+              title={opt.description ? `${opt.label}\n${opt.description}` : opt.label}
               onClick={() => { onChange(opt.value); setOpen(false); }}
             >
               {opt.label}
@@ -228,14 +237,16 @@ export function CustomSelect({
     : null;
 
   return (
-    <div>
+    <div style={{ minWidth: 0 }}>
       <style>{hoverCSS}</style>
       <button
         ref={triggerRef}
         type="button"
         onClick={handleToggle}
         disabled={disabled}
-        title={selectedLabel}
+        title={selectedTitle}
+        aria-expanded={open}
+        aria-haspopup="listbox"
         style={{
           ...triggerStyle,
           ...(compact ? triggerCompactStyle : {}),
