@@ -233,6 +233,6 @@ func (s *Service) DeleteAsset(ctx context.Context, userID int, assetID int64) er
 // defaultProjectLockKey 把 userID 映射成 advisory lock 的 key，命名空间用 fnv 哈希避免与其他锁冲突。
 func defaultProjectLockKey(userID int) int64 {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(fmt.Sprintf("studio-default-project:%d", userID)))
+	_, _ = fmt.Fprintf(h, "studio-default-project:%d", userID)
 	return int64(h.Sum64())
 }

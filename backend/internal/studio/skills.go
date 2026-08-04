@@ -1,3 +1,4 @@
+//nolint:unused // Skills routes are intentionally disabled until their extra LLM cost is released.
 package studio
 
 import (

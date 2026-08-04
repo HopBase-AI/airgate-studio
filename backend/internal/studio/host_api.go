@@ -8,9 +8,10 @@ import (
 	"net/http"
 	"strings"
 
-	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 const (
@@ -273,7 +274,7 @@ func intFromAny(value interface{}) int {
 
 // ── Gateway forward（skills 同步 LLM 调用）────────────────────────────────────
 
-type hostForwardRequest struct {
+type hostForwardRequest struct { //nolint:unused // Reserved for the intentionally disabled Skills routes.
 	UserID  int64
 	GroupID int64
 	Model   string
@@ -283,13 +284,13 @@ type hostForwardRequest struct {
 	Body    []byte
 }
 
-type hostForwardResponse struct {
+type hostForwardResponse struct { //nolint:unused // Reserved for the intentionally disabled Skills routes.
 	StatusCode int
 	Body       []byte
 }
 
 // hostForward 通过 host gateway.forward 同步调用上游 LLM（非流式）。
-func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*hostForwardResponse, error) {
+func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*hostForwardResponse, error) { //nolint:unused // Reserved for Skills.
 	payload := map[string]interface{}{
 		"user_id":  req.UserID,
 		"group_id": req.GroupID,
@@ -310,7 +311,7 @@ func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*h
 	}, nil
 }
 
-func headerPayload(headers http.Header) map[string]interface{} {
+func headerPayload(headers http.Header) map[string]interface{} { //nolint:unused // Reserved for Skills.
 	out := make(map[string]interface{}, len(headers))
 	for key, values := range headers {
 		out[key] = append([]string(nil), values...)
@@ -335,7 +336,7 @@ func hostGetAssetDataURL(ctx context.Context, host sdk.Host, objectKey string) (
 	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-func bytesFromPayload(value interface{}) []byte {
+func bytesFromPayload(value interface{}) []byte { //nolint:unused // Reserved for Skills.
 	switch v := value.(type) {
 	case nil:
 		return nil
@@ -373,7 +374,7 @@ func binaryFromPayload(value interface{}) []byte {
 	}
 }
 
-func looksLikeJSON(body []byte) bool {
+func looksLikeJSON(body []byte) bool { //nolint:unused // Reserved for Skills.
 	trimmed := strings.TrimSpace(string(body))
 	return strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
 }
