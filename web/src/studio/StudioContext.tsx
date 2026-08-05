@@ -13,7 +13,14 @@ import { api, ApiRequestError } from '../api';
 import type { GenerationTask, ImageGroup, Project, ProjectAsset } from '../api';
 import type { GalleryItem, StudioGenerationTask, BatchSubtask, ImageMode, MediaType, StudioMode } from './types';
 import { getModelConfig, getDefaultModel, MODEL_REGISTRY, type ModelConfig } from './modelConfig';
-import { VIDEO_MODEL_REGISTRY, videoModelById, useVideoStrings } from './video/videoConfig';
+import {
+  VIDEO_MODEL_REGISTRY,
+  videoGroupsForModel,
+  videoModelById,
+  useVideoStrings,
+  type VideoGroupsByModel,
+  type VideoModelConfig,
+} from './video/videoConfig';
 import { recordRemoteTaskSample } from './etaStats';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -585,6 +592,7 @@ export interface StudioContextValue {
   cancelGeneration: () => void;
 
   // Video generation（Seedance；与图像互不影响的独立参数域）
+  availableVideoModels: VideoModelConfig[];
   videoModelId: string;
   setVideoModelId: (id: string) => void;
   videoDuration: number;
@@ -661,35 +669,71 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [videoResolution, setVideoResolution] = useState('720p');
   const [videoRatio, setVideoRatio] = useState('16:9');
   const [videoAudio, setVideoAudio] = useState(false);
-  const [videoGroups, setVideoGroups] = useState<ImageGroup[]>([]);
+  const [videoGroupsByModel, setVideoGroupsByModel] = useState<VideoGroupsByModel>({});
   const [videoGroupsLoaded, setVideoGroupsLoaded] = useState(false);
   const [selectedVideoGroupId, setSelectedVideoGroupId] = useState<number | null>(null);
+  const videoGroups = useMemo(
+    () => videoGroupsForModel(videoModelId, videoGroupsByModel),
+    [videoGroupsByModel, videoModelId],
+  );
+  const availableVideoModels = useMemo(
+    () => videoGroupsLoaded
+      ? VIDEO_MODEL_REGISTRY.filter(model => videoGroupsForModel(model.id, videoGroupsByModel).length > 0)
+      : VIDEO_MODEL_REGISTRY,
+    [videoGroupsByModel, videoGroupsLoaded],
+  );
 
-  // 换档时收敛分辨率到该档支持范围（fast/mini 无 1080p/4k）。
+  // 换档时收敛分辨率到该版本支持范围，并清空上一版本的分组选择。
   const setVideoModelId = useCallback((id: string) => {
+    if (!VIDEO_MODEL_REGISTRY.some(model => model.id === id)) return;
     setVideoModelIdRaw(id);
+    setSelectedVideoGroupId(null);
     setVideoResolution(prev => (videoModelById(id).resolutions.includes(prev) ? prev : '720p'));
   }, []);
 
-  // 切到视频或换模型时拉取可用分组（seedance 平台，不要求图片能力）。
+  // 切到视频时一次性拉取所有版本的可用分组。海外标准 ID 也会命中国内的
+  // API 兼容别名，因此由 videoGroupsForModel 用国内原生 ID 的结果做集合排除。
   useEffect(() => {
     if (mediaType !== 'video') return;
     let cancelled = false;
+    setVideoGroupsByModel({});
     setVideoGroupsLoaded(false);
-    api.listImageGroups('seedance', videoModelId, 'video')
-      .then(groups => {
+    setSelectedVideoGroupId(null);
+    void Promise.all(VIDEO_MODEL_REGISTRY.map(async model => (
+      [model.id, await api.listImageGroups('seedance', model.id, 'video')] as const
+    )))
+      .then(entries => {
         if (cancelled) return;
-        setVideoGroups(groups);
+        const next: VideoGroupsByModel = {};
+        for (const [modelId, groups] of entries) next[modelId] = groups;
+        setVideoGroupsByModel(next);
         setVideoGroupsLoaded(true);
-        setSelectedVideoGroupId(prev => (prev != null && groups.some(g => g.id === prev)) ? prev : (groups[0]?.id ?? null));
       })
       .catch(() => {
         if (cancelled) return;
-        setVideoGroups([]);
+        // 区域隔离依赖完整的模型/分组集合；任一查询失败都禁用视频提交，
+        // 避免把国内兼容别名误判为海外路由。
+        setVideoGroupsByModel({});
         setVideoGroupsLoaded(true);
       });
     return () => { cancelled = true; };
-  }, [mediaType, videoModelId]);
+  }, [mediaType]);
+
+  // 默认海外版本对当前用户不可用时，自动落到第一个真实可用的版本。
+  useEffect(() => {
+    if (mediaType !== 'video' || !videoGroupsLoaded || videoGroups.length > 0) return;
+    const fallback = availableVideoModels[0];
+    if (fallback && fallback.id !== videoModelId) setVideoModelId(fallback.id);
+  }, [availableVideoModels, mediaType, setVideoModelId, videoGroups.length, videoGroupsLoaded, videoModelId]);
+
+  useEffect(() => {
+    if (!videoGroupsLoaded) return;
+    setSelectedVideoGroupId(prev => (
+      prev != null && videoGroups.some(group => group.id === prev)
+        ? prev
+        : (videoGroups[0]?.id ?? null)
+    ));
+  }, [videoGroups, videoGroupsLoaded]);
 
   // Model selection (hardcoded registry)
   const [selectedModelKey, setSelectedModelKeyRaw] = useState(() => getInitialModel().routeKey);
@@ -1742,9 +1786,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     (prompt: string, options?: { sourceImages?: string[] }) => {
       if (!prompt.trim()) return;
       const model = videoModelId;
+      const groupId = selectedVideoGroupId;
+      if (!videoGroupsLoaded || groupId == null || !videoGroups.some(group => group.id === groupId)) return;
       const taskId = uid();
       const now = new Date().toISOString();
-      const groupId = selectedVideoGroupId ?? undefined;
       const sources = options?.sourceImages ?? [];
       const targetProjectID = activeProjectIdRef.current;
 
@@ -2167,6 +2212,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setImageMode,
     videoModelId,
     setVideoModelId,
+    availableVideoModels,
     videoDuration,
     setVideoDuration,
     videoResolution,

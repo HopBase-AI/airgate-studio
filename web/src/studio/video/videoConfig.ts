@@ -1,29 +1,49 @@
 import { useTranslation } from 'react-i18next';
+import type { ImageGroup } from '../../api';
 
 // ── Seedance 2.0 视频模型 ────────────────────────────────────────────────────
-// 与 gateway-seedance 插件 registry 对齐：三档各取 hc 版本对用户暴露；
-// fast / mini 档只支持 480p / 720p。
+// 与 gateway-seedance 插件 registry 对齐。国内标准版使用上游原生模型 ID，
+// 海外继续使用既有 Dreamina ID；API 兼容别名由 gateway-seedance 处理。
+
+export const VIDEO_MODEL_IDS = {
+  standardOverseas: 'dreamina-seedance-2-0-hc',
+  standardDomestic: 'doubao-seedance-2-0-260128-a',
+  fastOverseas: 'dreamina-seedance-2-0-fast-hc',
+  miniOverseas: 'dreamina-seedance-2-0-mini-hc',
+} as const;
+
+export type VideoModelRegion = 'overseas' | 'domestic';
 
 export interface VideoModelConfig {
   id: string;
   nameKey: keyof typeof VIDEO_STRINGS['zh'];
+  region: VideoModelRegion;
   resolutions: string[];
 }
 
 export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
   {
-    id: 'dreamina-seedance-2-0-hc',
-    nameKey: 'model_standard',
+    id: VIDEO_MODEL_IDS.standardOverseas,
+    nameKey: 'model_standard_overseas',
+    region: 'overseas',
     resolutions: ['480p', '720p', '1080p', '4k'],
   },
   {
-    id: 'dreamina-seedance-2-0-fast-hc',
-    nameKey: 'model_fast',
+    id: VIDEO_MODEL_IDS.standardDomestic,
+    nameKey: 'model_standard_domestic',
+    region: 'domestic',
+    resolutions: ['480p', '720p', '1080p'],
+  },
+  {
+    id: VIDEO_MODEL_IDS.fastOverseas,
+    nameKey: 'model_fast_overseas',
+    region: 'overseas',
     resolutions: ['480p', '720p'],
   },
   {
-    id: 'dreamina-seedance-2-0-mini-hc',
-    nameKey: 'model_mini',
+    id: VIDEO_MODEL_IDS.miniOverseas,
+    nameKey: 'model_mini_overseas',
+    region: 'overseas',
     resolutions: ['480p', '720p'],
   },
 ];
@@ -33,6 +53,25 @@ export const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3'] as const;
 
 export function videoModelById(id: string): VideoModelConfig {
   return VIDEO_MODEL_REGISTRY.find(m => m.id === id) ?? VIDEO_MODEL_REGISTRY[0];
+}
+
+export type VideoGroupsByModel = Record<string, ImageGroup[]>;
+
+// 国内分组为了兼容既有 API 客户，也会声明支持海外标准模型别名。工作台的
+// “海外”选项必须排除这些分组，否则用户选了海外仍可能被路由到国内账号。
+// 国内原生模型的可调度结果是可靠的结构化判据，不依赖分组 ID 或展示名称。
+export function videoGroupsForModel(
+  modelId: string,
+  groupsByModel: VideoGroupsByModel,
+): ImageGroup[] {
+  const groups = groupsByModel[modelId] ?? [];
+  const model = VIDEO_MODEL_REGISTRY.find(item => item.id === modelId);
+  if (!model || model.region === 'domestic') return groups;
+
+  const domesticGroupIds = new Set(
+    (groupsByModel[VIDEO_MODEL_IDS.standardDomestic] ?? []).map(group => group.id),
+  );
+  return groups.filter(group => !domesticGroupIds.has(group.id));
 }
 
 // ── 本地多语言 ───────────────────────────────────────────────────────────────
@@ -46,9 +85,10 @@ export const VIDEO_STRINGS = {
     gallery_load_more: '加载更多',
     gallery_empty_image: '暂无图像作品',
     gallery_empty_video: '暂无视频作品',
-    model_standard: 'Seedance 2.0 标准',
-    model_fast: 'Seedance 2.0 快速',
-    model_mini: 'Seedance 2.0 迷你',
+    model_standard_overseas: 'Seedance 2.0 标准（海外）',
+    model_standard_domestic: 'Seedance 2.0 标准（国内）',
+    model_fast_overseas: 'Seedance 2.0 快速（海外）',
+    model_mini_overseas: 'Seedance 2.0 迷你（海外）',
     duration: '时长',
     duration_seconds: '秒',
     resolution: '分辨率',
@@ -74,9 +114,10 @@ export const VIDEO_STRINGS = {
     gallery_load_more: 'Load more',
     gallery_empty_image: 'No image works',
     gallery_empty_video: 'No video works',
-    model_standard: 'Seedance 2.0 Standard',
-    model_fast: 'Seedance 2.0 Fast',
-    model_mini: 'Seedance 2.0 Mini',
+    model_standard_overseas: 'Seedance 2.0 Standard (Overseas)',
+    model_standard_domestic: 'Seedance 2.0 Standard (China)',
+    model_fast_overseas: 'Seedance 2.0 Fast (Overseas)',
+    model_mini_overseas: 'Seedance 2.0 Mini (Overseas)',
     duration: 'Duration',
     duration_seconds: 's',
     resolution: 'Resolution',
@@ -102,9 +143,10 @@ export const VIDEO_STRINGS = {
     gallery_load_more: 'さらに読み込む',
     gallery_empty_image: '画像作品はありません',
     gallery_empty_video: '動画作品はありません',
-    model_standard: 'Seedance 2.0 標準',
-    model_fast: 'Seedance 2.0 高速',
-    model_mini: 'Seedance 2.0 ミニ',
+    model_standard_overseas: 'Seedance 2.0 標準（海外）',
+    model_standard_domestic: 'Seedance 2.0 標準（中国）',
+    model_fast_overseas: 'Seedance 2.0 高速（海外）',
+    model_mini_overseas: 'Seedance 2.0 ミニ（海外）',
     duration: '長さ',
     duration_seconds: '秒',
     resolution: '解像度',
@@ -130,9 +172,10 @@ export const VIDEO_STRINGS = {
     gallery_load_more: '載入更多',
     gallery_empty_image: '暫無圖像作品',
     gallery_empty_video: '暫無影片作品',
-    model_standard: 'Seedance 2.0 標準',
-    model_fast: 'Seedance 2.0 快速',
-    model_mini: 'Seedance 2.0 迷你',
+    model_standard_overseas: 'Seedance 2.0 標準（海外）',
+    model_standard_domestic: 'Seedance 2.0 標準（國內）',
+    model_fast_overseas: 'Seedance 2.0 快速（海外）',
+    model_mini_overseas: 'Seedance 2.0 迷你（海外）',
     duration: '時長',
     duration_seconds: '秒',
     resolution: '解像度',

@@ -7,7 +7,14 @@ import (
 	"strings"
 )
 
-const defaultExecutorPluginID = "gateway-openai"
+const (
+	defaultExecutorPluginID = "gateway-openai"
+
+	videoModelSeedanceStandardOverseas = "dreamina-seedance-2-0-hc"
+	videoModelSeedanceStandardDomestic = "doubao-seedance-2-0-260128-a"
+	videoModelSeedanceFastOverseas     = "dreamina-seedance-2-0-fast-hc"
+	videoModelSeedanceMiniOverseas     = "dreamina-seedance-2-0-mini-hc"
+)
 
 func generationExecutorPluginID(platform string) string {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
@@ -55,10 +62,13 @@ func executorSupportsOperation(executorID, operation string) bool {
 	return executorID != "gateway-gemini" || operation != "inpaint"
 }
 
-// videoModelResolutions Seedance 各档位允许的分辨率（与插件 registry 桶表一致）。
-// fast / mini 档只有 480p/720p。
+// videoModelResolutions Seedance 各版本允许的分辨率（与 gateway-seedance
+// registry 对齐）。国内标准版不支持 4K；海外 fast / mini 只有 480p/720p。
 func videoModelResolutions(model string) map[string]struct{} {
 	m := strings.ToLower(strings.TrimSpace(model))
+	if m == videoModelSeedanceStandardDomestic {
+		return map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}}
+	}
 	if strings.Contains(m, "-fast-") || strings.Contains(m, "-mini-") {
 		return map[string]struct{}{"480p": {}, "720p": {}}
 	}

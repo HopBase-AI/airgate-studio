@@ -1,15 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { VIDEO_MODEL_REGISTRY, VIDEO_DURATIONS, VIDEO_RATIOS, VIDEO_STRINGS, videoModelById } from './videoConfig';
+import type { ImageGroup } from '../../api';
+import {
+  VIDEO_MODEL_IDS,
+  VIDEO_MODEL_REGISTRY,
+  VIDEO_DURATIONS,
+  VIDEO_RATIOS,
+  VIDEO_STRINGS,
+  videoGroupsForModel,
+  videoModelById,
+} from './videoConfig';
+
+function group(id: number, name: string): ImageGroup {
+  return {
+    id,
+    name,
+    platform: 'seedance',
+    rate_multiplier: 6.12,
+    effective_rate: 6.12,
+  };
+}
 
 describe('videoConfig', () => {
-  it('注册三档 Seedance 模型且档位分辨率正确', () => {
-    expect(VIDEO_MODEL_REGISTRY).toHaveLength(3);
-    const standard = videoModelById('dreamina-seedance-2-0-hc');
-    expect(standard.resolutions).toContain('4k');
-    const fast = videoModelById('dreamina-seedance-2-0-fast-hc');
+  it('注册国内外 Seedance 模型且分辨率边界正确', () => {
+    expect(VIDEO_MODEL_REGISTRY).toHaveLength(4);
+    const overseas = videoModelById(VIDEO_MODEL_IDS.standardOverseas);
+    expect(overseas.region).toBe('overseas');
+    expect(overseas.resolutions).toContain('4k');
+
+    const domestic = videoModelById(VIDEO_MODEL_IDS.standardDomestic);
+    expect(domestic.region).toBe('domestic');
+    expect(domestic.resolutions).toEqual(['480p', '720p', '1080p']);
+
+    const fast = videoModelById(VIDEO_MODEL_IDS.fastOverseas);
     expect(fast.resolutions).toEqual(['480p', '720p']);
-    const mini = videoModelById('dreamina-seedance-2-0-mini-hc');
+    const mini = videoModelById(VIDEO_MODEL_IDS.miniOverseas);
     expect(mini.resolutions).toEqual(['480p', '720p']);
+  });
+
+  it('从海外选项排除为 API 别名兼容而挂载的国内分组', () => {
+    const overseas = group(21, 'Seedance 2.0 海外');
+    const domestic = group(26, 'Seedance 2.0 国内');
+    const groupsByModel = {
+      [VIDEO_MODEL_IDS.standardOverseas]: [overseas, domestic],
+      [VIDEO_MODEL_IDS.standardDomestic]: [domestic],
+      [VIDEO_MODEL_IDS.fastOverseas]: [overseas],
+      [VIDEO_MODEL_IDS.miniOverseas]: [overseas],
+    };
+
+    expect(videoGroupsForModel(VIDEO_MODEL_IDS.standardOverseas, groupsByModel))
+      .toEqual([overseas]);
+    expect(videoGroupsForModel(VIDEO_MODEL_IDS.standardDomestic, groupsByModel))
+      .toEqual([domestic]);
+    expect(videoGroupsForModel(VIDEO_MODEL_IDS.fastOverseas, groupsByModel))
+      .toEqual([overseas]);
   });
 
   it('未知模型回退到第一个注册模型', () => {

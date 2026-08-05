@@ -8,7 +8,7 @@ import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
 import { buildModelRouteOptions, modelRouteOptionValue, parseModelRouteOptionValue } from './modelRoutes';
-import { VIDEO_MODEL_REGISTRY, videoModelById, useVideoStrings } from './video/videoConfig';
+import { videoModelById, useVideoStrings } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
 import { ProjectSidebar, ThemeToggleButton } from './ProjectSidebar';
 import { api, type InspirationCatalog, type InspirationItem } from '../api';
@@ -995,6 +995,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     imageSize, setImageSize,
     generate,
     generateVideo,
+    availableVideoModels,
     videoModelId, setVideoModelId,
     videoDuration, setVideoDuration,
     videoResolution, setVideoResolution,
@@ -1062,7 +1063,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     ? modelRouteOptionValue(selectedModelKey, selectedGroupId)
     : '';
   const hasSelectableModel = !imageGroupsLoaded || modelRouteOptions.length > 0;
-  const hasVideoGroup = !videoGroupsLoaded || videoGroups.length > 0;
+  const hasVideoGroup = videoGroupsLoaded
+    && selectedVideoGroupId != null
+    && videoGroups.some(group => group.id === selectedVideoGroupId);
   const canSend = prompt.trim().length > 0 && (isVideo ? hasVideoGroup : hasSelectableModel);
 
   useEffect(() => {
@@ -1365,10 +1368,10 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               <div style={c.modelSelect}>
                 <CustomSelect
                   value={videoModelId}
-                  options={VIDEO_MODEL_REGISTRY.map(m => ({ value: m.id, label: vs(m.nameKey) }))}
+                  options={availableVideoModels.map(m => ({ value: m.id, label: vs(m.nameKey) }))}
                   onChange={setVideoModelId}
                   compact
-                  minDropdownWidth={220}
+                  minDropdownWidth={260}
                 />
               </div>
               <VideoParamsPopover
