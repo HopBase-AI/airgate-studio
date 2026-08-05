@@ -68,6 +68,31 @@ func TestBuildTaskAttributesKeepsPositiveProjectID(t *testing.T) {
 	}
 }
 
+func TestValidateVideoModelParamsKeepsDomesticAndOverseasResolutionBoundaries(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		resolution string
+		wantErr    bool
+	}{
+		{name: "overseas standard supports 4k", model: videoModelSeedanceStandardOverseas, resolution: "4k"},
+		{name: "domestic standard supports 1080p", model: videoModelSeedanceStandardDomestic, resolution: "1080p"},
+		{name: "domestic standard rejects 4k", model: videoModelSeedanceStandardDomestic, resolution: "4k", wantErr: true},
+		{name: "overseas fast supports 720p", model: videoModelSeedanceFastOverseas, resolution: "720p"},
+		{name: "overseas fast rejects 1080p", model: videoModelSeedanceFastOverseas, resolution: "1080p", wantErr: true},
+		{name: "overseas mini rejects 4k", model: videoModelSeedanceMiniOverseas, resolution: "4k", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateVideoModelParams(tt.model, map[string]interface{}{"resolution": tt.resolution})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateVideoModelParams() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestBuildGenerationTaskResponseReturnsInputImages(t *testing.T) {
 	task := &hostTask{
 		ID:       12,
