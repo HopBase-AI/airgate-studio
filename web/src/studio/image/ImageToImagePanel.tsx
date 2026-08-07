@@ -86,6 +86,7 @@ export function ImageToImagePanel() {
     imageSize,
     setImageSize,
     imageGroupsLoaded,
+    imageRouteReady,
     hasImageGroupsForModel,
     isGenerating,
     generate,
@@ -107,7 +108,7 @@ export function ImageToImagePanel() {
     }
   }, [editModelOptions, selectedModelKey, setSelectedModelKey]);
 
-  const canGenerate = prompt.trim().length > 0 && sourceImage !== null && editModelOptions.length > 0;
+  const canGenerate = prompt.trim().length > 0 && sourceImage !== null && editModelOptions.length > 0 && imageRouteReady;
 
   const handleFile = async (file: File) => {
     if (!file.type.startsWith('image/')) return;

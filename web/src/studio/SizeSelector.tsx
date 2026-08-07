@@ -14,6 +14,10 @@ export function formatImagePrice(price: number): string {
   return price.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+function imagePriceSymbol(currency?: string): string {
+  return currency?.toUpperCase() === 'CNY' ? '¥' : '$';
+}
+
 function AspectIcon({ aspect, size = 16 }: { aspect?: string; size?: number }) {
   if (!aspect) return null;
   const [aw, ah] = aspect.split(':').map(Number);
@@ -230,7 +234,7 @@ export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSe
           {triggerLabel}
         </span>
         {selected?.showPrice && (
-          <span style={s.price}>${formatImagePrice(selected.price)}/张</span>
+          <span style={s.price}>{imagePriceSymbol(selected.currency)}{formatImagePrice(selected.price)}/张</span>
         )}
         <svg
           width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -275,7 +279,7 @@ export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSe
                     {(opt.aspect || opt.showPrice) && (
                       <span style={s.optionMeta}>
                         {opt.aspect && <span style={s.optionAspect}>{opt.aspect}</span>}
-                        {opt.showPrice && <span style={s.price}>${formatImagePrice(opt.price)}/张</span>}
+                        {opt.showPrice && <span style={s.price}>{imagePriceSymbol(opt.currency)}{formatImagePrice(opt.price)}/张</span>}
                       </span>
                     )}
                   </button>

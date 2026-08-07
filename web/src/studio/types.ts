@@ -5,6 +5,14 @@ export type ImageMode = 'text2img' | 'img2img' | 'inpaint' | 'batch';
 // StudioMode 生成任务的工作模式：图像四态 + 视频。
 export type StudioMode = ImageMode | 'video';
 
+export interface GenerationRouteSnapshot {
+  routeKey: string;
+  platform: string;
+  model: string;
+  groupId: number;
+  size: string;
+}
+
 export interface GalleryItem {
   id: string;
   taskId?: number; // core task ID for API operations
@@ -12,7 +20,10 @@ export interface GalleryItem {
   url: string;
   alt: string;
   prompt: string;
+  platform?: string;
   model: string;
+  groupId?: number;
+  routeKey?: string;
   mode: StudioMode;
   // 渲染介质：缺省按 image 处理（历史数据兼容）。
   mediaType?: MediaType;
@@ -49,6 +60,7 @@ export interface StudioGenerationTask {
   createdAt: string;
   platform?: string;
   model?: string;
+  routeKey?: string;
   size?: string;
   // 视频时长(秒),ETA 估算分桶用;图片任务缺省。
   durationSeconds?: number;

@@ -289,6 +289,7 @@ func buildTaskAttributes(req createGenerationTaskRequest) map[string]interface{}
 		"operation": req.Operation,
 		"platform":  req.Platform,
 		"model":     req.Model,
+		"route_key": generationRouteKey(req.Platform, req.Model),
 	}
 	if req.ProjectID > 0 {
 		attrs["project_id"] = req.ProjectID
@@ -299,6 +300,43 @@ func buildTaskAttributes(req createGenerationTaskRequest) map[string]interface{}
 		}
 	}
 	return attrs
+}
+
+func generationRouteKey(platform, model string) string {
+	platform = strings.TrimSpace(platform)
+	model = strings.TrimSpace(model)
+	if platform == "" || model == "" {
+		return ""
+	}
+	return platform + ":" + model
+}
+
+func taskString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func generationTaskPlatform(task *hostTask) string {
+	if v, ok := task.Attributes["platform"]; ok {
+		if platform := taskString(v); platform != "" {
+			return platform
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(task.PluginID)) {
+	case "gateway-gemini":
+		return "gemini"
+	case "gateway-seedance":
+		return "seedance"
+	case "gateway-openai":
+		return "openai"
+	default:
+		return ""
+	}
 }
 
 func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
@@ -321,6 +359,9 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 		}
 		if mask, ok := task.Input["mask"].(string); ok && mask != "" {
 			resp["input_mask"] = mask
+		}
+		if groupID, ok := toInt(task.Input["group_id"]); ok && groupID > 0 {
+			resp["group_id"] = groupID
 		}
 	}
 	if task.Output != nil {
@@ -347,11 +388,26 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 	if task.ErrorMessage != "" {
 		resp["error_message"] = task.ErrorMessage
 	}
-	// 从 input 或 attributes 补充展示字段
-	if _, ok := resp["model"]; !ok {
-		if v, ok := task.Input["model"]; ok {
-			resp["model"] = v
+	// 路由身份必须使用请求模型；上游 output.model 可能是内部档位别名，不能
+	// 覆盖重试/计费所需的原始模型。
+	if v, ok := task.Attributes["model"]; ok && taskString(v) != "" {
+		resp["model"] = taskString(v)
+	} else if v, ok := task.Input["model"]; ok && taskString(v) != "" {
+		resp["model"] = taskString(v)
+	}
+	platform := generationTaskPlatform(task)
+	if platform != "" {
+		resp["platform"] = platform
+	}
+	model := taskString(resp["model"])
+	routeKey := generationRouteKey(platform, model)
+	if routeKey == "" {
+		if v, ok := task.Attributes["route_key"]; ok {
+			routeKey = taskString(v)
 		}
+	}
+	if routeKey != "" {
+		resp["route_key"] = routeKey
 	}
 	for _, key := range []string{"size", "quality"} {
 		if v, ok := task.Attributes[key]; ok && fmt.Sprint(v) != "" {
