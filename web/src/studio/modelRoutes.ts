@@ -39,24 +39,48 @@ export function formatImageGroupLabel(group: ImageGroup): string {
 // it in every option. The generic effective rate is also not an image price
 // when a group uses per-resolution fixed pricing.
 export function formatModelRouteGroupLabel(group: ImageGroup): string {
-  return imageGroupDisplayName(group);
+  const name = imageGroupDisplayName(group);
+  if (/azure/i.test(name)) return 'Azure';
+  if (/官方直[连聯]|official\s+direct|google\s+official/i.test(name)) return '官方直连';
+  if (/adobe/i.test(name)) return 'Adobe';
+
+  return name
+    .replace(/\s*[（(]?\s*(?:支持)?生图(?:分组)?\s*[)）]?\s*$/u, '')
+    .trim() || name;
 }
 
 export function buildModelRouteOptions(
   models: ModelConfig[],
   groupsForModel: (model: ModelConfig) => ImageGroup[],
 ): ModelRouteOption[] {
-  return models.flatMap(model => groupsForModel(model).map(group => ({
-    value: modelRouteOptionValue(model.routeKey, group.id),
-    label: `${model.name} · ${formatModelRouteGroupLabel(group)}`,
-    description: group.note?.trim() || undefined,
-    modelKey: model.routeKey,
-    groupId: group.id,
-  })));
+  return models.flatMap(model => groupsForModel(model).map(group => {
+    const channel = formatModelRouteGroupLabel(group);
+    const label = routeLabelRepeatsModel(model.name, channel)
+      ? model.name
+      : `${model.name} · ${channel}`;
+
+    return {
+      value: modelRouteOptionValue(model.routeKey, group.id),
+      label,
+      description: group.note?.trim() || undefined,
+      modelKey: model.routeKey,
+      groupId: group.id,
+    };
+  }));
 }
 
 function imageGroupDisplayName(group: ImageGroup): string {
   return group.name.trim() || `Group ${group.id}`;
+}
+
+function routeLabelRepeatsModel(modelName: string, channel: string): boolean {
+  const normalize = (value: string) => value
+    .toLowerCase()
+    .replace(/(\d+)\.0(?=\D|$)/g, '$1')
+    .replace(/[^a-z0-9]+/g, '');
+
+  const normalizedModel = normalize(modelName);
+  return normalizedModel !== '' && normalizedModel === normalize(channel);
 }
 
 function trimRate(rate: number): string {

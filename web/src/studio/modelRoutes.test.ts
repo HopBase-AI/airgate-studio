@@ -66,7 +66,7 @@ describe('model route labels', () => {
       .toBe('Adobe');
   });
 
-  it('builds distinct Adobe and Google official options for the same upstream model ID', () => {
+  it('builds concise Azure and official options for the same upstream model ID', () => {
     const adobe = getModelConfig('openai:gemini-3.1-flash-image');
     const official = getModelConfig('gemini:gemini-3.1-flash-image');
     expect(adobe).toBeDefined();
@@ -76,8 +76,8 @@ describe('model route labels', () => {
     const options = buildModelRouteOptions(
       [adobe, official],
       model => model.platform === 'openai'
-        ? [imageGroup()]
-        : [imageGroup({ id: 24, name: 'Google 官方', platform: 'gemini', effective_rate: 1 })],
+        ? [imageGroup({ name: 'Azure Gemini 支持生图' })]
+        : [imageGroup({ id: 24, name: 'Gemini 官方直连', platform: 'gemini', effective_rate: 1 })],
     );
 
     expect(options.map(option => option.value)).toEqual([
@@ -85,9 +85,31 @@ describe('model route labels', () => {
       'gemini:gemini-3.1-flash-image|24',
     ]);
     expect(options.map(option => option.label)).toEqual([
-      'Banana 2 · Adobe',
-      'Banana 2 · Google 官方',
+      'Banana 2 · Azure',
+      'Banana 2 · 官方直连',
     ]);
+  });
+
+  it('removes redundant image capability wording from channel names', () => {
+    expect(formatModelRouteGroupLabel(imageGroup({ name: 'Azure Gemini 支持生图' })))
+      .toBe('Azure');
+    expect(formatModelRouteGroupLabel(imageGroup({ name: 'Gemini 官方直连' })))
+      .toBe('官方直连');
+    expect(formatModelRouteGroupLabel(imageGroup({ name: 'Seedream 生图分组' })))
+      .toBe('Seedream');
+  });
+
+  it('does not repeat a group name that only adds a trailing version zero', () => {
+    const model = getModelConfig('openai:gpt-image-2');
+    expect(model).toBeDefined();
+    if (!model) throw new Error('expected GPT Image route');
+
+    const [option] = buildModelRouteOptions(
+      [model],
+      () => [imageGroup({ name: 'GPT Image 2.0' })],
+    );
+
+    expect(option.label).toBe('GPT Image 2');
   });
 
   it('keeps a long group note available as option metadata', () => {
