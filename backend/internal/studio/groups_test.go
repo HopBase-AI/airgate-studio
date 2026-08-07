@@ -30,9 +30,14 @@ func (h *groupTestHost) InvokeStream(context.Context, sdk.HostStreamRequest) (sd
 }
 
 func TestHostListImageGroups(t *testing.T) {
+	zero := 0.0
+	oneK := 0.08
 	host := &groupTestHost{groups: []interface{}{
 		map[string]interface{}{"id": 3, "name": "标准", "platform": "gemini", "rate_multiplier": 1.0, "effective_rate": 1.0},
-		map[string]interface{}{"id": 5, "name": "高清", "platform": "gemini", "rate_multiplier": 2.0, "effective_rate": 1.8, "note": "nano-banana"},
+		map[string]interface{}{
+			"id": 5, "name": "高清", "platform": "gemini", "rate_multiplier": 2.0, "effective_rate": 1.8, "note": "nano-banana",
+			"fixed_image_prices": map[string]interface{}{"1k": oneK, "2k": zero, "currency": "CNY"},
+		},
 	}}
 
 	groups, err := hostListImageGroups(context.Background(), host, 7, "gemini", "gemini-3-pro-image")
@@ -44,6 +49,12 @@ func TestHostListImageGroups(t *testing.T) {
 	}
 	if groups[1].EffectiveRate != 1.8 || groups[1].Note != "nano-banana" {
 		t.Fatalf("group fields = %+v", groups[1])
+	}
+	if groups[1].FixedImagePrices == nil || groups[1].FixedImagePrices.OneK == nil || *groups[1].FixedImagePrices.OneK != oneK {
+		t.Fatalf("fixed prices = %+v", groups[1].FixedImagePrices)
+	}
+	if groups[1].FixedImagePrices.TwoK == nil || *groups[1].FixedImagePrices.TwoK != zero || groups[1].FixedImagePrices.Currency != "CNY" {
+		t.Fatalf("fixed zero price/currency lost: %+v", groups[1].FixedImagePrices)
 	}
 
 	// 请求应带 eligible_only / needs_image / user_id / platform，让资格判定留在 core
@@ -82,5 +93,18 @@ func TestValidateGenerationAccessRequiresAvailablePlatformGroup(t *testing.T) {
 	}
 	if got, want := err.Error(), "当前没有可用的 Gemini 图片分组"; !strings.Contains(got, want) {
 		t.Fatalf("error = %q, want contains %q", got, want)
+	}
+}
+
+func TestValidateGenerationAccessRequiresExplicitGroup(t *testing.T) {
+	host := &groupTestHost{groups: []interface{}{
+		map[string]interface{}{"id": 3, "name": "标准", "platform": "openai"},
+	}}
+
+	if err := validateGenerationAccess(context.Background(), host, 7, 0, "openai", "gpt-image-2"); err == nil {
+		t.Fatal("missing image group_id must fail closed")
+	}
+	if err := validateVideoGenerationAccess(context.Background(), host, 7, 0, "seedance", "seedance-model"); err == nil {
+		t.Fatal("missing video group_id must fail closed")
 	}
 }

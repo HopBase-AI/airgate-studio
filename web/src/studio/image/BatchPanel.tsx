@@ -129,6 +129,7 @@ export function BatchPanel() {
     imageSize,
     setImageSize,
     imageGroupsLoaded,
+    imageRouteReady,
     hasImageGroupsForModel,
     isGenerating,
     generate,
@@ -153,7 +154,7 @@ export function BatchPanel() {
   const promptLines = multiPrompts.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
   const canGenerate = (
-    availableModels.length > 0 && (
+    imageRouteReady && availableModels.length > 0 && (
       mode === 'multi_prompt' ? promptLines.length > 0 : (images.length > 0 && imagePrompt.trim().length > 0)
     )
   );

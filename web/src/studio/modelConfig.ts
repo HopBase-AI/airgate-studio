@@ -3,6 +3,7 @@ export interface SizeOption {
   label: string;
   tier: '1K' | '2K' | '4K';
   price: number;
+  currency?: string;
   aspect?: string;
   showPrice?: boolean;
 }
@@ -160,9 +161,9 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     supportsImg2Img: true,
     supportsInpaint: true,
   },
-  // Adobe and other OpenAI-compatible relays use platform=openai. Google
-  // official accounts use platform=gemini. The request model ID stays equal,
-  // while routeKey keeps both choices distinct in Studio.
+  // OpenAI-compatible relays (for example Azure) use platform=openai. Google
+  // official accounts use platform=gemini. Adobe Image only advertises
+  // gpt-image-2, so model-aware group discovery never offers it for Banana.
   ...geminiImageRoutes('openai'),
   ...geminiImageRoutes('gemini'),
   {

@@ -32,4 +32,16 @@ describe('SizeSelector pricing', () => {
 
     expect(html).not.toContain('$0.1/张');
   });
+
+  it('uses the fixed-price currency supplied by the selected group', () => {
+    const html = renderToStaticMarkup(
+      <SizeSelector
+        value="1024x1024"
+        sizes={[{ value: '1024x1024', label: '1024x1024', tier: '1K', price: 0.08, currency: 'CNY', showPrice: true }]}
+        onChange={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('¥0.08/张');
+  });
 });

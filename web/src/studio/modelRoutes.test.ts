@@ -8,6 +8,7 @@ import {
   formatModelRouteGroupLabel,
   modelRouteOptionValue,
   parseModelRouteOptionValue,
+  withImageGroupPrices,
 } from './modelRoutes';
 
 function imageGroup(overrides: Partial<ImageGroup> = {}): ImageGroup {
@@ -50,11 +51,14 @@ describe('model route labels', () => {
   });
 
   it('does not invent a token multiplier for fixed-price image groups', () => {
-    expect(formatImageGroupLabel(imageGroup({ rate_multiplier: 0, effective_rate: 1 })))
-      .toBe('Adobe');
+    expect(formatImageGroupLabel(imageGroup({
+      rate_multiplier: 3,
+      effective_rate: 3,
+      fixed_image_prices: { '1k': 0.08, '2k': 0.12, '4k': 0.15, currency: 'CNY' },
+    }))).toBe('Adobe');
   });
 
-  it('does not present a generic multiplier as the model route image price', () => {
+  it('keeps generic multipliers out of compact route labels', () => {
     const group = imageGroup({
       rate_multiplier: 3,
       effective_rate: 3,
@@ -62,19 +66,18 @@ describe('model route labels', () => {
     });
 
     expect(formatImageGroupLabel(group)).toContain('×3');
-    expect(formatModelRouteGroupLabel(group))
-      .toBe('Adobe');
+    expect(formatModelRouteGroupLabel(group)).toBe('Adobe');
   });
 
   it('builds concise Azure and official options for the same upstream model ID', () => {
-    const adobe = getModelConfig('openai:gemini-3.1-flash-image');
+    const azure = getModelConfig('openai:gemini-3.1-flash-image');
     const official = getModelConfig('gemini:gemini-3.1-flash-image');
-    expect(adobe).toBeDefined();
+    expect(azure).toBeDefined();
     expect(official).toBeDefined();
-    if (!adobe || !official) throw new Error('expected both Gemini routes');
+    if (!azure || !official) throw new Error('expected both Gemini routes');
 
     const options = buildModelRouteOptions(
-      [adobe, official],
+      [azure, official],
       model => model.platform === 'openai'
         ? [imageGroup({ name: 'Azure Gemini 支持生图' })]
         : [imageGroup({ id: 24, name: 'Gemini 官方直连', platform: 'gemini', effective_rate: 1 })],
@@ -123,5 +126,43 @@ describe('model route labels', () => {
     expect(option.label).toBe('GPT Image 2 · Adobe');
     expect(option.description).toBe(note);
     expect(option.label).not.toContain(note);
+  });
+});
+
+describe('fixed image route pricing', () => {
+  it('applies exact prices only to the selected group without mutating the registry', () => {
+    const base = getModelConfig('openai:gpt-image-2');
+    expect(base).toBeDefined();
+    if (!base) throw new Error('expected gpt-image-2');
+
+    const priced = withImageGroupPrices(base, imageGroup({
+      fixed_image_prices: { '1k': 0, '2k': 0.12, '4k': 0.15, currency: 'CNY' },
+    }));
+    expect(priced).not.toBe(base);
+    expect(priced.sizes.find(size => size.tier === '1K')).toMatchObject({ price: 0, currency: 'CNY', showPrice: true });
+    expect(priced.sizes.find(size => size.tier === '2K')).toMatchObject({ price: 0.12, currency: 'CNY', showPrice: true });
+    expect(base.sizes.find(size => size.tier === '1K')?.showPrice).not.toBe(true);
+
+    const otherGroup = withImageGroupPrices(base, imageGroup({
+      id: 13,
+      fixed_image_prices: { '1k': 0.2, currency: 'CNY' },
+    }));
+    expect(otherGroup.sizes.find(size => size.tier === '1K')).toMatchObject({ price: 0.2, currency: 'CNY', showPrice: true });
+    expect(priced.sizes.find(size => size.tier === '1K')?.price).toBe(0);
+  });
+
+  it('defaults legacy fixed prices without a currency to CNY balance units', () => {
+    const base = getModelConfig('openai:gpt-image-2');
+    expect(base).toBeDefined();
+    if (!base) throw new Error('expected gpt-image-2');
+
+    const priced = withImageGroupPrices(base, imageGroup({
+      fixed_image_prices: { '1k': 0.08 },
+    }));
+    expect(priced.sizes.find(size => size.tier === '1K')).toMatchObject({
+      price: 0.08,
+      currency: 'CNY',
+      showPrice: true,
+    });
   });
 });

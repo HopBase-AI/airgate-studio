@@ -106,7 +106,9 @@ func TestServiceIntegration(t *testing.T) {
 	var firstAssetID int64
 	for i := 0; i < 3; i++ {
 		added, err := svc.AddAsset(ctx, uid, proj.ID, AssetRecord{
-			TaskID: int64(100 + i), URL: "/assets-runtime/img" + string(rune('a'+i)) + ".png", Prompt: "p", Model: "gpt-image-2", Mode: "text2img", Size: "auto",
+			TaskID: int64(100 + i), URL: "/assets-runtime/img" + string(rune('a'+i)) + ".png", Prompt: "p",
+			Platform: "openai", Model: "gpt-image-2", GroupID: 42, RouteKey: "openai:gpt-image-2",
+			Mode: "text2img", Size: "auto",
 		})
 		if err != nil {
 			t.Fatalf("AddAsset[%d]: %v", i, err)
@@ -149,6 +151,11 @@ func TestServiceIntegration(t *testing.T) {
 	}
 	if len(assets) != 2 {
 		t.Errorf("分页 limit=2 返回 %d 条, want 2", len(assets))
+	}
+	for _, asset := range assets {
+		if asset.Platform != "openai" || asset.Model != "gpt-image-2" || asset.GroupID != 42 || asset.RouteKey != "openai:gpt-image-2" || asset.Size != "auto" {
+			t.Fatalf("asset route snapshot did not round-trip: %+v", asset)
+		}
 	}
 
 	// 项目内删除使用持久墓碑：列表立即隐藏，恢复轮询也不能把同一任务重新插回。

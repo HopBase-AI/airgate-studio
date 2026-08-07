@@ -29,7 +29,7 @@ export class ApiRequestError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const url = `${baseURL()}${path}`;
   const headers: Record<string, string> = {};
   const token = getStoredToken();
@@ -38,6 +38,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const options: RequestInit = {
     method,
     headers,
+    signal,
   };
   if (body !== undefined) {
     options.body = JSON.stringify(body);
@@ -79,7 +80,10 @@ export interface GenerationTask {
   status: string;
   progress: number;
   prompt: string;
+  platform?: string;
   model?: string;
+  group_id?: number;
+  route_key?: string;
   operation?: string;
   // kind/duration 来自任务创建入参(image|video / 视频秒数),恢复链路用来
   // 还原媒体语义与 ETA 分桶;老后端不回传时缺省。
@@ -125,6 +129,12 @@ export interface ImageGroup {
   rate_multiplier: number;
   effective_rate: number;
   note?: string;
+  fixed_image_prices?: {
+    '1k'?: number;
+    '2k'?: number;
+    '4k'?: number;
+    currency?: string;
+  };
 }
 
 export interface Project {
@@ -142,7 +152,10 @@ export interface ProjectAsset {
   task_id: number;
   url: string;
   prompt: string;
+  platform?: string;
   model: string;
+  group_id?: number;
+  route_key?: string;
   mode: string;
   size: string;
   // 视频官方上游直链(24h 有效);老记录/图片为空串。
@@ -223,11 +236,11 @@ export const api = {
 
   // 当前用户在指定平台下可选的生成计费分组（最便宜优先）。
   // media='video' 时不要求图片能力（视频平台分组，如 seedance）。
-  listImageGroups(platform: string, model?: string, media?: 'image' | 'video'): Promise<ImageGroup[]> {
+  listImageGroups(platform: string, model?: string, media?: 'image' | 'video', signal?: AbortSignal): Promise<ImageGroup[]> {
     const qs = new URLSearchParams({ platform });
     if (model) qs.set('model', model);
     if (media) qs.set('media', media);
-    return request<{ groups: ImageGroup[] }>('GET', `/image-groups?${qs}`).then(r => r.groups || []);
+    return request<{ groups: ImageGroup[] }>('GET', `/image-groups?${qs}`, undefined, signal).then(r => r.groups || []);
   },
 
   listInspirations(): Promise<InspirationCatalog> {
@@ -270,7 +283,10 @@ export const api = {
     task_id?: number;
     url: string;
     prompt?: string;
+    platform?: string;
     model?: string;
+    group_id?: number;
+    route_key?: string;
     mode?: string;
     size?: string;
     source_video_url?: string;

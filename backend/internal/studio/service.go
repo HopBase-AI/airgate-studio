@@ -160,13 +160,14 @@ func (s *Service) assetByTaskURL(ctx context.Context, userID int, projectID, tas
 	var out AssetRecord
 	var deletedAt sql.NullTime
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, project_id, task_id, url, prompt, model, mode, size, source_video_url, created_at, deleted_at
+		`SELECT id, user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url, created_at, deleted_at
 		 FROM studio_assets
 		 WHERE user_id = $1 AND project_id = $2 AND task_id = $3 AND url = $4`,
 		userID, projectID, taskID, url,
 	).Scan(
 		&out.ID, &out.UserID, &out.ProjectID, &out.TaskID, &out.URL, &out.Prompt,
-		&out.Model, &out.Mode, &out.Size, &out.SourceVideoURL, &out.CreatedAt, &deletedAt,
+		&out.Platform, &out.Model, &out.GroupID, &out.RouteKey, &out.Mode, &out.Size,
+		&out.SourceVideoURL, &out.CreatedAt, &deletedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -203,12 +204,12 @@ func (s *Service) AddAsset(ctx context.Context, userID int, projectID int64, rec
 	out.UserID = userID
 	out.ProjectID = projectID
 	if err := s.db.QueryRowContext(ctx,
-		`INSERT INTO studio_assets (user_id, project_id, task_id, url, prompt, model, mode, size, source_video_url)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`INSERT INTO studio_assets (user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		 ON CONFLICT (project_id, task_id, url) WHERE task_id > 0
 		 DO NOTHING
 		 RETURNING id, created_at`,
-		userID, projectID, rec.TaskID, rec.URL, rec.Prompt, rec.Model, rec.Mode, rec.Size, rec.SourceVideoURL,
+		userID, projectID, rec.TaskID, rec.URL, rec.Prompt, rec.Platform, rec.Model, rec.GroupID, rec.RouteKey, rec.Mode, rec.Size, rec.SourceVideoURL,
 	).Scan(&out.ID, &out.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) && rec.TaskID > 0 {
 			return s.assetByTaskURL(ctx, userID, projectID, rec.TaskID, rec.URL)
@@ -231,7 +232,7 @@ func (s *Service) ListAssets(ctx context.Context, userID int, projectID int64, l
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, user_id, project_id, task_id, url, prompt, model, mode, size, source_video_url, created_at
+		`SELECT id, user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url, created_at
 		 FROM studio_assets
 		 WHERE project_id = $1 AND user_id = $2 AND deleted_at IS NULL
 		 ORDER BY created_at DESC, id DESC
@@ -246,7 +247,7 @@ func (s *Service) ListAssets(ctx context.Context, userID int, projectID int64, l
 	assets := make([]AssetRecord, 0, limit)
 	for rows.Next() {
 		var a AssetRecord
-		if err := rows.Scan(&a.ID, &a.UserID, &a.ProjectID, &a.TaskID, &a.URL, &a.Prompt, &a.Model, &a.Mode, &a.Size, &a.SourceVideoURL, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.UserID, &a.ProjectID, &a.TaskID, &a.URL, &a.Prompt, &a.Platform, &a.Model, &a.GroupID, &a.RouteKey, &a.Mode, &a.Size, &a.SourceVideoURL, &a.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		assets = append(assets, a)

@@ -120,7 +120,10 @@ func (p *StudioPlugin) handleAddProjectAsset(w http.ResponseWriter, r *http.Requ
 		TaskID         int64  `json:"task_id"`
 		URL            string `json:"url"`
 		Prompt         string `json:"prompt"`
+		Platform       string `json:"platform"`
 		Model          string `json:"model"`
+		GroupID        int64  `json:"group_id"`
+		RouteKey       string `json:"route_key"`
 		Mode           string `json:"mode"`
 		Size           string `json:"size"`
 		SourceVideoURL string `json:"source_video_url"`
@@ -133,11 +136,20 @@ func (p *StudioPlugin) handleAddProjectAsset(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
 		return
 	}
+	platform := strings.TrimSpace(req.Platform)
+	model := strings.TrimSpace(req.Model)
+	routeKey := generationRouteKey(platform, model)
+	if routeKey == "" {
+		routeKey = strings.TrimSpace(req.RouteKey)
+	}
 	asset, err := p.svc.AddAsset(r.Context(), userID, projectID, AssetRecord{
 		TaskID:         req.TaskID,
 		URL:            req.URL,
 		Prompt:         req.Prompt,
-		Model:          req.Model,
+		Platform:       platform,
+		Model:          model,
+		GroupID:        req.GroupID,
+		RouteKey:       routeKey,
 		Mode:           req.Mode,
 		Size:           req.Size,
 		SourceVideoURL: req.SourceVideoURL,

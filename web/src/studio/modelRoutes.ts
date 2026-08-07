@@ -28,7 +28,7 @@ export function parseModelRouteOptionValue(value: string): { modelKey: string; g
 
 export function formatImageGroupLabel(group: ImageGroup): string {
   const parts = [imageGroupDisplayName(group)];
-  if (group.rate_multiplier > 0 && group.effective_rate > 0) {
+  if (!group.fixed_image_prices && group.rate_multiplier > 0 && group.effective_rate > 0) {
     parts.push(`×${trimRate(group.effective_rate)}`);
   }
   return parts.join(' · ');
@@ -47,6 +47,21 @@ export function formatModelRouteGroupLabel(group: ImageGroup): string {
   return name
     .replace(/\s*[（(]?\s*(?:支持)?生图(?:分组)?\s*[)）]?\s*$/u, '')
     .trim() || name;
+}
+
+export function withImageGroupPrices(model: ModelConfig, group: ImageGroup | undefined): ModelConfig {
+  const prices = group?.fixed_image_prices;
+  if (!prices) return model;
+  const currency = prices.currency?.trim() || 'CNY';
+  let changed = false;
+  const sizes = model.sizes.map(size => {
+    const key = size.tier.toLowerCase() as '1k' | '2k' | '4k';
+    const price = prices[key];
+    if (typeof price !== 'number' || !Number.isFinite(price) || price < 0) return size;
+    changed = true;
+    return { ...size, price, currency, showPrice: true };
+  });
+  return changed ? { ...model, sizes } : model;
 }
 
 export function buildModelRouteOptions(

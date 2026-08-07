@@ -28,7 +28,10 @@ type AssetRecord struct {
 	TaskID    int64  `json:"task_id"`
 	URL       string `json:"url"`
 	Prompt    string `json:"prompt"`
+	Platform  string `json:"platform,omitempty"`
 	Model     string `json:"model"`
+	GroupID   int64  `json:"group_id,omitempty"`
+	RouteKey  string `json:"route_key,omitempty"`
 	Mode      string `json:"mode"`
 	Size      string `json:"size"`
 	// SourceVideoURL 视频官方上游直链（火山 TOS 签名，与视频同为 24h 过期）。
@@ -66,6 +69,9 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_studio_assets_user_task ON studio_assets(user_id, task_id);
 
 		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS source_video_url TEXT NOT NULL DEFAULT '';
+		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT '';
+		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS group_id BIGINT NOT NULL DEFAULT 0;
+		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS route_key TEXT NOT NULL DEFAULT '';
 		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
 		-- Run the legacy cleanup only during the upgrade that creates the unique
