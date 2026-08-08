@@ -93,6 +93,24 @@ func TestValidateVideoModelParamsKeepsDomesticAndOverseasResolutionBoundaries(t 
 	}
 }
 
+func TestValidateVideoModelParamsEnforcesSD25Specs(t *testing.T) {
+	valid := map[string]interface{}{"duration": 4, "resolution": "480p", "ratio": "16:9"}
+	if err := validateVideoModelParams(videoModelSeedance25EP, valid); err != nil {
+		t.Fatalf("valid SD2.5 parameters rejected: %v", err)
+	}
+	for name, params := range map[string]map[string]interface{}{
+		"duration":   {"duration": 5, "resolution": "480p", "ratio": "16:9"},
+		"resolution": {"duration": 4, "resolution": "720p", "ratio": "16:9"},
+		"ratio":      {"duration": 4, "resolution": "480p", "ratio": "9:16"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateVideoModelParams(videoModelSeedance25EP, params); err == nil {
+				t.Fatalf("invalid SD2.5 parameters accepted: %v", params)
+			}
+		})
+	}
+}
+
 func TestBuildGenerationTaskResponseReturnsInputImages(t *testing.T) {
 	task := &hostTask{
 		ID:       12,

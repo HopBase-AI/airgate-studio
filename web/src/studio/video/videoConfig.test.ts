@@ -22,7 +22,12 @@ function group(id: number, name: string): ImageGroup {
 
 describe('videoConfig', () => {
   it('注册国内外 Seedance 模型且分辨率边界正确', () => {
-    expect(VIDEO_MODEL_REGISTRY).toHaveLength(4);
+    expect(VIDEO_MODEL_REGISTRY).toHaveLength(5);
+    const sd25 = videoModelById(VIDEO_MODEL_IDS.seedance25EP);
+    expect(sd25.region).toBe('overseas');
+    expect(sd25.resolutions).toEqual(['480p']);
+    expect(sd25.durationOptions).toEqual([4]);
+    expect(sd25.ratioOptions).toEqual(['16:9']);
     const overseas = videoModelById(VIDEO_MODEL_IDS.standardOverseas);
     expect(overseas.region).toBe('overseas');
     expect(overseas.resolutions).toContain('4k');

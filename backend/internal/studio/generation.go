@@ -11,6 +11,7 @@ const (
 	defaultExecutorPluginID = "gateway-openai"
 
 	videoModelSeedanceStandardOverseas = "dreamina-seedance-2-0-hc"
+	videoModelSeedance25EP             = "dreamina-seedance-2-5-ep"
 	videoModelSeedanceStandardDomestic = "doubao-seedance-2-0-260128-a"
 	videoModelSeedanceFastOverseas     = "dreamina-seedance-2-0-fast-hc"
 	videoModelSeedanceMiniOverseas     = "dreamina-seedance-2-0-mini-hc"
@@ -69,6 +70,9 @@ func videoModelResolutions(model string) map[string]struct{} {
 	if m == videoModelSeedanceStandardDomestic {
 		return map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}}
 	}
+	if m == videoModelSeedance25EP {
+		return map[string]struct{}{"480p": {}}
+	}
 	if strings.Contains(m, "-fast-") || strings.Contains(m, "-mini-") {
 		return map[string]struct{}{"480p": {}, "720p": {}}
 	}
@@ -85,9 +89,17 @@ func validateVideoModelParams(model string, params map[string]interface{}) error
 		}
 	}
 	if v, ok := params["duration"]; ok {
-		if d, ok := toInt(v); ok && (d < 1 || d > 30) {
-			return fmt.Errorf("duration 需在 1-30 秒之间")
+		if d, ok := toInt(v); ok {
+			if strings.EqualFold(strings.TrimSpace(model), videoModelSeedance25EP) && d != 4 {
+				return fmt.Errorf("模型 %s 仅支持 4 秒时长", model)
+			}
+			if d < 1 || d > 30 {
+				return fmt.Errorf("duration 需在 1-30 秒之间")
+			}
 		}
+	}
+	if ratio, ok := params["ratio"].(string); ok && strings.EqualFold(strings.TrimSpace(model), videoModelSeedance25EP) && strings.TrimSpace(ratio) != "16:9" {
+		return fmt.Errorf("模型 %s 仅支持 16:9 画幅", model)
 	}
 	return nil
 }
@@ -370,6 +382,9 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 		}
 		if urls := stringSliceFromAny(task.Output["video_urls"]); len(urls) > 0 {
 			resp["video_urls"] = urls
+		}
+		if url, ok := task.Output["last_frame_url"].(string); ok && strings.TrimSpace(url) != "" {
+			resp["last_frame_url"] = url
 		}
 		// 官方上游直链（seedance 插件在完结时写入,与视频同为 24h 有效),
 		// 前端用来提供「官方源链接」溯源入口。

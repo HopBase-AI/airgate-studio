@@ -18,6 +18,7 @@ import { buildGenerationRouteSnapshot } from './generationRoute';
 import { startImageGroupDiscovery } from './imageGroupDiscovery';
 import {
   VIDEO_MODEL_REGISTRY,
+  VIDEO_MODEL_IDS,
   videoGroupsForModel,
   videoModelById,
   useVideoStrings,
@@ -287,6 +288,10 @@ function taskSourceVideoUrl(task: GenerationTask): string | undefined {
   return task.source_outputs?.[0];
 }
 
+function taskLastFrameUrl(task: GenerationTask): string | undefined {
+  return typeof task.last_frame_url === 'string' && task.last_frame_url.trim() ? task.last_frame_url : undefined;
+}
+
 function isRemoteTaskActive(status: string): boolean {
   return ['pending', 'queued', 'processing', 'retrying', 'running', 'in_progress'].includes(status);
 }
@@ -439,6 +444,7 @@ function galleryItemsFromCompletedTask(
       createdAt: taskAssetCreatedAt(task),
       sourceUrl: taskSourceUrl(task),
       sourceVideoUrl: taskSourceVideoUrl(task),
+      lastFrameUrl: taskLastFrameUrl(task),
     }];
   }
   return parseMarkdownImages(task.result_content || '').map((img, index) => ({
@@ -652,6 +658,10 @@ export interface StudioContextValue {
   setVideoRatio: (ratio: string) => void;
   videoAudio: boolean;
   setVideoAudio: (enabled: boolean) => void;
+  videoWatermark: boolean;
+  setVideoWatermark: (enabled: boolean) => void;
+  videoReturnLastFrame: boolean;
+  setVideoReturnLastFrame: (enabled: boolean) => void;
   videoGroups: ImageGroup[];
   videoGroupsLoaded: boolean;
   videoRouteReady: boolean;
@@ -715,10 +725,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // ── Video（Seedance）参数域 ────────────────────────────────────────────────
   const vs = useVideoStrings();
   const [videoModelId, setVideoModelIdRaw] = useState(VIDEO_MODEL_REGISTRY[0].id);
-  const [videoDuration, setVideoDuration] = useState<number>(5);
-  const [videoResolution, setVideoResolution] = useState('720p');
+  const [videoDuration, setVideoDuration] = useState<number>(4);
+  const [videoResolution, setVideoResolution] = useState('480p');
   const [videoRatio, setVideoRatio] = useState('16:9');
-  const [videoAudio, setVideoAudio] = useState(false);
+  const [videoAudio, setVideoAudio] = useState(true);
+  const [videoWatermark, setVideoWatermark] = useState(false);
+  const [videoReturnLastFrame, setVideoReturnLastFrame] = useState(true);
   const [videoGroupsByModel, setVideoGroupsByModel] = useState<VideoGroupsByModel>({});
   const [videoGroupsLoaded, setVideoGroupsLoaded] = useState(false);
   const [selectedVideoGroupId, setSelectedVideoGroupId] = useState<number | null>(null);
@@ -736,11 +748,20 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     && selectedVideoGroupId != null
     && videoGroups.some(group => group.id === selectedVideoGroupId);
 
-  // 换档时收敛分辨率到该版本支持范围，并清空上一版本的分组选择。
+  // 换档时收敛参数到所选版本的公开规格，并清空上一版本的分组选择。
   const setVideoModelId = useCallback((id: string) => {
     if (!VIDEO_MODEL_REGISTRY.some(model => model.id === id)) return;
     setVideoModelIdRaw(id);
     setSelectedVideoGroupId(null);
+    if (id === VIDEO_MODEL_IDS.seedance25EP) {
+      setVideoDuration(4);
+      setVideoResolution('480p');
+      setVideoRatio('16:9');
+      setVideoAudio(true);
+      setVideoWatermark(false);
+      setVideoReturnLastFrame(true);
+      return;
+    }
     setVideoResolution(prev => (videoModelById(id).resolutions.includes(prev) ? prev : '720p'));
   }, []);
 
@@ -2027,6 +2048,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               resolution: route.size,
               ratio: videoRatio,
               generate_audio: videoAudio,
+              watermark: videoWatermark,
+              return_last_frame: videoReturnLastFrame,
             },
             inputs: sources.length > 0
               ? sources.map(url => ({ type: 'image' as const, role: 'reference_image' as const, url }))
@@ -2068,6 +2091,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             createdAt: taskAssetCreatedAt(completed),
             sourceUrl: sources[0],
             sourceVideoUrl: taskSourceVideoUrl(completed),
+            lastFrameUrl: taskLastFrameUrl(completed),
           };
           prependGalleryForTarget(targetProjectID, [item], taskId);
           updateTask({ status: 'completed', result: [item], remoteTaskIds: [created.id] });
@@ -2095,6 +2119,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       videoResolution,
       videoRatio,
       videoAudio,
+      videoWatermark,
+      videoReturnLastFrame,
       videoGroupsByModel,
       videoGroupsLoaded,
       selectedVideoGroupId,
@@ -2430,6 +2456,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setVideoRatio,
     videoAudio,
     setVideoAudio,
+    videoWatermark,
+    setVideoWatermark,
+    videoReturnLastFrame,
+    setVideoReturnLastFrame,
     videoGroups,
     videoGroupsLoaded,
     videoRouteReady,

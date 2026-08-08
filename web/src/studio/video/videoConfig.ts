@@ -1,11 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import type { ImageGroup } from '../../api';
 
-// ── Seedance 2.0 视频模型 ────────────────────────────────────────────────────
-// 与 gateway-seedance 插件 registry 对齐。国内标准版使用上游原生模型 ID，
-// 海外继续使用既有 Dreamina ID；API 兼容别名由 gateway-seedance 处理。
+// ── Seedance 视频模型 ────────────────────────────────────────────────────────
+// 与 gateway-seedance 插件 registry 对齐。SD2.5 EP 是海外工作台公开别名，
+// 上游兼容 ID 的改写由 gateway-seedance 处理；国内标准版仍使用原生 ID。
 
 export const VIDEO_MODEL_IDS = {
+  seedance25EP: 'dreamina-seedance-2-5-ep',
   standardOverseas: 'dreamina-seedance-2-0-hc',
   standardDomestic: 'doubao-seedance-2-0-260128-a',
   fastOverseas: 'dreamina-seedance-2-0-fast-hc',
@@ -19,9 +20,19 @@ export interface VideoModelConfig {
   nameKey: keyof typeof VIDEO_STRINGS['zh'];
   region: VideoModelRegion;
   resolutions: string[];
+  durationOptions?: readonly number[];
+  ratioOptions?: readonly string[];
 }
 
 export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
+  {
+    id: VIDEO_MODEL_IDS.seedance25EP,
+    nameKey: 'model_sd25_ep',
+    region: 'overseas',
+    resolutions: ['480p'],
+    durationOptions: [4],
+    ratioOptions: ['16:9'],
+  },
   {
     id: VIDEO_MODEL_IDS.standardOverseas,
     nameKey: 'model_standard_overseas',
@@ -48,7 +59,9 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
   },
 ];
 
-export const VIDEO_DURATIONS = [5, 10, 15] as const;
+// The upstream contract accepts 4-15 seconds. Keep the common presets compact
+// while exposing the documented 4-second SD2.5 default.
+export const VIDEO_DURATIONS = [4, 5, 10, 15] as const;
 export const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3'] as const;
 
 export function videoModelById(id: string): VideoModelConfig {
@@ -86,6 +99,7 @@ export const VIDEO_STRINGS = {
     gallery_empty_image: '暂无图像作品',
     gallery_empty_video: '暂无视频作品',
     model_standard_overseas: 'Seedance 2.0 标准（海外）',
+    model_sd25_ep: 'Seedance 2.5 EP（海外）',
     model_standard_domestic: 'Seedance 2.0 标准（国内）',
     model_fast_overseas: 'Seedance 2.0 快速（海外）',
     model_mini_overseas: 'Seedance 2.0 迷你（海外）',
@@ -94,6 +108,8 @@ export const VIDEO_STRINGS = {
     resolution: '分辨率',
     ratio: '画幅',
     audio: '生成音频',
+    watermark: '水印',
+    return_last_frame: '返回末帧',
     video_placeholder: '描述你想生成的视频画面，可附参考图…',
     generating: '视频生成中（约 2-10 分钟）…',
     no_result: '生成完成但没有可用的视频输出',
@@ -115,6 +131,7 @@ export const VIDEO_STRINGS = {
     gallery_empty_image: 'No image works',
     gallery_empty_video: 'No video works',
     model_standard_overseas: 'Seedance 2.0 Standard (Overseas)',
+    model_sd25_ep: 'Seedance 2.5 EP (Overseas)',
     model_standard_domestic: 'Seedance 2.0 Standard (China)',
     model_fast_overseas: 'Seedance 2.0 Fast (Overseas)',
     model_mini_overseas: 'Seedance 2.0 Mini (Overseas)',
@@ -123,6 +140,8 @@ export const VIDEO_STRINGS = {
     resolution: 'Resolution',
     ratio: 'Aspect',
     audio: 'Audio',
+    watermark: 'Watermark',
+    return_last_frame: 'Return last frame',
     video_placeholder: 'Describe the video you want to create; reference images optional…',
     generating: 'Generating video (about 2-10 min)…',
     no_result: 'Task completed but returned no video output',
@@ -144,6 +163,7 @@ export const VIDEO_STRINGS = {
     gallery_empty_image: '画像作品はありません',
     gallery_empty_video: '動画作品はありません',
     model_standard_overseas: 'Seedance 2.0 標準（海外）',
+    model_sd25_ep: 'Seedance 2.5 EP（海外）',
     model_standard_domestic: 'Seedance 2.0 標準（中国）',
     model_fast_overseas: 'Seedance 2.0 高速（海外）',
     model_mini_overseas: 'Seedance 2.0 ミニ（海外）',
@@ -152,6 +172,8 @@ export const VIDEO_STRINGS = {
     resolution: '解像度',
     ratio: 'アスペクト',
     audio: '音声生成',
+    watermark: 'ウォーターマーク',
+    return_last_frame: '最終フレームを返す',
     video_placeholder: '生成したい動画を説明してください。参考画像も添付できます…',
     generating: '動画を生成中（約 2〜10 分）…',
     no_result: 'タスクは完了しましたが動画出力がありません',
@@ -173,6 +195,7 @@ export const VIDEO_STRINGS = {
     gallery_empty_image: '暫無圖像作品',
     gallery_empty_video: '暫無影片作品',
     model_standard_overseas: 'Seedance 2.0 標準（海外）',
+    model_sd25_ep: 'Seedance 2.5 EP（海外）',
     model_standard_domestic: 'Seedance 2.0 標準（國內）',
     model_fast_overseas: 'Seedance 2.0 快速（海外）',
     model_mini_overseas: 'Seedance 2.0 迷你（海外）',
@@ -181,6 +204,8 @@ export const VIDEO_STRINGS = {
     resolution: '解像度',
     ratio: '畫幅',
     audio: '生成音訊',
+    watermark: '浮水印',
+    return_last_frame: '返回末幀',
     video_placeholder: '描述你想生成的影片畫面，可附參考圖…',
     generating: '影片生成中（約 2-10 分鐘）…',
     no_result: '生成完成但沒有可用的影片輸出',
