@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
@@ -41,6 +42,36 @@ func hostListEligibleGroups(ctx context.Context, host sdk.Host, userID int64, pl
 	if platform == "" {
 		return nil, fmt.Errorf("platform 不能为空")
 	}
+	models := []string{strings.TrimSpace(model)}
+	if strings.EqualFold(platform, "seedance") && isSeedance25VideoModel(model) {
+		models = []string{videoModelSeedance25, videoModelSeedance25LegacyEP}
+	}
+	if len(models) == 1 {
+		return hostListEligibleGroupsForModel(ctx, host, userID, platform, models[0], needsImage)
+	}
+
+	merged := make([]imageGroup, 0)
+	seen := make(map[int64]struct{})
+	for _, candidate := range models {
+		groups, err := hostListEligibleGroupsForModel(ctx, host, userID, platform, candidate, needsImage)
+		if err != nil {
+			return nil, err
+		}
+		for _, group := range groups {
+			if _, exists := seen[group.ID]; exists {
+				continue
+			}
+			seen[group.ID] = struct{}{}
+			merged = append(merged, group)
+		}
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].EffectiveRate < merged[j].EffectiveRate
+	})
+	return merged, nil
+}
+
+func hostListEligibleGroupsForModel(ctx context.Context, host sdk.Host, userID int64, platform, model string, needsImage bool) ([]imageGroup, error) {
 	payload := map[string]interface{}{
 		"eligible_only": true,
 		"user_id":       userID,
