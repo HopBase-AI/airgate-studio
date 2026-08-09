@@ -2,16 +2,21 @@ import { useTranslation } from 'react-i18next';
 import type { ImageGroup } from '../../api';
 
 // ── Seedance 视频模型 ────────────────────────────────────────────────────────
-// 与 gateway-seedance 插件 registry 对齐。SD2.5 EP 是海外工作台公开别名，
-// 上游兼容 ID 的改写由 gateway-seedance 处理；国内标准版仍使用原生 ID。
+// 与 gateway-seedance 插件 registry 对齐。SD2.5 使用官方 ModelArk 原生 ID；
+// 旧 -ep 只由后端兼容读取，不进入工作台模型列表。
 
 export const VIDEO_MODEL_IDS = {
-  seedance25EP: 'dreamina-seedance-2-5-ep',
+  seedance25: 'dreamina-seedance-2-5-260628',
+  // Source-compatible property name; value is intentionally canonical.
+  seedance25EP: 'dreamina-seedance-2-5-260628',
   standardOverseas: 'dreamina-seedance-2-0-hc',
   standardDomestic: 'doubao-seedance-2-0-260128-a',
   fastOverseas: 'dreamina-seedance-2-0-fast-hc',
   miniOverseas: 'dreamina-seedance-2-0-mini-hc',
 } as const;
+
+/** Legacy input accepted by the backend, never emitted by the Studio UI. */
+export const LEGACY_SEEDANCE25_MODEL_ID = 'dreamina-seedance-2-5-ep';
 
 export type VideoModelRegion = 'overseas' | 'domestic';
 
@@ -59,7 +64,7 @@ export const SEEDANCE25_VIDEO_DEFAULTS: VideoGenerationSettings = {
 
 export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
   {
-    id: VIDEO_MODEL_IDS.seedance25EP,
+    id: VIDEO_MODEL_IDS.seedance25,
     nameKey: 'model_sd25_ep',
     region: 'overseas',
     resolutions: ['480p', '720p'],
@@ -97,7 +102,7 @@ export function videoModelById(id: string): VideoModelConfig {
 }
 
 export function videoDefaultsForModel(id: string): VideoGenerationSettings {
-  const defaults = videoModelById(id).id === VIDEO_MODEL_IDS.seedance25EP
+  const defaults = videoModelById(id).id === VIDEO_MODEL_IDS.seedance25
     ? SEEDANCE25_VIDEO_DEFAULTS
     : SEEDANCE20_VIDEO_DEFAULTS;
   return { ...defaults };
@@ -111,7 +116,7 @@ export function normalizeVideoSettingsForModel(
   settings: VideoGenerationSettings,
 ): VideoGenerationSettings {
   const model = videoModelById(id);
-  if (model.id === VIDEO_MODEL_IDS.seedance25EP) return videoDefaultsForModel(model.id);
+  if (model.id === VIDEO_MODEL_IDS.seedance25) return videoDefaultsForModel(model.id);
 
   const defaults = videoDefaultsForModel(model.id);
   const durations: readonly number[] = model.durationOptions ?? VIDEO_DURATIONS;

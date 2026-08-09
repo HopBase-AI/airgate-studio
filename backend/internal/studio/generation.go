@@ -12,11 +12,26 @@ const (
 	defaultExecutorPluginID = "gateway-openai"
 
 	videoModelSeedanceStandardOverseas = "dreamina-seedance-2-0-hc"
-	videoModelSeedance25EP             = "dreamina-seedance-2-5-ep"
+	videoModelSeedance25               = "dreamina-seedance-2-5-260628"
+	videoModelSeedance25LegacyEP       = "dreamina-seedance-2-5-ep"
+	// Deprecated source-compatible name. Runtime task values use the native ID.
+	videoModelSeedance25EP             = videoModelSeedance25
 	videoModelSeedanceStandardDomestic = "doubao-seedance-2-0-260128-a"
 	videoModelSeedanceFastOverseas     = "dreamina-seedance-2-0-fast-hc"
 	videoModelSeedanceMiniOverseas     = "dreamina-seedance-2-0-mini-hc"
 )
+
+func canonicalSeedanceVideoModel(model string) string {
+	model = strings.TrimSpace(model)
+	if strings.EqualFold(model, videoModelSeedance25LegacyEP) {
+		return videoModelSeedance25
+	}
+	return model
+}
+
+func isSeedance25VideoModel(model string) bool {
+	return canonicalSeedanceVideoModel(model) == videoModelSeedance25
+}
 
 func generationExecutorPluginID(platform string) string {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
@@ -67,11 +82,11 @@ func executorSupportsOperation(executorID, operation string) bool {
 // videoModelResolutions Seedance 各版本允许的分辨率（与 gateway-seedance
 // registry 对齐）。国内标准版不支持 4K；海外 fast / mini 只有 480p/720p。
 func videoModelResolutions(model string) map[string]struct{} {
-	m := strings.ToLower(strings.TrimSpace(model))
+	m := strings.ToLower(canonicalSeedanceVideoModel(model))
 	if m == videoModelSeedanceStandardDomestic {
 		return map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}}
 	}
-	if m == videoModelSeedance25EP {
+	if m == videoModelSeedance25 {
 		return map[string]struct{}{"480p": {}, "720p": {}}
 	}
 	if strings.Contains(m, "-fast-") || strings.Contains(m, "-mini-") {
@@ -88,6 +103,7 @@ var seedance25VideoRatios = map[string]struct{}{
 // validateVideoModelParams 视频任务的参数预校验：分辨率按档位、时长限幅，
 // 在创建入口给前端明确错误，避免排队后才在上游失败。
 func validateVideoModelParams(model string, params map[string]interface{}) error {
+	model = canonicalSeedanceVideoModel(model)
 	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
 		normalized := strings.ToLower(strings.TrimSpace(res))
 		if _, allowed := videoModelResolutions(model)[normalized]; !allowed {
@@ -100,14 +116,14 @@ func validateVideoModelParams(model string, params map[string]interface{}) error
 			return fmt.Errorf("duration 必须是整数")
 		}
 		maxDuration := 15
-		if strings.EqualFold(strings.TrimSpace(model), videoModelSeedance25EP) {
+		if isSeedance25VideoModel(model) {
 			maxDuration = 30
 		}
 		if d != -1 && (d < 4 || d > maxDuration) {
 			return fmt.Errorf("模型 %s 的 duration 需在 4-%d 秒之间，或使用 -1 自动选择", model, maxDuration)
 		}
 	}
-	if strings.EqualFold(strings.TrimSpace(model), videoModelSeedance25EP) {
+	if isSeedance25VideoModel(model) {
 		if ratio, ok := params["ratio"].(string); ok && strings.TrimSpace(ratio) != "" {
 			normalized := strings.ToLower(strings.TrimSpace(ratio))
 			if _, allowed := seedance25VideoRatios[normalized]; !allowed {
@@ -263,6 +279,9 @@ func normalizeGenerationRequest(req *createGenerationTaskRequest) {
 	req.Operation = strings.TrimSpace(req.Operation)
 	if req.Operation == "" {
 		req.Operation = "generate"
+	}
+	if strings.EqualFold(req.Platform, "seedance") {
+		req.Model = canonicalSeedanceVideoModel(req.Model)
 	}
 }
 

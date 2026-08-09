@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ImageGroup } from '../../api';
 import {
   VIDEO_MODEL_IDS,
+  LEGACY_SEEDANCE25_MODEL_ID,
   VIDEO_MODEL_REGISTRY,
   VIDEO_DURATIONS,
   VIDEO_RATIOS,
@@ -29,7 +30,10 @@ function group(id: number, name: string): ImageGroup {
 describe('videoConfig', () => {
   it('注册国内外 Seedance 模型且分辨率边界正确', () => {
     expect(VIDEO_MODEL_REGISTRY).toHaveLength(5);
-    const sd25 = videoModelById(VIDEO_MODEL_IDS.seedance25EP);
+	    expect(VIDEO_MODEL_IDS.seedance25).toBe('dreamina-seedance-2-5-260628');
+	    expect(VIDEO_MODEL_IDS.seedance25EP).toBe(VIDEO_MODEL_IDS.seedance25);
+	    expect(VIDEO_MODEL_REGISTRY.map(model => model.id)).not.toContain(LEGACY_SEEDANCE25_MODEL_ID);
+	    const sd25 = videoModelById(VIDEO_MODEL_IDS.seedance25);
     expect(sd25.region).toBe('overseas');
     expect(sd25.resolutions).toEqual(['480p', '720p']);
     expect(sd25.durationOptions).toEqual(SEEDANCE25_DURATIONS);

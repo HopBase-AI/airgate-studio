@@ -97,11 +97,14 @@ func TestValidateVideoModelParamsKeepsDomesticAndOverseasResolutionBoundaries(t 
 }
 
 func TestValidateVideoModelParamsEnforcesSD25Specs(t *testing.T) {
+	if canonicalSeedanceVideoModel(videoModelSeedance25LegacyEP) != videoModelSeedance25 {
+		t.Fatal("legacy SD2.5 model must canonicalize to native ID")
+	}
 	for _, duration := range []int{4, 30, -1} {
 		for _, resolution := range []string{"480p", "720p"} {
 			for _, ratio := range []string{"16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"} {
 				params := map[string]interface{}{"duration": duration, "resolution": resolution, "ratio": ratio}
-				if err := validateVideoModelParams(videoModelSeedance25EP, params); err != nil {
+				if err := validateVideoModelParams(videoModelSeedance25, params); err != nil {
 					t.Fatalf("valid SD2.5 parameters rejected: duration=%d resolution=%s ratio=%s: %v", duration, resolution, ratio, err)
 				}
 			}
@@ -115,7 +118,7 @@ func TestValidateVideoModelParamsEnforcesSD25Specs(t *testing.T) {
 		"ratio":              {"duration": 4, "resolution": "480p", "ratio": "2:1"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := validateVideoModelParams(videoModelSeedance25EP, params); err == nil {
+			if err := validateVideoModelParams(videoModelSeedance25, params); err == nil {
 				t.Fatalf("invalid SD2.5 parameters accepted: %v", params)
 			}
 		})
@@ -137,12 +140,12 @@ func TestValidateVideoModelParamsKeepsSeedance20DurationBoundary(t *testing.T) {
 
 func TestValidateVideoModelParamsRejectsFractionalDuration(t *testing.T) {
 	for _, duration := range []interface{}{float64(4.5), json.Number("4.5")} {
-		err := validateVideoModelParams(videoModelSeedance25EP, map[string]interface{}{"duration": duration})
+		err := validateVideoModelParams(videoModelSeedance25, map[string]interface{}{"duration": duration})
 		if err == nil || !strings.Contains(err.Error(), "duration 必须是整数") {
 			t.Fatalf("fractional duration %v error = %v, want integer validation error", duration, err)
 		}
 	}
-	if err := validateVideoModelParams(videoModelSeedance25EP, map[string]interface{}{"duration": float64(4)}); err != nil {
+	if err := validateVideoModelParams(videoModelSeedance25, map[string]interface{}{"duration": float64(4)}); err != nil {
 		t.Fatalf("integral JSON duration rejected: %v", err)
 	}
 }
