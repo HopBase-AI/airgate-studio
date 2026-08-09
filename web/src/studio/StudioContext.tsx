@@ -19,6 +19,8 @@ import { startImageGroupDiscovery } from './imageGroupDiscovery';
 import {
   VIDEO_MODEL_REGISTRY,
   VIDEO_MODEL_IDS,
+  VIDEO_DURATIONS,
+  VIDEO_RATIOS,
   videoGroupsForModel,
   videoModelById,
   useVideoStrings,
@@ -754,6 +756,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setVideoModelIdRaw(id);
     setSelectedVideoGroupId(null);
     if (id === VIDEO_MODEL_IDS.seedance25EP) {
+      // Keep the documented SD2.5 defaults while leaving the full ordinary
+      // duration, resolution, and ratio matrix available in the popover.
       setVideoDuration(4);
       setVideoResolution('480p');
       setVideoRatio('16:9');
@@ -762,7 +766,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setVideoReturnLastFrame(true);
       return;
     }
-    setVideoResolution(prev => (videoModelById(id).resolutions.includes(prev) ? prev : '720p'));
+    const model = videoModelById(id);
+    const durations = model.durationOptions ?? VIDEO_DURATIONS;
+    const ratios = model.ratioOptions ?? VIDEO_RATIOS;
+    setVideoDuration(prev => (durations.includes(prev) ? prev : VIDEO_DURATIONS[0]));
+    setVideoRatio(prev => (ratios.includes(prev) ? prev : VIDEO_RATIOS[0]));
+    setVideoResolution(prev => (model.resolutions.includes(prev) ? prev : '720p'));
   }, []);
 
   // 切到视频时一次性拉取所有版本的可用分组。海外标准 ID 也会命中国内的

@@ -71,7 +71,8 @@ export function VideoParamsPopover({
     };
   }, [open, calcPos]);
 
-  const summary = `${duration}${vs('duration_seconds')} · ${resolution} · ${ratio}`;
+  const durationLabel = duration === -1 ? vs('duration_auto') : `${duration}${vs('duration_seconds')}`;
+  const summary = `${durationLabel} · ${resolution} · ${ratio}`;
   const durations = durationOptions ?? VIDEO_DURATIONS;
   const ratios = ratioOptions ?? VIDEO_RATIOS;
 
@@ -96,7 +97,7 @@ export function VideoParamsPopover({
           <ParamRow label={vs('duration')}>
             {durations.map(d => (
               <button key={d} type="button" style={chip(d === duration)} onClick={() => setDuration(d)}>
-                {d}{vs('duration_seconds')}
+                {d === -1 ? vs('duration_auto') : `${d}${vs('duration_seconds')}`}
               </button>
             ))}
           </ParamRow>

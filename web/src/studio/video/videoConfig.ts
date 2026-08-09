@@ -24,14 +24,27 @@ export interface VideoModelConfig {
   ratioOptions?: readonly string[];
 }
 
+// Seedance 2.0's existing Studio presets. Keep these as the fallback for
+// models without an explicit per-model option list.
+export const VIDEO_DURATIONS = [4, 5, 10, 15] as const;
+export const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3'] as const;
+
+// Seedance 2.5 EP's ordinary generation contract. -1 asks the upstream to
+// choose the duration automatically.
+export const SEEDANCE25_DURATIONS = [
+  4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+  19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, -1,
+] as const;
+export const SEEDANCE25_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'] as const;
+
 export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
   {
     id: VIDEO_MODEL_IDS.seedance25EP,
     nameKey: 'model_sd25_ep',
     region: 'overseas',
-    resolutions: ['480p'],
-    durationOptions: [4],
-    ratioOptions: ['16:9'],
+    resolutions: ['480p', '720p'],
+    durationOptions: SEEDANCE25_DURATIONS,
+    ratioOptions: SEEDANCE25_RATIOS,
   },
   {
     id: VIDEO_MODEL_IDS.standardOverseas,
@@ -58,11 +71,6 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
     resolutions: ['480p', '720p'],
   },
 ];
-
-// The upstream contract accepts 4-15 seconds. Keep the common presets compact
-// while exposing the documented 4-second SD2.5 default.
-export const VIDEO_DURATIONS = [4, 5, 10, 15] as const;
-export const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3'] as const;
 
 export function videoModelById(id: string): VideoModelConfig {
   return VIDEO_MODEL_REGISTRY.find(m => m.id === id) ?? VIDEO_MODEL_REGISTRY[0];
@@ -107,6 +115,7 @@ export const VIDEO_STRINGS = {
     duration_seconds: '秒',
     resolution: '分辨率',
     ratio: '画幅',
+    duration_auto: '自动',
     audio: '生成音频',
     watermark: '水印',
     return_last_frame: '返回末帧',
@@ -139,6 +148,7 @@ export const VIDEO_STRINGS = {
     duration_seconds: 's',
     resolution: 'Resolution',
     ratio: 'Aspect',
+    duration_auto: 'Auto',
     audio: 'Audio',
     watermark: 'Watermark',
     return_last_frame: 'Return last frame',
@@ -171,6 +181,7 @@ export const VIDEO_STRINGS = {
     duration_seconds: '秒',
     resolution: '解像度',
     ratio: 'アスペクト',
+    duration_auto: '自動',
     audio: '音声生成',
     watermark: 'ウォーターマーク',
     return_last_frame: '最終フレームを返す',
@@ -203,6 +214,7 @@ export const VIDEO_STRINGS = {
     duration_seconds: '秒',
     resolution: '解像度',
     ratio: '畫幅',
+    duration_auto: '自動',
     audio: '生成音訊',
     watermark: '浮水印',
     return_last_frame: '返回末幀',

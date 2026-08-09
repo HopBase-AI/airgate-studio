@@ -94,20 +94,41 @@ func TestValidateVideoModelParamsKeepsDomesticAndOverseasResolutionBoundaries(t 
 }
 
 func TestValidateVideoModelParamsEnforcesSD25Specs(t *testing.T) {
-	valid := map[string]interface{}{"duration": 4, "resolution": "480p", "ratio": "16:9"}
-	if err := validateVideoModelParams(videoModelSeedance25EP, valid); err != nil {
-		t.Fatalf("valid SD2.5 parameters rejected: %v", err)
+	for _, duration := range []int{4, 30, -1} {
+		for _, resolution := range []string{"480p", "720p"} {
+			for _, ratio := range []string{"16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"} {
+				params := map[string]interface{}{"duration": duration, "resolution": resolution, "ratio": ratio}
+				if err := validateVideoModelParams(videoModelSeedance25EP, params); err != nil {
+					t.Fatalf("valid SD2.5 parameters rejected: duration=%d resolution=%s ratio=%s: %v", duration, resolution, ratio, err)
+				}
+			}
+		}
 	}
 	for name, params := range map[string]map[string]interface{}{
-		"duration":   {"duration": 5, "resolution": "480p", "ratio": "16:9"},
-		"resolution": {"duration": 4, "resolution": "720p", "ratio": "16:9"},
-		"ratio":      {"duration": 4, "resolution": "480p", "ratio": "9:16"},
+		"duration_below_min": {"duration": 3, "resolution": "480p", "ratio": "16:9"},
+		"duration_above_max": {"duration": 31, "resolution": "480p", "ratio": "16:9"},
+		"resolution_1080p":   {"duration": 4, "resolution": "1080p", "ratio": "16:9"},
+		"resolution_4k":      {"duration": 4, "resolution": "4k", "ratio": "16:9"},
+		"ratio":              {"duration": 4, "resolution": "480p", "ratio": "2:1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := validateVideoModelParams(videoModelSeedance25EP, params); err == nil {
 				t.Fatalf("invalid SD2.5 parameters accepted: %v", params)
 			}
 		})
+	}
+}
+
+func TestValidateVideoModelParamsKeepsSeedance20DurationBoundary(t *testing.T) {
+	for _, duration := range []int{4, 5, 10, 15, -1} {
+		if err := validateVideoModelParams(videoModelSeedanceStandardOverseas, map[string]interface{}{"duration": duration}); err != nil {
+			t.Fatalf("valid Seedance 2.0 duration %d rejected: %v", duration, err)
+		}
+	}
+	for _, duration := range []int{3, 16, 30} {
+		if err := validateVideoModelParams(videoModelSeedanceStandardOverseas, map[string]interface{}{"duration": duration}); err == nil {
+			t.Fatalf("invalid Seedance 2.0 duration %d accepted", duration)
+		}
 	}
 }
 
