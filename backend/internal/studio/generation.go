@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -94,14 +95,16 @@ func validateVideoModelParams(model string, params map[string]interface{}) error
 		}
 	}
 	if v, ok := params["duration"]; ok {
-		if d, ok := toInt(v); ok {
-			maxDuration := 15
-			if strings.EqualFold(strings.TrimSpace(model), videoModelSeedance25EP) {
-				maxDuration = 30
-			}
-			if d != -1 && (d < 4 || d > maxDuration) {
-				return fmt.Errorf("模型 %s 的 duration 需在 4-%d 秒之间，或使用 -1 自动选择", model, maxDuration)
-			}
+		d, ok := toInt(v)
+		if !ok {
+			return fmt.Errorf("duration 必须是整数")
+		}
+		maxDuration := 15
+		if strings.EqualFold(strings.TrimSpace(model), videoModelSeedance25EP) {
+			maxDuration = 30
+		}
+		if d != -1 && (d < 4 || d > maxDuration) {
+			return fmt.Errorf("模型 %s 的 duration 需在 4-%d 秒之间，或使用 -1 自动选择", model, maxDuration)
 		}
 	}
 	if strings.EqualFold(strings.TrimSpace(model), videoModelSeedance25EP) {
@@ -122,6 +125,10 @@ func toInt(v interface{}) (int, bool) {
 	case int64:
 		return int(n), true
 	case float64:
+		intLimit := float64(uint64(1) << (strconv.IntSize - 1))
+		if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n || n < -intLimit || n >= intLimit {
+			return 0, false
+		}
 		return int(n), true
 	case json.Number:
 		i, err := n.Int64()

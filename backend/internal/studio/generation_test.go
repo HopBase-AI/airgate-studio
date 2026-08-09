@@ -1,8 +1,11 @@
 package studio
 
 import (
+	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -128,6 +131,31 @@ func TestValidateVideoModelParamsKeepsSeedance20DurationBoundary(t *testing.T) {
 	for _, duration := range []int{3, 16, 30} {
 		if err := validateVideoModelParams(videoModelSeedanceStandardOverseas, map[string]interface{}{"duration": duration}); err == nil {
 			t.Fatalf("invalid Seedance 2.0 duration %d accepted", duration)
+		}
+	}
+}
+
+func TestValidateVideoModelParamsRejectsFractionalDuration(t *testing.T) {
+	for _, duration := range []interface{}{float64(4.5), json.Number("4.5")} {
+		err := validateVideoModelParams(videoModelSeedance25EP, map[string]interface{}{"duration": duration})
+		if err == nil || !strings.Contains(err.Error(), "duration 必须是整数") {
+			t.Fatalf("fractional duration %v error = %v, want integer validation error", duration, err)
+		}
+	}
+	if err := validateVideoModelParams(videoModelSeedance25EP, map[string]interface{}{"duration": float64(4)}); err != nil {
+		t.Fatalf("integral JSON duration rejected: %v", err)
+	}
+}
+
+func TestToIntAcceptsOnlyIntegralFloat64(t *testing.T) {
+	for _, value := range []float64{4, -1} {
+		if got, ok := toInt(value); !ok || got != int(value) {
+			t.Fatalf("toInt(%v) = (%d, %t), want (%d, true)", value, got, ok, int(value))
+		}
+	}
+	for _, value := range []float64{4.5, math.Inf(1), math.NaN(), float64(uint64(1) << (strconv.IntSize - 1))} {
+		if got, ok := toInt(value); ok {
+			t.Fatalf("toInt(%v) = (%d, true), want conversion failure", value, got)
 		}
 	}
 }
