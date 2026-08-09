@@ -15,14 +15,22 @@ interface Props {
   setRatio: (v: string) => void;
   audio: boolean;
   setAudio: (v: boolean) => void;
+  watermark: boolean;
+  setWatermark: (v: boolean) => void;
+  returnLastFrame: boolean;
+  setReturnLastFrame: (v: boolean) => void;
   resolutions: string[];
+  durationOptions?: readonly number[];
+  ratioOptions?: readonly string[];
   vs: (key: VideoStringKey) => string;
 }
 
 type PanelPos = { bottom: number; left: number; width: number };
 
 export function VideoParamsPopover({
-  duration, setDuration, resolution, setResolution, ratio, setRatio, audio, setAudio, resolutions, vs,
+  duration, setDuration, resolution, setResolution, ratio, setRatio, audio, setAudio,
+  watermark, setWatermark, returnLastFrame, setReturnLastFrame, resolutions,
+  durationOptions, ratioOptions, vs,
 }: Props) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -63,7 +71,10 @@ export function VideoParamsPopover({
     };
   }, [open, calcPos]);
 
-  const summary = `${duration}${vs('duration_seconds')} · ${resolution} · ${ratio}`;
+  const durationLabel = duration === -1 ? vs('duration_auto') : `${duration}${vs('duration_seconds')}`;
+  const summary = `${durationLabel} · ${resolution} · ${ratio}`;
+  const durations = durationOptions ?? VIDEO_DURATIONS;
+  const ratios = ratioOptions ?? VIDEO_RATIOS;
 
   const chip = (active: boolean): CSSProperties => ({
     height: 28,
@@ -84,9 +95,9 @@ export function VideoParamsPopover({
     ? createPortal(
         <div ref={panelRef} style={{ ...s.panel, bottom: pos.bottom, left: pos.left, width: pos.width }}>
           <ParamRow label={vs('duration')}>
-            {VIDEO_DURATIONS.map(d => (
+            {durations.map(d => (
               <button key={d} type="button" style={chip(d === duration)} onClick={() => setDuration(d)}>
-                {d}{vs('duration_seconds')}
+                {d === -1 ? vs('duration_auto') : `${d}${vs('duration_seconds')}`}
               </button>
             ))}
           </ParamRow>
@@ -98,7 +109,7 @@ export function VideoParamsPopover({
             ))}
           </ParamRow>
           <ParamRow label={vs('ratio')}>
-            {VIDEO_RATIOS.map(r => (
+            {ratios.map(r => (
               <button key={r} type="button" style={chip(r === ratio)} onClick={() => setRatio(r)}>
                 {r}
               </button>
@@ -116,6 +127,8 @@ export function VideoParamsPopover({
               <span style={{ ...s.switchKnob, ...(audio ? s.switchKnobOn : null) }} />
             </button>
           </div>
+          <ToggleRow label={vs('watermark')} enabled={watermark} onChange={setWatermark} />
+          <ToggleRow label={vs('return_last_frame')} enabled={returnLastFrame} onChange={setReturnLastFrame} />
         </div>,
         document.body,
       )
@@ -144,6 +157,17 @@ export function VideoParamsPopover({
       </button>
       {panel}
     </>
+  );
+}
+
+function ToggleRow({ label, enabled, onChange }: { label: string; enabled: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <div style={s.audioRow}>
+      <span style={s.rowLabel}>{label}</span>
+      <button type="button" role="switch" aria-checked={enabled} style={{ ...s.switch, ...(enabled ? s.switchOn : null) }} onClick={() => onChange(!enabled)}>
+        <span style={{ ...s.switchKnob, ...(enabled ? s.switchKnobOn : null) }} />
+      </button>
+    </div>
   );
 }
 

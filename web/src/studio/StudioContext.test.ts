@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { GenerationTask } from '../api';
 import type { GalleryItem } from './types';
 import {
+  canonicalVideoRoute,
   filterDeletedGalleryItems,
   isExpectedGalleryView,
   isGalleryTargetVisible,
   mergeGalleryItems,
   remoteTaskProjectID,
 } from './StudioContext';
+import { LEGACY_SEEDANCE25_MODEL_ID, VIDEO_MODEL_IDS } from './video/videoConfig';
 
 function galleryItem(id: string, url = `https://example.test/${id}.png`): GalleryItem {
   return {
@@ -95,5 +97,23 @@ describe('gallery project guards', () => {
     expect(remoteTaskProjectID({} as GenerationTask)).toBe(0);
     expect(remoteTaskProjectID({ project_id: -1 } as GenerationTask)).toBe(0);
     expect(remoteTaskProjectID({ project_id: 1.5 } as GenerationTask)).toBe(0);
+  });
+});
+
+describe('historical video route compatibility', () => {
+  it('normalizes the retired SD2.5 route to the official model ID', () => {
+    expect(canonicalVideoRoute({
+      routeKey: `seedance:${LEGACY_SEEDANCE25_MODEL_ID}`,
+      platform: 'seedance',
+      model: LEGACY_SEEDANCE25_MODEL_ID,
+      groupId: 42,
+      size: '720p',
+    })).toEqual({
+      routeKey: `seedance:${VIDEO_MODEL_IDS.seedance25}`,
+      platform: 'seedance',
+      model: VIDEO_MODEL_IDS.seedance25,
+      groupId: 42,
+      size: '720p',
+    });
   });
 });

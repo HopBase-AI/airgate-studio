@@ -1,16 +1,28 @@
 import { useTranslation } from 'react-i18next';
 import type { ImageGroup } from '../../api';
 
-// ── Seedance 2.0 视频模型 ────────────────────────────────────────────────────
-// 与 gateway-seedance 插件 registry 对齐。国内标准版使用上游原生模型 ID，
-// 海外继续使用既有 Dreamina ID；API 兼容别名由 gateway-seedance 处理。
+// ── Seedance 视频模型 ────────────────────────────────────────────────────────
+// 与 gateway-seedance 插件 registry 对齐。SD2.5 使用官方 ModelArk 原生 ID；
+// 旧 -ep 只由后端兼容读取，不进入工作台模型列表。
 
 export const VIDEO_MODEL_IDS = {
+  seedance25: 'dreamina-seedance-2-5-260628',
+  // Source-compatible property name; value is intentionally canonical.
+  seedance25EP: 'dreamina-seedance-2-5-260628',
   standardOverseas: 'dreamina-seedance-2-0-hc',
   standardDomestic: 'doubao-seedance-2-0-260128-a',
   fastOverseas: 'dreamina-seedance-2-0-fast-hc',
   miniOverseas: 'dreamina-seedance-2-0-mini-hc',
 } as const;
+
+/** Legacy input accepted by the backend, never emitted by the Studio UI. */
+export const LEGACY_SEEDANCE25_MODEL_ID = 'dreamina-seedance-2-5-ep';
+
+export function canonicalVideoModelId(id: string): string {
+  return id.trim().toLowerCase() === LEGACY_SEEDANCE25_MODEL_ID
+    ? VIDEO_MODEL_IDS.seedance25
+    : id.trim();
+}
 
 export type VideoModelRegion = 'overseas' | 'domestic';
 
@@ -19,9 +31,52 @@ export interface VideoModelConfig {
   nameKey: keyof typeof VIDEO_STRINGS['zh'];
   region: VideoModelRegion;
   resolutions: string[];
+  durationOptions?: readonly number[];
+  ratioOptions?: readonly string[];
 }
 
+// Seedance 2.0's existing Studio presets. Keep these as the fallback for
+// models without an explicit per-model option list.
+export const VIDEO_DURATIONS = [4, 5, 10, 15] as const;
+export const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3'] as const;
+
+// Seedance 2.5 EP's ordinary generation contract. -1 asks the upstream to
+// choose the duration automatically.
+export const SEEDANCE25_DURATIONS = [
+  4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+  19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, -1,
+] as const;
+export const SEEDANCE25_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'] as const;
+
+export interface VideoGenerationSettings {
+  duration: number;
+  resolution: string;
+  ratio: string;
+}
+
+// Studio keeps the compact Seedance 2.0 presets while exposing the gateway's
+// documented defaults when the Seedance 2.5 EP model is selected.
+export const SEEDANCE20_VIDEO_DEFAULTS: VideoGenerationSettings = {
+  duration: VIDEO_DURATIONS[0],
+  resolution: '720p',
+  ratio: VIDEO_RATIOS[0],
+};
+
+export const SEEDANCE25_VIDEO_DEFAULTS: VideoGenerationSettings = {
+  duration: -1,
+  resolution: '720p',
+  ratio: 'adaptive',
+};
+
 export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
+  {
+    id: VIDEO_MODEL_IDS.seedance25,
+    nameKey: 'model_sd25_ep',
+    region: 'overseas',
+    resolutions: ['480p', '720p'],
+    durationOptions: SEEDANCE25_DURATIONS,
+    ratioOptions: SEEDANCE25_RATIOS,
+  },
   {
     id: VIDEO_MODEL_IDS.standardOverseas,
     nameKey: 'model_standard_overseas',
@@ -48,11 +103,53 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
   },
 ];
 
-export const VIDEO_DURATIONS = [5, 10, 15] as const;
-export const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3'] as const;
-
 export function videoModelById(id: string): VideoModelConfig {
-  return VIDEO_MODEL_REGISTRY.find(m => m.id === id) ?? VIDEO_MODEL_REGISTRY[0];
+  const canonicalID = canonicalVideoModelId(id);
+  return VIDEO_MODEL_REGISTRY.find(m => m.id === canonicalID) ?? VIDEO_MODEL_REGISTRY[0];
+}
+
+export function videoDefaultsForModel(id: string): VideoGenerationSettings {
+  const defaults = videoModelById(id).id === VIDEO_MODEL_IDS.seedance25
+    ? SEEDANCE25_VIDEO_DEFAULTS
+    : SEEDANCE20_VIDEO_DEFAULTS;
+  return { ...defaults };
+}
+
+// SD2.5 deliberately resets to its gateway defaults on selection. When
+// returning to a 2.0 model, retain choices shared by its Studio options and
+// replace SD2.5-only values with the 2.0 defaults.
+export function normalizeVideoSettingsForModel(
+  id: string,
+  settings: VideoGenerationSettings,
+): VideoGenerationSettings {
+  const model = videoModelById(id);
+  if (model.id === VIDEO_MODEL_IDS.seedance25) return videoDefaultsForModel(model.id);
+
+  const defaults = videoDefaultsForModel(model.id);
+  const durations: readonly number[] = model.durationOptions ?? VIDEO_DURATIONS;
+  const ratios: readonly string[] = model.ratioOptions ?? VIDEO_RATIOS;
+  return {
+    duration: durations.includes(settings.duration) ? settings.duration : defaults.duration,
+    resolution: model.resolutions.includes(settings.resolution) ? settings.resolution : defaults.resolution,
+    ratio: ratios.includes(settings.ratio) ? settings.ratio : defaults.ratio,
+  };
+}
+
+// Historical retry routes can target a different model than the composer.
+// Preserve compatible values and replace out-of-contract values before send.
+export function normalizeVideoSubmissionSettingsForModel(
+  id: string,
+  settings: VideoGenerationSettings,
+): VideoGenerationSettings {
+  const model = videoModelById(id);
+  const defaults = videoDefaultsForModel(model.id);
+  const durations: readonly number[] = model.durationOptions ?? VIDEO_DURATIONS;
+  const ratios: readonly string[] = model.ratioOptions ?? VIDEO_RATIOS;
+  return {
+    duration: durations.includes(settings.duration) ? settings.duration : defaults.duration,
+    resolution: model.resolutions.includes(settings.resolution) ? settings.resolution : defaults.resolution,
+    ratio: ratios.includes(settings.ratio) ? settings.ratio : defaults.ratio,
+  };
 }
 
 export type VideoGroupsByModel = Record<string, ImageGroup[]>;
@@ -64,8 +161,9 @@ export function videoGroupsForModel(
   modelId: string,
   groupsByModel: VideoGroupsByModel,
 ): ImageGroup[] {
-  const groups = groupsByModel[modelId] ?? [];
-  const model = VIDEO_MODEL_REGISTRY.find(item => item.id === modelId);
+  const canonicalID = canonicalVideoModelId(modelId);
+  const groups = groupsByModel[canonicalID] ?? [];
+  const model = VIDEO_MODEL_REGISTRY.find(item => item.id === canonicalID);
   if (!model || model.region === 'domestic') return groups;
 
   const domesticGroupIds = new Set(
@@ -86,6 +184,7 @@ export const VIDEO_STRINGS = {
     gallery_empty_image: '暂无图像作品',
     gallery_empty_video: '暂无视频作品',
     model_standard_overseas: 'Seedance 2.0 标准（海外）',
+    model_sd25_ep: 'Seedance 2.5 EP（海外）',
     model_standard_domestic: 'Seedance 2.0 标准（国内）',
     model_fast_overseas: 'Seedance 2.0 快速（海外）',
     model_mini_overseas: 'Seedance 2.0 迷你（海外）',
@@ -93,7 +192,10 @@ export const VIDEO_STRINGS = {
     duration_seconds: '秒',
     resolution: '分辨率',
     ratio: '画幅',
+    duration_auto: '自动',
     audio: '生成音频',
+    watermark: '水印',
+    return_last_frame: '返回末帧',
     video_placeholder: '描述你想生成的视频画面，可附参考图…',
     generating: '视频生成中（约 2-10 分钟）…',
     no_result: '生成完成但没有可用的视频输出',
@@ -115,6 +217,7 @@ export const VIDEO_STRINGS = {
     gallery_empty_image: 'No image works',
     gallery_empty_video: 'No video works',
     model_standard_overseas: 'Seedance 2.0 Standard (Overseas)',
+    model_sd25_ep: 'Seedance 2.5 EP (Overseas)',
     model_standard_domestic: 'Seedance 2.0 Standard (China)',
     model_fast_overseas: 'Seedance 2.0 Fast (Overseas)',
     model_mini_overseas: 'Seedance 2.0 Mini (Overseas)',
@@ -122,7 +225,10 @@ export const VIDEO_STRINGS = {
     duration_seconds: 's',
     resolution: 'Resolution',
     ratio: 'Aspect',
+    duration_auto: 'Auto',
     audio: 'Audio',
+    watermark: 'Watermark',
+    return_last_frame: 'Return last frame',
     video_placeholder: 'Describe the video you want to create; reference images optional…',
     generating: 'Generating video (about 2-10 min)…',
     no_result: 'Task completed but returned no video output',
@@ -144,6 +250,7 @@ export const VIDEO_STRINGS = {
     gallery_empty_image: '画像作品はありません',
     gallery_empty_video: '動画作品はありません',
     model_standard_overseas: 'Seedance 2.0 標準（海外）',
+    model_sd25_ep: 'Seedance 2.5 EP（海外）',
     model_standard_domestic: 'Seedance 2.0 標準（中国）',
     model_fast_overseas: 'Seedance 2.0 高速（海外）',
     model_mini_overseas: 'Seedance 2.0 ミニ（海外）',
@@ -151,7 +258,10 @@ export const VIDEO_STRINGS = {
     duration_seconds: '秒',
     resolution: '解像度',
     ratio: 'アスペクト',
+    duration_auto: '自動',
     audio: '音声生成',
+    watermark: 'ウォーターマーク',
+    return_last_frame: '最終フレームを返す',
     video_placeholder: '生成したい動画を説明してください。参考画像も添付できます…',
     generating: '動画を生成中（約 2〜10 分）…',
     no_result: 'タスクは完了しましたが動画出力がありません',
@@ -173,6 +283,7 @@ export const VIDEO_STRINGS = {
     gallery_empty_image: '暫無圖像作品',
     gallery_empty_video: '暫無影片作品',
     model_standard_overseas: 'Seedance 2.0 標準（海外）',
+    model_sd25_ep: 'Seedance 2.5 EP（海外）',
     model_standard_domestic: 'Seedance 2.0 標準（國內）',
     model_fast_overseas: 'Seedance 2.0 快速（海外）',
     model_mini_overseas: 'Seedance 2.0 迷你（海外）',
@@ -180,7 +291,10 @@ export const VIDEO_STRINGS = {
     duration_seconds: '秒',
     resolution: '解像度',
     ratio: '畫幅',
+    duration_auto: '自動',
     audio: '生成音訊',
+    watermark: '浮水印',
+    return_last_frame: '返回末幀',
     video_placeholder: '描述你想生成的影片畫面，可附參考圖…',
     generating: '影片生成中（約 2-10 分鐘）…',
     no_result: '生成完成但沒有可用的影片輸出',

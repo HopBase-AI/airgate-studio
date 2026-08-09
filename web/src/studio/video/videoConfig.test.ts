@@ -2,12 +2,21 @@ import { describe, expect, it } from 'vitest';
 import type { ImageGroup } from '../../api';
 import {
   VIDEO_MODEL_IDS,
+  LEGACY_SEEDANCE25_MODEL_ID,
   VIDEO_MODEL_REGISTRY,
   VIDEO_DURATIONS,
   VIDEO_RATIOS,
+  SEEDANCE25_DURATIONS,
+  SEEDANCE25_RATIOS,
+  SEEDANCE20_VIDEO_DEFAULTS,
+  SEEDANCE25_VIDEO_DEFAULTS,
   VIDEO_STRINGS,
+  canonicalVideoModelId,
   videoGroupsForModel,
+  videoDefaultsForModel,
   videoModelById,
+  normalizeVideoSettingsForModel,
+  normalizeVideoSubmissionSettingsForModel,
 } from './videoConfig';
 
 function group(id: number, name: string): ImageGroup {
@@ -22,10 +31,22 @@ function group(id: number, name: string): ImageGroup {
 
 describe('videoConfig', () => {
   it('注册国内外 Seedance 模型且分辨率边界正确', () => {
-    expect(VIDEO_MODEL_REGISTRY).toHaveLength(4);
+    expect(VIDEO_MODEL_REGISTRY).toHaveLength(5);
+	    expect(VIDEO_MODEL_IDS.seedance25).toBe('dreamina-seedance-2-5-260628');
+	    expect(VIDEO_MODEL_IDS.seedance25EP).toBe(VIDEO_MODEL_IDS.seedance25);
+	    expect(VIDEO_MODEL_REGISTRY.map(model => model.id)).not.toContain(LEGACY_SEEDANCE25_MODEL_ID);
+	    const sd25 = videoModelById(VIDEO_MODEL_IDS.seedance25);
+    expect(sd25.region).toBe('overseas');
+    expect(sd25.resolutions).toEqual(['480p', '720p']);
+    expect(sd25.durationOptions).toEqual(SEEDANCE25_DURATIONS);
+    expect(sd25.ratioOptions).toEqual(SEEDANCE25_RATIOS);
     const overseas = videoModelById(VIDEO_MODEL_IDS.standardOverseas);
     expect(overseas.region).toBe('overseas');
     expect(overseas.resolutions).toContain('4k');
+    for (const model of VIDEO_MODEL_REGISTRY.filter(item => item.id !== VIDEO_MODEL_IDS.seedance25EP)) {
+      expect(model.durationOptions).toBeUndefined();
+      expect(model.ratioOptions).toBeUndefined();
+    }
 
     const domestic = videoModelById(VIDEO_MODEL_IDS.standardDomestic);
     expect(domestic.region).toBe('domestic');
@@ -59,9 +80,63 @@ describe('videoConfig', () => {
     expect(videoModelById('nope').id).toBe(VIDEO_MODEL_REGISTRY[0].id);
   });
 
-  it('时长与画幅选项非空', () => {
-    expect(VIDEO_DURATIONS.length).toBeGreaterThan(0);
-    expect(VIDEO_RATIOS).toContain('16:9');
+  it('历史 SD2.5 别名在注册表查找前归一化为官方 ID', () => {
+    expect(canonicalVideoModelId(LEGACY_SEEDANCE25_MODEL_ID)).toBe(VIDEO_MODEL_IDS.seedance25);
+    expect(videoModelById(LEGACY_SEEDANCE25_MODEL_ID).id).toBe(VIDEO_MODEL_IDS.seedance25);
+  });
+
+  it('切换到 SD2.5 时使用网关文档的默认参数', () => {
+    expect(videoDefaultsForModel(VIDEO_MODEL_IDS.seedance25EP)).toEqual(SEEDANCE25_VIDEO_DEFAULTS);
+    expect(normalizeVideoSettingsForModel(VIDEO_MODEL_IDS.seedance25EP, {
+      duration: 30,
+      resolution: '480p',
+      ratio: '21:9',
+    })).toEqual(SEEDANCE25_VIDEO_DEFAULTS);
+  });
+
+  it('从 SD2.5 切回每个 2.0 模型时移除 2.5 专有参数', () => {
+    const sd25Settings = videoDefaultsForModel(VIDEO_MODEL_IDS.seedance25EP);
+    for (const model of VIDEO_MODEL_REGISTRY.filter(item => item.id !== VIDEO_MODEL_IDS.seedance25EP)) {
+      const normalized = normalizeVideoSettingsForModel(model.id, sd25Settings);
+      expect(normalized).toEqual(SEEDANCE20_VIDEO_DEFAULTS);
+      expect(VIDEO_DURATIONS).toContain(normalized.duration);
+      expect(model.resolutions).toContain(normalized.resolution);
+      expect(VIDEO_RATIOS).toContain(normalized.ratio);
+    }
+  });
+
+  it('提交历史 2.0 路由时收敛当前 SD2.5 的越界参数', () => {
+    expect(normalizeVideoSubmissionSettingsForModel(VIDEO_MODEL_IDS.fastOverseas, {
+      duration: 30,
+      resolution: '1080p',
+      ratio: 'adaptive',
+    })).toEqual({
+      duration: 4,
+      resolution: '720p',
+      ratio: '16:9',
+    });
+  });
+
+  it('提交当前 SD2.5 路由时保留合法的 30 秒与宽画幅', () => {
+    expect(normalizeVideoSubmissionSettingsForModel(VIDEO_MODEL_IDS.seedance25, {
+      duration: 30,
+      resolution: '480p',
+      ratio: '21:9',
+    })).toEqual({
+      duration: 30,
+      resolution: '480p',
+      ratio: '21:9',
+    });
+  });
+
+  it('保留 2.0 预设并为 SD2.5 提供独立完整矩阵', () => {
+    expect(VIDEO_DURATIONS).toEqual([4, 5, 10, 15]);
+    expect(VIDEO_RATIOS).toEqual(['16:9', '9:16', '1:1', '4:3']);
+    expect(SEEDANCE25_DURATIONS[0]).toBe(4);
+    expect(SEEDANCE25_DURATIONS.at(-2)).toBe(30);
+    expect(SEEDANCE25_DURATIONS.at(-1)).toBe(-1);
+    expect(SEEDANCE25_DURATIONS).toHaveLength(28);
+    expect(SEEDANCE25_RATIOS).toEqual(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive']);
   });
 
   it('四语文案键完全对齐（防漏翻）', () => {

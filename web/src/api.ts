@@ -95,6 +95,7 @@ export interface GenerationTask {
   input_mask?: string;
   result_content?: string;
   video_urls?: string[];
+  last_frame_url?: string;
   // 官方上游直链(seedance 视频,与中继地址同为 24h 有效),用于「官方源链接」溯源。
   source_outputs?: string[];
   error_message?: string;

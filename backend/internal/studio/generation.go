@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -11,10 +12,26 @@ const (
 	defaultExecutorPluginID = "gateway-openai"
 
 	videoModelSeedanceStandardOverseas = "dreamina-seedance-2-0-hc"
+	videoModelSeedance25               = "dreamina-seedance-2-5-260628"
+	videoModelSeedance25LegacyEP       = "dreamina-seedance-2-5-ep"
+	// Deprecated source-compatible name. Runtime task values use the native ID.
+	videoModelSeedance25EP             = videoModelSeedance25
 	videoModelSeedanceStandardDomestic = "doubao-seedance-2-0-260128-a"
 	videoModelSeedanceFastOverseas     = "dreamina-seedance-2-0-fast-hc"
 	videoModelSeedanceMiniOverseas     = "dreamina-seedance-2-0-mini-hc"
 )
+
+func canonicalSeedanceVideoModel(model string) string {
+	model = strings.TrimSpace(model)
+	if strings.EqualFold(model, videoModelSeedance25LegacyEP) {
+		return videoModelSeedance25
+	}
+	return model
+}
+
+func isSeedance25VideoModel(model string) bool {
+	return canonicalSeedanceVideoModel(model) == videoModelSeedance25
+}
 
 func generationExecutorPluginID(platform string) string {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
@@ -65,9 +82,12 @@ func executorSupportsOperation(executorID, operation string) bool {
 // videoModelResolutions Seedance 各版本允许的分辨率（与 gateway-seedance
 // registry 对齐）。国内标准版不支持 4K；海外 fast / mini 只有 480p/720p。
 func videoModelResolutions(model string) map[string]struct{} {
-	m := strings.ToLower(strings.TrimSpace(model))
+	m := strings.ToLower(canonicalSeedanceVideoModel(model))
 	if m == videoModelSeedanceStandardDomestic {
 		return map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}}
+	}
+	if m == videoModelSeedance25 {
+		return map[string]struct{}{"480p": {}, "720p": {}}
 	}
 	if strings.Contains(m, "-fast-") || strings.Contains(m, "-mini-") {
 		return map[string]struct{}{"480p": {}, "720p": {}}
@@ -75,9 +95,15 @@ func videoModelResolutions(model string) map[string]struct{} {
 	return map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}, "4k": {}}
 }
 
+var seedance25VideoRatios = map[string]struct{}{
+	"16:9": {}, "4:3": {}, "1:1": {}, "3:4": {},
+	"9:16": {}, "21:9": {}, "adaptive": {},
+}
+
 // validateVideoModelParams 视频任务的参数预校验：分辨率按档位、时长限幅，
 // 在创建入口给前端明确错误，避免排队后才在上游失败。
 func validateVideoModelParams(model string, params map[string]interface{}) error {
+	model = canonicalSeedanceVideoModel(model)
 	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
 		normalized := strings.ToLower(strings.TrimSpace(res))
 		if _, allowed := videoModelResolutions(model)[normalized]; !allowed {
@@ -85,8 +111,24 @@ func validateVideoModelParams(model string, params map[string]interface{}) error
 		}
 	}
 	if v, ok := params["duration"]; ok {
-		if d, ok := toInt(v); ok && (d < 1 || d > 30) {
-			return fmt.Errorf("duration 需在 1-30 秒之间")
+		d, ok := toInt(v)
+		if !ok {
+			return fmt.Errorf("duration 必须是整数")
+		}
+		maxDuration := 15
+		if isSeedance25VideoModel(model) {
+			maxDuration = 30
+		}
+		if d != -1 && (d < 4 || d > maxDuration) {
+			return fmt.Errorf("模型 %s 的 duration 需在 4-%d 秒之间，或使用 -1 自动选择", model, maxDuration)
+		}
+	}
+	if isSeedance25VideoModel(model) {
+		if ratio, ok := params["ratio"].(string); ok && strings.TrimSpace(ratio) != "" {
+			normalized := strings.ToLower(strings.TrimSpace(ratio))
+			if _, allowed := seedance25VideoRatios[normalized]; !allowed {
+				return fmt.Errorf("模型 %s 不支持画幅 %s", model, ratio)
+			}
 		}
 	}
 	return nil
@@ -99,6 +141,10 @@ func toInt(v interface{}) (int, bool) {
 	case int64:
 		return int(n), true
 	case float64:
+		intLimit := float64(uint64(1) << (strconv.IntSize - 1))
+		if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n || n < -intLimit || n >= intLimit {
+			return 0, false
+		}
 		return int(n), true
 	case json.Number:
 		i, err := n.Int64()
@@ -233,6 +279,9 @@ func normalizeGenerationRequest(req *createGenerationTaskRequest) {
 	req.Operation = strings.TrimSpace(req.Operation)
 	if req.Operation == "" {
 		req.Operation = "generate"
+	}
+	if strings.EqualFold(req.Platform, "seedance") {
+		req.Model = canonicalSeedanceVideoModel(req.Model)
 	}
 }
 
@@ -371,6 +420,9 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 		if urls := stringSliceFromAny(task.Output["video_urls"]); len(urls) > 0 {
 			resp["video_urls"] = urls
 		}
+		if url, ok := task.Output["last_frame_url"].(string); ok && strings.TrimSpace(url) != "" {
+			resp["last_frame_url"] = url
+		}
 		// 官方上游直链（seedance 插件在完结时写入,与视频同为 24h 有效),
 		// 前端用来提供「官方源链接」溯源入口。
 		if urls := stringSliceFromAny(task.Output["source_outputs"]); len(urls) > 0 {
@@ -426,7 +478,7 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 		resp["project_id"] = projectID
 	}
 	if v, ok := task.Input["duration"]; ok {
-		if d, ok2 := toInt(v); ok2 && d > 0 {
+		if d, ok2 := toInt(v); ok2 && (d > 0 || d == -1) {
 			resp["duration"] = d
 		}
 	}

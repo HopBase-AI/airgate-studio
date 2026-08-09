@@ -1002,6 +1002,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     videoResolution, setVideoResolution,
     videoRatio, setVideoRatio,
     videoAudio, setVideoAudio,
+    videoWatermark, setVideoWatermark,
+    videoReturnLastFrame, setVideoReturnLastFrame,
     videoGroups, videoRouteReady,
     selectedVideoGroupId, setSelectedVideoGroupId,
     referenceImages, setReferenceImages,
@@ -1381,7 +1383,13 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                 setRatio={setVideoRatio}
                 audio={videoAudio}
                 setAudio={setVideoAudio}
+                watermark={videoWatermark}
+                setWatermark={setVideoWatermark}
+                returnLastFrame={videoReturnLastFrame}
+                setReturnLastFrame={setVideoReturnLastFrame}
                 resolutions={videoModelById(videoModelId).resolutions}
+                durationOptions={videoModelById(videoModelId).durationOptions}
+                ratioOptions={videoModelById(videoModelId).ratioOptions}
                 vs={vs}
               />
               {videoGroups.length > 1 && (

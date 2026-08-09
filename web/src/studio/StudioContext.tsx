@@ -18,11 +18,16 @@ import { buildGenerationRouteSnapshot } from './generationRoute';
 import { startImageGroupDiscovery } from './imageGroupDiscovery';
 import {
   VIDEO_MODEL_REGISTRY,
+  VIDEO_MODEL_IDS,
+  canonicalVideoModelId,
   videoGroupsForModel,
-  videoModelById,
+  videoDefaultsForModel,
+  normalizeVideoSettingsForModel,
+  normalizeVideoSubmissionSettingsForModel,
   useVideoStrings,
   type VideoGroupsByModel,
   type VideoModelConfig,
+  type VideoGenerationSettings,
 } from './video/videoConfig';
 import { recordRemoteTaskSample } from './etaStats';
 
@@ -167,7 +172,8 @@ function operationToImageMode(operation: string): ImageMode {
 function remoteTaskMediaType(t: GenerationTask): 'video' | 'image' {
   if (t.kind === 'video') return 'video';
   if ((t.video_urls?.length ?? 0) > 0) return 'video';
-  if (t.model && VIDEO_MODEL_REGISTRY.some(m => m.id === t.model)) return 'video';
+  const model = t.model ? canonicalVideoModelId(t.model) : '';
+  if (model && VIDEO_MODEL_REGISTRY.some(candidate => candidate.id === model)) return 'video';
   if (t.size && /^(\d{3,4}p|4k)$/i.test(t.size)) return 'video';
   return 'image';
 }
@@ -208,14 +214,47 @@ interface GenerateVideoOptions {
   sourceImages?: string[];
   route?: GenerationRouteSnapshot | null;
   projectId?: number;
+  durationSeconds?: number;
+}
+
+export function canonicalVideoRoute(route: GenerationRouteSnapshot | null): GenerationRouteSnapshot | null {
+  if (!route || route.platform.trim().toLowerCase() !== 'seedance') return route;
+  const model = canonicalVideoModelId(route.model);
+  return buildGenerationRouteSnapshot(
+    modelRouteKey('seedance', model),
+    'seedance',
+    model,
+    route.groupId,
+    route.size,
+  );
 }
 
 function galleryItemRoute(item: GalleryItem): GenerationRouteSnapshot | null {
-  return buildGenerationRouteSnapshot(item.routeKey, item.platform, item.model, item.groupId, item.size);
+  const route = buildGenerationRouteSnapshot(item.routeKey, item.platform, item.model, item.groupId, item.size);
+  if (route) return canonicalVideoRoute(route);
+  if (item.platform?.trim().toLowerCase() !== 'seedance') return null;
+  const model = canonicalVideoModelId(item.model);
+  return canonicalVideoRoute(buildGenerationRouteSnapshot(
+    modelRouteKey('seedance', model),
+    'seedance',
+    model,
+    item.groupId,
+    item.size,
+  ));
 }
 
 function studioTaskRoute(task: StudioGenerationTask): GenerationRouteSnapshot | null {
-  return buildGenerationRouteSnapshot(task.routeKey, task.platform, task.model, task.groupId, task.size);
+  const route = buildGenerationRouteSnapshot(task.routeKey, task.platform, task.model, task.groupId, task.size);
+  if (route) return canonicalVideoRoute(route);
+  if (task.platform?.trim().toLowerCase() !== 'seedance' || !task.model) return null;
+  const model = canonicalVideoModelId(task.model);
+  return canonicalVideoRoute(buildGenerationRouteSnapshot(
+    modelRouteKey('seedance', model),
+    'seedance',
+    model,
+    task.groupId,
+    task.size,
+  ));
 }
 
 // projectAssetToGallery 把后端持久化的项目资产记录映射成画廊条目。
@@ -285,6 +324,10 @@ function taskSourceUrl(task: GenerationTask): string | undefined {
 // 视频官方上游直链（与中继同为 24h 过期），取值口径收敛于此，勿在构造点内联。
 function taskSourceVideoUrl(task: GenerationTask): string | undefined {
   return task.source_outputs?.[0];
+}
+
+function taskLastFrameUrl(task: GenerationTask): string | undefined {
+  return typeof task.last_frame_url === 'string' && task.last_frame_url.trim() ? task.last_frame_url : undefined;
 }
 
 function isRemoteTaskActive(status: string): boolean {
@@ -439,6 +482,7 @@ function galleryItemsFromCompletedTask(
       createdAt: taskAssetCreatedAt(task),
       sourceUrl: taskSourceUrl(task),
       sourceVideoUrl: taskSourceVideoUrl(task),
+      lastFrameUrl: taskLastFrameUrl(task),
     }];
   }
   return parseMarkdownImages(task.result_content || '').map((img, index) => ({
@@ -652,6 +696,10 @@ export interface StudioContextValue {
   setVideoRatio: (ratio: string) => void;
   videoAudio: boolean;
   setVideoAudio: (enabled: boolean) => void;
+  videoWatermark: boolean;
+  setVideoWatermark: (enabled: boolean) => void;
+  videoReturnLastFrame: boolean;
+  setVideoReturnLastFrame: (enabled: boolean) => void;
   videoGroups: ImageGroup[];
   videoGroupsLoaded: boolean;
   videoRouteReady: boolean;
@@ -715,10 +763,22 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // ── Video（Seedance）参数域 ────────────────────────────────────────────────
   const vs = useVideoStrings();
   const [videoModelId, setVideoModelIdRaw] = useState(VIDEO_MODEL_REGISTRY[0].id);
-  const [videoDuration, setVideoDuration] = useState<number>(5);
-  const [videoResolution, setVideoResolution] = useState('720p');
-  const [videoRatio, setVideoRatio] = useState('16:9');
-  const [videoAudio, setVideoAudio] = useState(false);
+  const [videoSettings, setVideoSettings] = useState<VideoGenerationSettings>(() => (
+    videoDefaultsForModel(VIDEO_MODEL_REGISTRY[0].id)
+  ));
+  const { duration: videoDuration, resolution: videoResolution, ratio: videoRatio } = videoSettings;
+  const setVideoDuration = useCallback((duration: number) => {
+    setVideoSettings(current => ({ ...current, duration }));
+  }, []);
+  const setVideoResolution = useCallback((resolution: string) => {
+    setVideoSettings(current => ({ ...current, resolution }));
+  }, []);
+  const setVideoRatio = useCallback((ratio: string) => {
+    setVideoSettings(current => ({ ...current, ratio }));
+  }, []);
+  const [videoAudio, setVideoAudio] = useState(true);
+  const [videoWatermark, setVideoWatermark] = useState(false);
+  const [videoReturnLastFrame, setVideoReturnLastFrame] = useState(true);
   const [videoGroupsByModel, setVideoGroupsByModel] = useState<VideoGroupsByModel>({});
   const [videoGroupsLoaded, setVideoGroupsLoaded] = useState(false);
   const [selectedVideoGroupId, setSelectedVideoGroupId] = useState<number | null>(null);
@@ -736,12 +796,18 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     && selectedVideoGroupId != null
     && videoGroups.some(group => group.id === selectedVideoGroupId);
 
-  // 换档时收敛分辨率到该版本支持范围，并清空上一版本的分组选择。
+  // 换档时收敛参数到所选版本的公开规格，并清空上一版本的分组选择。
   const setVideoModelId = useCallback((id: string) => {
-    if (!VIDEO_MODEL_REGISTRY.some(model => model.id === id)) return;
-    setVideoModelIdRaw(id);
+    const canonicalID = canonicalVideoModelId(id);
+    if (!VIDEO_MODEL_REGISTRY.some(model => model.id === canonicalID)) return;
+    setVideoModelIdRaw(canonicalID);
     setSelectedVideoGroupId(null);
-    setVideoResolution(prev => (videoModelById(id).resolutions.includes(prev) ? prev : '720p'));
+    setVideoSettings(current => normalizeVideoSettingsForModel(canonicalID, current));
+    if (canonicalID === VIDEO_MODEL_IDS.seedance25EP) {
+      setVideoAudio(true);
+      setVideoWatermark(false);
+      setVideoReturnLastFrame(true);
+    }
   }, []);
 
   // 切到视频时一次性拉取所有版本的可用分组。海外标准 ID 也会命中国内的
@@ -1928,10 +1994,21 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         selectedVideoGroupId ?? undefined,
         videoResolution,
       );
-      const route = options?.route === undefined ? selectedRoute : options.route;
+      const routeCandidate = options?.route === undefined ? selectedRoute : options.route;
+      const canonicalRoute = canonicalVideoRoute(routeCandidate);
+      const routeModel = canonicalRoute && VIDEO_MODEL_REGISTRY.find(candidate => candidate.id === canonicalRoute.model);
+      const submissionSettings = canonicalRoute && routeModel
+        ? normalizeVideoSubmissionSettingsForModel(canonicalRoute.model, {
+            duration: options?.durationSeconds ?? videoDuration,
+            resolution: canonicalRoute.size,
+            ratio: videoRatio,
+          })
+        : null;
+      const route = canonicalRoute && submissionSettings
+        ? { ...canonicalRoute, size: submissionSettings.resolution }
+        : canonicalRoute;
       const model = route?.model ?? videoModelId;
-      const routeModel = route && VIDEO_MODEL_REGISTRY.find(candidate => candidate.id === route.model);
-      if (!route || route.platform !== 'seedance' || !routeModel || !routeModel.resolutions.includes(route.size)) {
+      if (!route || route.platform !== 'seedance' || !routeModel || !submissionSettings) {
         setTasks(prev => [{
           id: uid(),
           projectId: targetProjectID,
@@ -1967,7 +2044,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         groupId,
         routeKey: route.routeKey,
         size: route.size,
-        durationSeconds: videoDuration,
+        durationSeconds: submissionSettings.duration,
         remoteTaskIds: [],
       };
       setTasks(prev => [task, ...prev]);
@@ -2023,10 +2100,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             group_id: groupId,
             project_id: targetProjectID > ALL_VIEW_ID ? targetProjectID : undefined,
             parameters: {
-              duration: videoDuration,
+              duration: submissionSettings.duration,
               resolution: route.size,
-              ratio: videoRatio,
+              ratio: submissionSettings.ratio,
               generate_audio: videoAudio,
+              watermark: videoWatermark,
+              return_last_frame: videoReturnLastFrame,
             },
             inputs: sources.length > 0
               ? sources.map(url => ({ type: 'image' as const, role: 'reference_image' as const, url }))
@@ -2046,7 +2125,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask(failedTaskPatchFromRemote(completed, pollErrorMessages.failed));
             return;
           }
-          recordRemoteTaskSample(completed, { mediaType: 'video', model: route.model, size: route.size, durationSeconds: videoDuration });
+          recordRemoteTaskSample(completed, { mediaType: 'video', model: route.model, size: route.size, durationSeconds: submissionSettings.duration });
           const videoUrl = completed.video_urls?.[0] || (completed.result_content || '').trim();
           if (!videoUrl) {
             updateTask({ status: 'failed', error: vs('no_result'), remoteTaskIds: [created.id] });
@@ -2068,6 +2147,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             createdAt: taskAssetCreatedAt(completed),
             sourceUrl: sources[0],
             sourceVideoUrl: taskSourceVideoUrl(completed),
+            lastFrameUrl: taskLastFrameUrl(completed),
           };
           prependGalleryForTarget(targetProjectID, [item], taskId);
           updateTask({ status: 'completed', result: [item], remoteTaskIds: [created.id] });
@@ -2095,6 +2175,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       videoResolution,
       videoRatio,
       videoAudio,
+      videoWatermark,
+      videoReturnLastFrame,
       videoGroupsByModel,
       videoGroupsLoaded,
       selectedVideoGroupId,
@@ -2430,6 +2512,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setVideoRatio,
     videoAudio,
     setVideoAudio,
+    videoWatermark,
+    setVideoWatermark,
+    videoReturnLastFrame,
+    setVideoReturnLastFrame,
     videoGroups,
     videoGroupsLoaded,
     videoRouteReady,

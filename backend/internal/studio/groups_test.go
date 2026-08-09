@@ -3,6 +3,8 @@ package studio
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,18 +12,25 @@ import (
 )
 
 type groupTestHost struct {
-	groups      []interface{}
-	lastRequest sdk.HostInvokeRequest
+	groups        []interface{}
+	groupsByModel map[string][]interface{}
+	lastRequest   sdk.HostInvokeRequest
+	requests      []sdk.HostInvokeRequest
 }
 
 func (h *groupTestHost) Invoke(_ context.Context, req sdk.HostInvokeRequest) (*sdk.HostInvokeResponse, error) {
 	h.lastRequest = req
+	h.requests = append(h.requests, req)
 	if req.Method != hostMethodGroupsList {
 		return nil, errors.New("unexpected host method")
 	}
+	groups := h.groups
+	if h.groupsByModel != nil {
+		groups = h.groupsByModel[fmt.Sprint(req.Payload["model"])]
+	}
 	return &sdk.HostInvokeResponse{
 		Status:  "ok",
-		Payload: map[string]interface{}{"groups": h.groups},
+		Payload: map[string]interface{}{"groups": groups},
 	}, nil
 }
 
@@ -68,6 +77,52 @@ func TestHostListImageGroups(t *testing.T) {
 
 	if _, err := hostListImageGroups(context.Background(), host, 7, "  ", "gemini-3-pro-image"); err == nil {
 		t.Fatal("expected error for empty platform")
+	}
+}
+
+func TestHostListEligibleGroupsMergesBothSeedance25RoutingIDs(t *testing.T) {
+	host := &groupTestHost{groupsByModel: map[string][]interface{}{
+		videoModelSeedance25: {
+			map[string]interface{}{"id": 3, "name": "official", "platform": "seedance", "effective_rate": 1.5},
+			map[string]interface{}{"id": 5, "name": "shared", "platform": "seedance", "effective_rate": 1.8},
+		},
+		videoModelSeedance25LegacyEP: {
+			map[string]interface{}{"id": 5, "name": "shared legacy", "platform": "seedance", "effective_rate": 1.8},
+			map[string]interface{}{"id": 4, "name": "legacy", "platform": "seedance", "effective_rate": 1.1},
+		},
+	}}
+
+	groups, err := hostListEligibleGroups(context.Background(), host, 7, "seedance", videoModelSeedance25, false)
+	if err != nil {
+		t.Fatalf("hostListEligibleGroups: %v", err)
+	}
+	if len(groups) != 3 || groups[0].ID != 4 || groups[1].ID != 3 || groups[2].ID != 5 {
+		t.Fatalf("groups = %+v", groups)
+	}
+	if len(host.requests) != 2 {
+		t.Fatalf("groups.list calls = %d, want 2", len(host.requests))
+	}
+	gotModels := []interface{}{host.requests[0].Payload["model"], host.requests[1].Payload["model"]}
+	wantModels := []interface{}{videoModelSeedance25, videoModelSeedance25LegacyEP}
+	if !reflect.DeepEqual(gotModels, wantModels) {
+		t.Fatalf("models = %#v, want %#v", gotModels, wantModels)
+	}
+	for _, req := range host.requests {
+		if req.Payload["needs_image"] != false {
+			t.Fatalf("payload = %v", req.Payload)
+		}
+	}
+
+	host.requests = nil
+	legacyGroups, err := hostListEligibleGroups(context.Background(), host, 7, "seedance", videoModelSeedance25LegacyEP, false)
+	if err != nil {
+		t.Fatalf("hostListEligibleGroups legacy input: %v", err)
+	}
+	if !reflect.DeepEqual(legacyGroups, groups) {
+		t.Fatalf("legacy-input groups = %+v, want %+v", legacyGroups, groups)
+	}
+	if len(host.requests) != 2 || host.requests[0].Payload["model"] != videoModelSeedance25 || host.requests[1].Payload["model"] != videoModelSeedance25LegacyEP {
+		t.Fatalf("legacy-input requests = %+v", host.requests)
 	}
 }
 
