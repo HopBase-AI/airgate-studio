@@ -37,6 +37,26 @@ export const SEEDANCE25_DURATIONS = [
 ] as const;
 export const SEEDANCE25_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'] as const;
 
+export interface VideoGenerationSettings {
+  duration: number;
+  resolution: string;
+  ratio: string;
+}
+
+// Studio keeps the compact Seedance 2.0 presets while exposing the gateway's
+// documented defaults when the Seedance 2.5 EP model is selected.
+export const SEEDANCE20_VIDEO_DEFAULTS: VideoGenerationSettings = {
+  duration: VIDEO_DURATIONS[0],
+  resolution: '720p',
+  ratio: VIDEO_RATIOS[0],
+};
+
+export const SEEDANCE25_VIDEO_DEFAULTS: VideoGenerationSettings = {
+  duration: -1,
+  resolution: '720p',
+  ratio: 'adaptive',
+};
+
 export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
   {
     id: VIDEO_MODEL_IDS.seedance25EP,
@@ -74,6 +94,33 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
 
 export function videoModelById(id: string): VideoModelConfig {
   return VIDEO_MODEL_REGISTRY.find(m => m.id === id) ?? VIDEO_MODEL_REGISTRY[0];
+}
+
+export function videoDefaultsForModel(id: string): VideoGenerationSettings {
+  const defaults = videoModelById(id).id === VIDEO_MODEL_IDS.seedance25EP
+    ? SEEDANCE25_VIDEO_DEFAULTS
+    : SEEDANCE20_VIDEO_DEFAULTS;
+  return { ...defaults };
+}
+
+// SD2.5 deliberately resets to its gateway defaults on selection. When
+// returning to a 2.0 model, retain choices shared by its Studio options and
+// replace SD2.5-only values with the 2.0 defaults.
+export function normalizeVideoSettingsForModel(
+  id: string,
+  settings: VideoGenerationSettings,
+): VideoGenerationSettings {
+  const model = videoModelById(id);
+  if (model.id === VIDEO_MODEL_IDS.seedance25EP) return videoDefaultsForModel(model.id);
+
+  const defaults = videoDefaultsForModel(model.id);
+  const durations: readonly number[] = model.durationOptions ?? VIDEO_DURATIONS;
+  const ratios: readonly string[] = model.ratioOptions ?? VIDEO_RATIOS;
+  return {
+    duration: durations.includes(settings.duration) ? settings.duration : defaults.duration,
+    resolution: model.resolutions.includes(settings.resolution) ? settings.resolution : defaults.resolution,
+    ratio: ratios.includes(settings.ratio) ? settings.ratio : defaults.ratio,
+  };
 }
 
 export type VideoGroupsByModel = Record<string, ImageGroup[]>;

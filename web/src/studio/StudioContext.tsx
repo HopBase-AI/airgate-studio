@@ -19,13 +19,13 @@ import { startImageGroupDiscovery } from './imageGroupDiscovery';
 import {
   VIDEO_MODEL_REGISTRY,
   VIDEO_MODEL_IDS,
-  VIDEO_DURATIONS,
-  VIDEO_RATIOS,
   videoGroupsForModel,
-  videoModelById,
+  videoDefaultsForModel,
+  normalizeVideoSettingsForModel,
   useVideoStrings,
   type VideoGroupsByModel,
   type VideoModelConfig,
+  type VideoGenerationSettings,
 } from './video/videoConfig';
 import { recordRemoteTaskSample } from './etaStats';
 
@@ -727,9 +727,19 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // ── Video（Seedance）参数域 ────────────────────────────────────────────────
   const vs = useVideoStrings();
   const [videoModelId, setVideoModelIdRaw] = useState(VIDEO_MODEL_REGISTRY[0].id);
-  const [videoDuration, setVideoDuration] = useState<number>(4);
-  const [videoResolution, setVideoResolution] = useState('480p');
-  const [videoRatio, setVideoRatio] = useState('16:9');
+  const [videoSettings, setVideoSettings] = useState<VideoGenerationSettings>(() => (
+    videoDefaultsForModel(VIDEO_MODEL_REGISTRY[0].id)
+  ));
+  const { duration: videoDuration, resolution: videoResolution, ratio: videoRatio } = videoSettings;
+  const setVideoDuration = useCallback((duration: number) => {
+    setVideoSettings(current => ({ ...current, duration }));
+  }, []);
+  const setVideoResolution = useCallback((resolution: string) => {
+    setVideoSettings(current => ({ ...current, resolution }));
+  }, []);
+  const setVideoRatio = useCallback((ratio: string) => {
+    setVideoSettings(current => ({ ...current, ratio }));
+  }, []);
   const [videoAudio, setVideoAudio] = useState(true);
   const [videoWatermark, setVideoWatermark] = useState(false);
   const [videoReturnLastFrame, setVideoReturnLastFrame] = useState(true);
@@ -755,23 +765,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     if (!VIDEO_MODEL_REGISTRY.some(model => model.id === id)) return;
     setVideoModelIdRaw(id);
     setSelectedVideoGroupId(null);
+    setVideoSettings(current => normalizeVideoSettingsForModel(id, current));
     if (id === VIDEO_MODEL_IDS.seedance25EP) {
-      // Keep the documented SD2.5 defaults while leaving the full ordinary
-      // duration, resolution, and ratio matrix available in the popover.
-      setVideoDuration(4);
-      setVideoResolution('480p');
-      setVideoRatio('16:9');
       setVideoAudio(true);
       setVideoWatermark(false);
       setVideoReturnLastFrame(true);
-      return;
     }
-    const model = videoModelById(id);
-    const durations = model.durationOptions ?? VIDEO_DURATIONS;
-    const ratios = model.ratioOptions ?? VIDEO_RATIOS;
-    setVideoDuration(prev => (durations.includes(prev) ? prev : VIDEO_DURATIONS[0]));
-    setVideoRatio(prev => (ratios.includes(prev) ? prev : VIDEO_RATIOS[0]));
-    setVideoResolution(prev => (model.resolutions.includes(prev) ? prev : '720p'));
   }, []);
 
   // 切到视频时一次性拉取所有版本的可用分组。海外标准 ID 也会命中国内的

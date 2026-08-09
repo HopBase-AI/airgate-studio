@@ -7,9 +7,13 @@ import {
   VIDEO_RATIOS,
   SEEDANCE25_DURATIONS,
   SEEDANCE25_RATIOS,
+  SEEDANCE20_VIDEO_DEFAULTS,
+  SEEDANCE25_VIDEO_DEFAULTS,
   VIDEO_STRINGS,
   videoGroupsForModel,
+  videoDefaultsForModel,
   videoModelById,
+  normalizeVideoSettingsForModel,
 } from './videoConfig';
 
 function group(id: number, name: string): ImageGroup {
@@ -68,6 +72,26 @@ describe('videoConfig', () => {
 
   it('未知模型回退到第一个注册模型', () => {
     expect(videoModelById('nope').id).toBe(VIDEO_MODEL_REGISTRY[0].id);
+  });
+
+  it('切换到 SD2.5 时使用网关文档的默认参数', () => {
+    expect(videoDefaultsForModel(VIDEO_MODEL_IDS.seedance25EP)).toEqual(SEEDANCE25_VIDEO_DEFAULTS);
+    expect(normalizeVideoSettingsForModel(VIDEO_MODEL_IDS.seedance25EP, {
+      duration: 30,
+      resolution: '480p',
+      ratio: '21:9',
+    })).toEqual(SEEDANCE25_VIDEO_DEFAULTS);
+  });
+
+  it('从 SD2.5 切回每个 2.0 模型时移除 2.5 专有参数', () => {
+    const sd25Settings = videoDefaultsForModel(VIDEO_MODEL_IDS.seedance25EP);
+    for (const model of VIDEO_MODEL_REGISTRY.filter(item => item.id !== VIDEO_MODEL_IDS.seedance25EP)) {
+      const normalized = normalizeVideoSettingsForModel(model.id, sd25Settings);
+      expect(normalized).toEqual(SEEDANCE20_VIDEO_DEFAULTS);
+      expect(VIDEO_DURATIONS).toContain(normalized.duration);
+      expect(model.resolutions).toContain(normalized.resolution);
+      expect(VIDEO_RATIOS).toContain(normalized.ratio);
+    }
   });
 
   it('保留 2.0 预设并为 SD2.5 提供独立完整矩阵', () => {
