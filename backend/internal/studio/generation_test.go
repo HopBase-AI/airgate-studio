@@ -287,6 +287,12 @@ func TestBuildGenerationTaskResponseReturnsKindAndDuration(t *testing.T) {
 	if got := resp["project_id"]; got != int64(42) {
 		t.Fatalf("project_id = %v (%T), want 42", got, got)
 	}
+	autoDuration := buildGenerationTaskResponse(&hostTask{
+		Input: map[string]interface{}{"duration": float64(-1)},
+	})
+	if got := autoDuration["duration"]; got != -1 {
+		t.Fatalf("automatic duration = %v (%T), want -1", got, got)
+	}
 
 	image := &hostTask{
 		ID:     22,

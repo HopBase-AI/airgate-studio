@@ -11,10 +11,12 @@ import {
   SEEDANCE20_VIDEO_DEFAULTS,
   SEEDANCE25_VIDEO_DEFAULTS,
   VIDEO_STRINGS,
+  canonicalVideoModelId,
   videoGroupsForModel,
   videoDefaultsForModel,
   videoModelById,
   normalizeVideoSettingsForModel,
+  normalizeVideoSubmissionSettingsForModel,
 } from './videoConfig';
 
 function group(id: number, name: string): ImageGroup {
@@ -78,6 +80,11 @@ describe('videoConfig', () => {
     expect(videoModelById('nope').id).toBe(VIDEO_MODEL_REGISTRY[0].id);
   });
 
+  it('历史 SD2.5 别名在注册表查找前归一化为官方 ID', () => {
+    expect(canonicalVideoModelId(LEGACY_SEEDANCE25_MODEL_ID)).toBe(VIDEO_MODEL_IDS.seedance25);
+    expect(videoModelById(LEGACY_SEEDANCE25_MODEL_ID).id).toBe(VIDEO_MODEL_IDS.seedance25);
+  });
+
   it('切换到 SD2.5 时使用网关文档的默认参数', () => {
     expect(videoDefaultsForModel(VIDEO_MODEL_IDS.seedance25EP)).toEqual(SEEDANCE25_VIDEO_DEFAULTS);
     expect(normalizeVideoSettingsForModel(VIDEO_MODEL_IDS.seedance25EP, {
@@ -96,6 +103,30 @@ describe('videoConfig', () => {
       expect(model.resolutions).toContain(normalized.resolution);
       expect(VIDEO_RATIOS).toContain(normalized.ratio);
     }
+  });
+
+  it('提交历史 2.0 路由时收敛当前 SD2.5 的越界参数', () => {
+    expect(normalizeVideoSubmissionSettingsForModel(VIDEO_MODEL_IDS.fastOverseas, {
+      duration: 30,
+      resolution: '1080p',
+      ratio: 'adaptive',
+    })).toEqual({
+      duration: 4,
+      resolution: '720p',
+      ratio: '16:9',
+    });
+  });
+
+  it('提交当前 SD2.5 路由时保留合法的 30 秒与宽画幅', () => {
+    expect(normalizeVideoSubmissionSettingsForModel(VIDEO_MODEL_IDS.seedance25, {
+      duration: 30,
+      resolution: '480p',
+      ratio: '21:9',
+    })).toEqual({
+      duration: 30,
+      resolution: '480p',
+      ratio: '21:9',
+    });
   });
 
   it('保留 2.0 预设并为 SD2.5 提供独立完整矩阵', () => {

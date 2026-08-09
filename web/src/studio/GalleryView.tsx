@@ -291,7 +291,11 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
     if (task.mode === 'video') {
       setMediaType('video');
       if (retryRoute) setVideoModelId(retryRoute.model);
-      if (generateVideo(task.prompt, { route: retryRoute, projectId: task.projectId })) {
+      if (generateVideo(task.prompt, {
+        route: retryRoute,
+        projectId: task.projectId,
+        durationSeconds: task.durationSeconds,
+      })) {
         void deleteTask(task.id).catch(() => {});
       }
       return;

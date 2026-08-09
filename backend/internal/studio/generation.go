@@ -478,7 +478,7 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 		resp["project_id"] = projectID
 	}
 	if v, ok := task.Input["duration"]; ok {
-		if d, ok2 := toInt(v); ok2 && d > 0 {
+		if d, ok2 := toInt(v); ok2 && (d > 0 || d == -1) {
 			resp["duration"] = d
 		}
 	}

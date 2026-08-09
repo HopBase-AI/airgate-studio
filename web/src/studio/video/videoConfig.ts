@@ -18,6 +18,12 @@ export const VIDEO_MODEL_IDS = {
 /** Legacy input accepted by the backend, never emitted by the Studio UI. */
 export const LEGACY_SEEDANCE25_MODEL_ID = 'dreamina-seedance-2-5-ep';
 
+export function canonicalVideoModelId(id: string): string {
+  return id.trim().toLowerCase() === LEGACY_SEEDANCE25_MODEL_ID
+    ? VIDEO_MODEL_IDS.seedance25
+    : id.trim();
+}
+
 export type VideoModelRegion = 'overseas' | 'domestic';
 
 export interface VideoModelConfig {
@@ -98,7 +104,8 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
 ];
 
 export function videoModelById(id: string): VideoModelConfig {
-  return VIDEO_MODEL_REGISTRY.find(m => m.id === id) ?? VIDEO_MODEL_REGISTRY[0];
+  const canonicalID = canonicalVideoModelId(id);
+  return VIDEO_MODEL_REGISTRY.find(m => m.id === canonicalID) ?? VIDEO_MODEL_REGISTRY[0];
 }
 
 export function videoDefaultsForModel(id: string): VideoGenerationSettings {
@@ -128,6 +135,23 @@ export function normalizeVideoSettingsForModel(
   };
 }
 
+// Historical retry routes can target a different model than the composer.
+// Preserve compatible values and replace out-of-contract values before send.
+export function normalizeVideoSubmissionSettingsForModel(
+  id: string,
+  settings: VideoGenerationSettings,
+): VideoGenerationSettings {
+  const model = videoModelById(id);
+  const defaults = videoDefaultsForModel(model.id);
+  const durations: readonly number[] = model.durationOptions ?? VIDEO_DURATIONS;
+  const ratios: readonly string[] = model.ratioOptions ?? VIDEO_RATIOS;
+  return {
+    duration: durations.includes(settings.duration) ? settings.duration : defaults.duration,
+    resolution: model.resolutions.includes(settings.resolution) ? settings.resolution : defaults.resolution,
+    ratio: ratios.includes(settings.ratio) ? settings.ratio : defaults.ratio,
+  };
+}
+
 export type VideoGroupsByModel = Record<string, ImageGroup[]>;
 
 // 国内分组为了兼容既有 API 客户，也会声明支持海外标准模型别名。工作台的
@@ -137,8 +161,9 @@ export function videoGroupsForModel(
   modelId: string,
   groupsByModel: VideoGroupsByModel,
 ): ImageGroup[] {
-  const groups = groupsByModel[modelId] ?? [];
-  const model = VIDEO_MODEL_REGISTRY.find(item => item.id === modelId);
+  const canonicalID = canonicalVideoModelId(modelId);
+  const groups = groupsByModel[canonicalID] ?? [];
+  const model = VIDEO_MODEL_REGISTRY.find(item => item.id === canonicalID);
   if (!model || model.region === 'domestic') return groups;
 
   const domesticGroupIds = new Set(
