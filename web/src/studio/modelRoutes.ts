@@ -88,6 +88,31 @@ function imageGroupDisplayName(group: ImageGroup): string {
   return group.name.trim() || `Group ${group.id}`;
 }
 
+// ── Route label localization ────────────────────────────────────────────────
+// Group/model display names come straight from backend data (formatModelRouteGroupLabel,
+// imageGroupDisplayName, video group names) and routinely carry Chinese tokens like
+// “官方直连/海外/国内”. Keep the data-layer helpers above pure and returning the raw
+// token — zh/zh-HK UIs must keep showing the original Chinese wording unchanged — and
+// only localize known tokens here, at the render layer, where the caller already has a
+// `t` function and the active UI language.
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+const ROUTE_TOKEN_REPLACEMENTS: ReadonlyArray<{ token: string; key: string; defaultValue: string }> = [
+  { token: '官方直连', key: 'playground.studio_route_official', defaultValue: 'Official' },
+  { token: '海外', key: 'playground.studio_route_overseas', defaultValue: 'Global' },
+  { token: '国内', key: 'playground.studio_route_domestic', defaultValue: 'CN' },
+];
+
+export function localizeRouteLabel(label: string, t: Translate, lang: string): string {
+  if ((lang || '').trim().toLowerCase().startsWith('zh')) return label;
+
+  return ROUTE_TOKEN_REPLACEMENTS.reduce(
+    (acc, { token, key, defaultValue }) =>
+      acc.includes(token) ? acc.split(token).join(t(key, { defaultValue })) : acc,
+    label,
+  );
+}
+
 function routeLabelRepeatsModel(modelName: string, channel: string): boolean {
   const normalize = (value: string) => value
     .toLowerCase()

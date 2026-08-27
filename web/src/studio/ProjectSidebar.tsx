@@ -3,6 +3,19 @@ import { useTranslation } from 'react-i18next';
 import { cssVar, getStoredTheme, setTheme, type ThemeName } from '@doudou-start/airgate-theme';
 import { useStudio } from './StudioContext';
 
+// 后端默认项目名硬编码简体中文（backend/internal/studio/service.go
+// defaultProjectName）。这里只做展示层映射，不改数据：非中文界面把该字面量
+// 换成本地化文案；重命名输入框仍回填原始 name，避免把翻译后的文本误存回库。
+const UNTITLED_PROJECT_NAME = '未命名项目';
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+export function displayProjectName(name: string, t: Translate): string {
+  return name === UNTITLED_PROJECT_NAME
+    ? t('playground.studio_untitled_project', { defaultValue: 'Untitled project' })
+    : name;
+}
+
 const s: Record<string, CSSProperties> = {
   sidebar: {
     height: '100%',
@@ -240,7 +253,7 @@ export function ProjectSidebar() {
   };
 
   const handleDelete = async (id: number, name: string) => {
-    const ok = window.confirm(t('playground.studio_project_delete_confirm', { name }));
+    const ok = window.confirm(t('playground.studio_project_delete_confirm', { name: displayProjectName(name, t) }));
     if (!ok) return;
     try { await deleteProject(id); } catch { /* ignore */ }
   };
@@ -295,7 +308,7 @@ export function ProjectSidebar() {
                 />
               ) : (
                 <>
-                  <span style={s.itemName}>{p.name}</span>
+                  <span style={s.itemName}>{displayProjectName(p.name, t)}</span>
                   {active && (
                     <>
                       <button

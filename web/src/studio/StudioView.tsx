@@ -7,7 +7,7 @@ import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
-import { buildModelRouteOptions, modelRouteOptionValue, parseModelRouteOptionValue } from './modelRoutes';
+import { buildModelRouteOptions, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue } from './modelRoutes';
 import { commitComposerSend, isComposerSubmitKey } from './composerSend';
 import { videoModelById, useVideoStrings } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
@@ -984,7 +984,7 @@ const COUNT_OPTIONS = [1, 2, 3, 4];
 const COMPOSER_TEXTAREA_HEIGHT = 112;
 
 function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.MutableRefObject<{ set: (v: string) => void } | null>; onOpenInspiration?: () => void }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const vs = useVideoStrings();
   const {
     mediaType, setMediaType,
@@ -1059,8 +1059,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     return filtered;
   }, [baseModelOptions, hasImageGroupsForModel, imageGroupsLoaded]);
   const modelRouteOptions = useMemo(
-    () => buildModelRouteOptions(modelOptions, getImageGroupsForModel),
-    [getImageGroupsForModel, modelOptions],
+    () => buildModelRouteOptions(modelOptions, getImageGroupsForModel)
+      .map(option => ({ ...option, label: localizeRouteLabel(option.label, t, i18n.language) })),
+    [getImageGroupsForModel, modelOptions, t, i18n.language],
   );
   const selectedModelRouteValue = selectedGroupId != null
     ? modelRouteOptionValue(selectedModelKey, selectedGroupId)
@@ -1396,7 +1397,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                 <div style={c.videoOption}>
                   <CustomSelect
                     value={selectedVideoGroupId != null ? String(selectedVideoGroupId) : ''}
-                    options={videoGroups.map(g => ({ value: String(g.id), label: g.name }))}
+                    options={videoGroups.map(g => ({ value: String(g.id), label: localizeRouteLabel(g.name, t, i18n.language) }))}
                     onChange={v => setSelectedVideoGroupId(Number(v))}
                     compact
                   />

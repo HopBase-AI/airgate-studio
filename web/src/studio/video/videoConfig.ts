@@ -309,6 +309,39 @@ export const VIDEO_STRINGS = {
     expired_hint: '上游連結僅 24 小時有效，可重新生成獲取新影片',
     load_failed: '影片載入失敗，連結可能已失效',
   },
+  es: {
+    media_image: 'Imagen',
+    media_video: 'Video',
+    gallery_load_more: 'Cargar más',
+    gallery_empty_image: 'Sin obras de imagen',
+    gallery_empty_video: 'Sin obras de video',
+    model_standard_overseas: 'Seedance 2.0 Estándar (internacional)',
+    model_sd25_ep: 'Seedance 2.5 EP (internacional)',
+    model_standard_domestic: 'Seedance 2.0 Estándar (China)',
+    model_fast_overseas: 'Seedance 2.0 Rápido (internacional)',
+    model_mini_overseas: 'Seedance 2.0 Mini (internacional)',
+    duration: 'Duración',
+    duration_seconds: 's',
+    resolution: 'Resolución',
+    ratio: 'Proporción',
+    duration_auto: 'Automático',
+    audio: 'Audio',
+    watermark: 'Marca de agua',
+    return_last_frame: 'Devolver el último fotograma',
+    video_placeholder: 'Describa el video que desea crear; puede adjuntar imágenes de referencia…',
+    generating: 'Generando video (aprox. 2-10 min)…',
+    no_result: 'La tarea se completó pero no devolvió ningún video',
+    no_group: 'No hay ningún grupo de generación de video disponible. Contacte al administrador.',
+    download: 'Descargar video',
+    preview_video: 'Vista previa del video',
+    source_link: 'Enlace de origen',
+    copy_source_link: 'Copiar enlace de origen',
+    source_copied: 'Enlace de origen copiado',
+    expire_hint: 'Los enlaces de video son válidos por 24 horas; descárguelos a tiempo.',
+    expired_title: 'El enlace del video ha caducado',
+    expired_hint: 'Los enlaces upstream solo son válidos por 24 horas; puede regenerar el video para obtener uno nuevo.',
+    load_failed: 'No se pudo cargar el video; el enlace podría haber caducado.',
+  },
 } as const;
 
 export type VideoStringKey = keyof typeof VIDEO_STRINGS['zh'];
@@ -321,6 +354,8 @@ export function useVideoStrings(): (key: VideoStringKey) => string {
     ? (lang.includes('hk') || lang.includes('hant') || lang.includes('tw') ? VIDEO_STRINGS['zh-HK'] : VIDEO_STRINGS.zh)
     : lang.startsWith('ja')
       ? VIDEO_STRINGS.ja
-      : VIDEO_STRINGS.en;
+      : lang.startsWith('es')
+        ? VIDEO_STRINGS.es
+        : VIDEO_STRINGS.en;
   return (key: VideoStringKey) => dict[key] ?? VIDEO_STRINGS.en[key] ?? VIDEO_STRINGS.zh[key];
 }

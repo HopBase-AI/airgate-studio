@@ -217,7 +217,9 @@ export function BatchPanel() {
             rows={5}
           />
           <div style={ss.formHint}>
-            {promptLines.length > 0 ? `共 ${promptLines.length} 个提示词` : t('playground.studio_batch_empty')}
+            {promptLines.length > 0
+              ? t('playground.studio_batch_prompt_count', { count: promptLines.length, defaultValue: '{{count}} prompts' })
+              : t('playground.studio_batch_empty')}
           </div>
         </div>
       ) : (
