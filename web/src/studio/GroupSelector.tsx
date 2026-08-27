@@ -1,20 +1,20 @@
 import { useTranslation } from 'react-i18next';
 import { useStudio } from './StudioContext';
 import { CustomSelect } from './CustomSelect';
-import { formatImageGroupLabel } from './modelRoutes';
+import { formatImageGroupLabel, localizeRouteLabel } from './modelRoutes';
 import { studioStyles as ss } from './studioStyles';
 
 // 计费分组（通道）选择器：让用户在同平台的不同倍率分组间自选（高质量/低价等）。
 // 只有一个可选分组时不渲染——没有选择余地，交给默认行为即可。
 export function GroupSelector() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { imageGroups, selectedGroupId, setSelectedGroupId } = useStudio();
 
   if (imageGroups.length <= 1) return null;
 
   const options = imageGroups.map(g => ({
     value: String(g.id),
-    label: formatImageGroupLabel(g),
+    label: localizeRouteLabel(formatImageGroupLabel(g), t, i18n.language),
     description: g.note?.trim() || undefined,
   }));
 

@@ -10,9 +10,12 @@ const seedreamSizes: SizeOption[] = [
 ];
 
 describe('SizeSelector pricing', () => {
+  // No i18next instance is initialized in this test environment, so
+  // useTranslation() falls back to the en defaultValue supplied at each
+  // call site — see playground.studio_price_per_image, defaultValue '/image'.
   it.each([
-    ['1024x1024', '$0.045/张'],
-    ['2048x2048', '$0.09/张'],
+    ['1024x1024', '$0.045/image'],
+    ['2048x2048', '$0.09/image'],
   ])('renders the selected Seedream price for %s', (value, expectedPrice) => {
     const html = renderToStaticMarkup(
       <SizeSelector value={value} sizes={seedreamSizes} onChange={() => undefined} />,
@@ -30,7 +33,7 @@ describe('SizeSelector pricing', () => {
       />,
     );
 
-    expect(html).not.toContain('$0.1/张');
+    expect(html).not.toContain('$0.1/image');
   });
 
   it('uses the fixed-price currency supplied by the selected group', () => {
@@ -42,6 +45,6 @@ describe('SizeSelector pricing', () => {
       />,
     );
 
-    expect(html).toContain('¥0.08/张');
+    expect(html).toContain('¥0.08/image');
   });
 });

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
 import type { SizeOption } from './modelConfig';
 
@@ -156,6 +157,8 @@ const sizeHoverCSS = `
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSelectorProps) {
+  const { t } = useTranslation();
+  const priceUnit = t('playground.studio_price_per_image', { defaultValue: '/image' });
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -234,7 +237,7 @@ export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSe
           {triggerLabel}
         </span>
         {selected?.showPrice && (
-          <span style={s.price}>{imagePriceSymbol(selected.currency)}{formatImagePrice(selected.price)}/张</span>
+          <span style={s.price}>{imagePriceSymbol(selected.currency)}{formatImagePrice(selected.price)}{priceUnit}</span>
         )}
         <svg
           width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -279,7 +282,7 @@ export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSe
                     {(opt.aspect || opt.showPrice) && (
                       <span style={s.optionMeta}>
                         {opt.aspect && <span style={s.optionAspect}>{opt.aspect}</span>}
-                        {opt.showPrice && <span style={s.price}>{imagePriceSymbol(opt.currency)}{formatImagePrice(opt.price)}/张</span>}
+                        {opt.showPrice && <span style={s.price}>{imagePriceSymbol(opt.currency)}{formatImagePrice(opt.price)}{priceUnit}</span>}
                       </span>
                     )}
                   </button>

@@ -139,9 +139,9 @@ describe('videoConfig', () => {
     expect(SEEDANCE25_RATIOS).toEqual(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive']);
   });
 
-  it('四语文案键完全对齐（防漏翻）', () => {
+  it('五语文案键完全对齐（防漏翻）', () => {
     const zhKeys = Object.keys(VIDEO_STRINGS.zh).sort();
-    for (const lang of ['en', 'ja', 'zh-HK'] as const) {
+    for (const lang of ['en', 'ja', 'zh-HK', 'es'] as const) {
       expect(Object.keys(VIDEO_STRINGS[lang]).sort()).toEqual(zhKeys);
     }
   });
@@ -154,7 +154,7 @@ describe('videoConfig', () => {
   });
 
   it('过期文案与上游 24h 签名口径一致(防回归 30 天)', () => {
-    for (const lang of ['zh', 'en', 'ja', 'zh-HK'] as const) {
+    for (const lang of ['zh', 'en', 'ja', 'zh-HK', 'es'] as const) {
       expect(VIDEO_STRINGS[lang].expire_hint).toContain('24');
       expect(VIDEO_STRINGS[lang].expire_hint).not.toContain('30');
       expect(VIDEO_STRINGS[lang].expired_title).toBeTruthy();
