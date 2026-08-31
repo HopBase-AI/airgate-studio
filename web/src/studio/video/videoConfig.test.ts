@@ -125,6 +125,27 @@ describe('videoConfig', () => {
     }
   });
 
+  it('跨平台切换按大小写不敏感匹配分辨率并采用目标写法', () => {
+    expect(normalizeVideoSettingsForModel(VIDEO_MODEL_IDS.klingV3, {
+      duration: 5, resolution: '1080P', ratio: '16:9',
+    }).resolution).toBe('1080p');
+    expect(normalizeVideoSettingsForModel(VIDEO_MODEL_IDS.wan30, {
+      duration: 5, resolution: '1080p', ratio: '16:9',
+    }).resolution).toBe('1080P');
+  });
+
+  it('grok 挂 seedance 平台但不参与国内互斥过滤', () => {
+    const shared = group(39, 'Grok 视频');
+    const domestic = group(26, 'Seedance 2.0 国内');
+    const groupsByModel = {
+      [VIDEO_MODEL_IDS.grokVideo15]: [shared, domestic],
+      [VIDEO_MODEL_IDS.standardDomestic]: [domestic],
+    };
+    // 即使某组同时可调度国内 doubao,grok 的分组集合也原样返回。
+    expect(videoGroupsForModel(VIDEO_MODEL_IDS.grokVideo15, groupsByModel))
+      .toEqual([shared, domestic]);
+  });
+
   it('从 Seedance 切到 MiniMax 时越界参数收敛到 MiniMax 默认档', () => {
     expect(normalizeVideoSettingsForModel(VIDEO_MODEL_IDS.minimaxH3, {
       duration: -1,

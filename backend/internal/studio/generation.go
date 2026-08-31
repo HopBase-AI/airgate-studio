@@ -224,7 +224,10 @@ var fleetVideoSpecs = map[string]struct {
 }
 
 func validateFleetVideoParams(model string, params map[string]interface{}) error {
-	spec := fleetVideoSpecs[strings.ToLower(strings.TrimSpace(model))]
+	spec, ok := fleetVideoSpecs[strings.ToLower(strings.TrimSpace(model))]
+	if !ok {
+		return fmt.Errorf("模型 %s 不在视频参数目录内", model)
+	}
 	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
 		normalized := strings.ToLower(strings.TrimSpace(res))
 		if _, allowed := spec.resolutions[normalized]; !allowed {

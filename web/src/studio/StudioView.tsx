@@ -1401,7 +1401,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                 <div style={c.videoOption}>
                   <CustomSelect
                     value={selectedVideoGroupId != null ? String(selectedVideoGroupId) : ''}
-                    options={videoGroups.map(g => ({ value: String(g.id), label: localizeRouteLabel(sanitizeVendorTokens(g.name), t, i18n.language) }))}
+                    options={videoGroups.map(g => ({ value: String(g.id), label: localizeRouteLabel(sanitizeVendorTokens(g.name) || `Group ${g.id}`, t, i18n.language) }))}
                     onChange={v => setSelectedVideoGroupId(Number(v))}
                     compact
                   />

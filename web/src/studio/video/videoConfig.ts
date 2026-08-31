@@ -301,9 +301,16 @@ export function normalizeVideoSettingsForModel(
   const ratios: readonly string[] = model.ratioOptions ?? VIDEO_RATIOS;
   return {
     duration: durations.includes(settings.duration) ? settings.duration : defaults.duration,
-    resolution: model.resolutions.includes(settings.resolution) ? settings.resolution : defaults.resolution,
+    resolution: matchResolution(model.resolutions, settings.resolution) ?? defaults.resolution,
     ratio: ratios.includes(settings.ratio) ? settings.ratio : defaults.ratio,
   };
+}
+
+// 分辨率大小写按平台各异（'720P' vs '720p'）。跨模型切换按大小写不敏感匹配，
+// 命中则采用目标模型的官方写法，避免等价档位被静默重置成默认档。
+function matchResolution(resolutions: readonly string[], value: string): string | undefined {
+  const normalized = value.trim().toLowerCase();
+  return resolutions.find(r => r.toLowerCase() === normalized);
 }
 
 // Historical retry routes can target a different model than the composer.
@@ -318,7 +325,7 @@ export function normalizeVideoSubmissionSettingsForModel(
   const ratios: readonly string[] = model.ratioOptions ?? VIDEO_RATIOS;
   return {
     duration: durations.includes(settings.duration) ? settings.duration : defaults.duration,
-    resolution: model.resolutions.includes(settings.resolution) ? settings.resolution : defaults.resolution,
+    resolution: matchResolution(model.resolutions, settings.resolution) ?? defaults.resolution,
     ratio: ratios.includes(settings.ratio) ? settings.ratio : defaults.ratio,
   };
 }
@@ -335,9 +342,10 @@ export function videoGroupsForModel(
   const canonicalID = canonicalVideoModelId(modelId);
   const groups = groupsByModel[canonicalID] ?? [];
   const model = VIDEO_MODEL_REGISTRY.find(item => item.id === canonicalID);
-  // 海外/国内互斥只存在于 seedance（国内组会声明海外兼容别名）；
-  // 其他平台的分组集合原样返回。
-  if (!model || model.platform !== 'seedance' || model.region === 'domestic') return groups;
+  // 海外/国内互斥只存在于 seedance 的 dreamina 系（国内组会声明海外兼容别名）；
+  // 其他平台以及同挂 seedance 平台的 grok 按秒档原样返回，不参与互斥过滤。
+  if (!model || model.platform !== 'seedance' || model.region === 'domestic'
+    || !model.id.startsWith('dreamina')) return groups;
 
   const domesticGroupIds = new Set(
     (groupsByModel[VIDEO_MODEL_IDS.standardDomestic] ?? []).map(group => group.id),
