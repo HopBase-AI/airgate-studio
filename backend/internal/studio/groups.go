@@ -153,6 +153,11 @@ func displayPlatformName(platform string) string {
 	case "minimax":
 		// 工作台不暴露上游厂商名,统一用产品名「海螺」。
 		return "Hailuo"
+	case "bailian":
+		// 同上:不暴露「百炼/阿里云」,用产品名。
+		return "万相/快乐马"
+	case "kling":
+		return "可灵"
 	default:
 		return strings.TrimSpace(platform)
 	}

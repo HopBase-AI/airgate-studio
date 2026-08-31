@@ -15,6 +15,12 @@ export const VIDEO_MODEL_IDS = {
   miniOverseas: 'dreamina-seedance-2-0-mini-hc',
   minimaxH3: 'MiniMax-H3',
   minimaxH3Max: 'MiniMax-H3-Max',
+  grokVideo15: 'grok-imagine-video-1.5',
+  wan30: 'wan3.0-video',
+  happyhorseT2V: 'happyhorse-1.1-t2v',
+  happyhorseI2V: 'happyhorse-1.1-i2v',
+  klingV3: 'kling-v3',
+  klingV26: 'kling-v2-6',
 } as const;
 
 /** Legacy input accepted by the backend, never emitted by the Studio UI. */
@@ -27,7 +33,7 @@ export function canonicalVideoModelId(id: string): string {
 }
 
 export type VideoModelRegion = 'overseas' | 'domestic';
-export type VideoModelPlatform = 'seedance' | 'minimax';
+export type VideoModelPlatform = 'seedance' | 'minimax' | 'bailian' | 'kling';
 
 export interface VideoModelConfig {
   id: string;
@@ -39,10 +45,13 @@ export interface VideoModelConfig {
   resolutions: string[];
   durationOptions?: readonly number[];
   ratioOptions?: readonly string[];
-  // MiniMax 契约没有 generate_audio / return_last_frame 开关；
-  // watermark 语义为 aigc_watermark。
+  // 各平台参数域不同：flags 缺省(undefined)视为支持(seedance 全家桶默认)。
+  // MiniMax 契约没有 generate_audio / return_last_frame 开关；watermark 语义
+  // 为 aigc_watermark。grok/可灵没有 watermark；快乐马 i2v 比例随首帧图。
   supportsAudio?: boolean;
   supportsReturnLastFrame?: boolean;
+  supportsWatermark?: boolean;
+  supportsRatio?: boolean;
 }
 
 // Seedance 2.0's existing Studio presets. Keep these as the fallback for
@@ -63,6 +72,22 @@ export const SEEDANCE25_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', '
 export const MINIMAX_H3_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 export const MINIMAX_H3MAX_DURATIONS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 export const MINIMAX_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'] as const;
+
+// grok（platform=seedance 按秒计费档）：1~15 秒整数、无 -1；画幅白名单多
+// 3:2/2:3、无 21:9/adaptive（插件把 ratio 映射为 aspect_ratio）。
+export const GROK_DURATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+export const GROK_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'] as const;
+
+// 万相 3.0：2~30 秒 + -1 自动；快乐马 1.1：3~15 秒。
+export const WAN30_DURATIONS = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, -1] as const;
+export const WAN30_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'] as const;
+export const HAPPYHORSE_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+export const HAPPYHORSE_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '4:5', '5:4', '9:21', '21:9'] as const;
+
+// 可灵：分辨率合法集合由插件价格表 fail-closed，这里对齐已定价的桶。
+export const KLING_V3_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+export const KLING_V26_DURATIONS = [5, 6, 7, 8, 9, 10] as const;
+export const KLING_RATIOS = ['16:9', '9:16', '1:1'] as const;
 
 export interface VideoGenerationSettings {
   duration: number;
@@ -88,6 +113,18 @@ export const SEEDANCE25_VIDEO_DEFAULTS: VideoGenerationSettings = {
 export const MINIMAX_VIDEO_DEFAULTS: VideoGenerationSettings = {
   duration: 5,
   resolution: '768P',
+  ratio: '16:9',
+};
+
+export const BAILIAN_VIDEO_DEFAULTS: VideoGenerationSettings = {
+  duration: 5,
+  resolution: '720P',
+  ratio: '16:9',
+};
+
+export const KLING_VIDEO_DEFAULTS: VideoGenerationSettings = {
+  duration: 5,
+  resolution: '720p',
   ratio: '16:9',
 };
 
@@ -151,6 +188,76 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
     supportsAudio: false,
     supportsReturnLastFrame: false,
   },
+  {
+    id: VIDEO_MODEL_IDS.grokVideo15,
+    nameKey: 'model_grok_video15',
+    platform: 'seedance',
+    region: 'overseas',
+    resolutions: ['480p', '720p', '1080p'],
+    durationOptions: GROK_DURATIONS,
+    ratioOptions: GROK_RATIOS,
+    supportsAudio: false,
+    supportsReturnLastFrame: false,
+    supportsWatermark: false,
+  },
+  {
+    id: VIDEO_MODEL_IDS.wan30,
+    nameKey: 'model_wan30',
+    platform: 'bailian',
+    region: 'domestic',
+    resolutions: ['480P', '720P', '1080P'],
+    durationOptions: WAN30_DURATIONS,
+    ratioOptions: WAN30_RATIOS,
+    supportsReturnLastFrame: false,
+  },
+  {
+    id: VIDEO_MODEL_IDS.happyhorseT2V,
+    nameKey: 'model_happyhorse_t2v',
+    platform: 'bailian',
+    region: 'domestic',
+    resolutions: ['480P', '720P', '1080P'],
+    durationOptions: HAPPYHORSE_DURATIONS,
+    ratioOptions: HAPPYHORSE_RATIOS,
+    supportsAudio: false,
+    supportsReturnLastFrame: false,
+    supportsWatermark: false,
+  },
+  {
+    id: VIDEO_MODEL_IDS.happyhorseI2V,
+    nameKey: 'model_happyhorse_i2v',
+    platform: 'bailian',
+    region: 'domestic',
+    resolutions: ['480P', '720P', '1080P'],
+    durationOptions: HAPPYHORSE_DURATIONS,
+    supportsAudio: false,
+    supportsReturnLastFrame: false,
+    supportsWatermark: false,
+    supportsRatio: false,
+  },
+  {
+    id: VIDEO_MODEL_IDS.klingV3,
+    nameKey: 'model_kling_v3',
+    platform: 'kling',
+    region: 'domestic',
+    resolutions: ['720p', '1080p', '2k', '4k'],
+    durationOptions: KLING_V3_DURATIONS,
+    ratioOptions: KLING_RATIOS,
+    supportsReturnLastFrame: false,
+    supportsWatermark: false,
+  },
+  {
+    // v2.6 720p 有声档官方未定价，为避免踩 fail-closed 一律无声提交。
+    id: VIDEO_MODEL_IDS.klingV26,
+    nameKey: 'model_kling_v26',
+    platform: 'kling',
+    region: 'domestic',
+    resolutions: ['720p', '1080p', '2k', '4k'],
+    durationOptions: KLING_V26_DURATIONS,
+    ratioOptions: KLING_RATIOS,
+    supportsAudio: false,
+    supportsReturnLastFrame: false,
+    supportsWatermark: false,
+  },
 ];
 
 export function videoModelById(id: string): VideoModelConfig {
@@ -160,11 +267,22 @@ export function videoModelById(id: string): VideoModelConfig {
 
 export function videoDefaultsForModel(id: string): VideoGenerationSettings {
   const model = videoModelById(id);
-  const defaults = model.platform === 'minimax'
-    ? MINIMAX_VIDEO_DEFAULTS
-    : model.id === VIDEO_MODEL_IDS.seedance25
-      ? SEEDANCE25_VIDEO_DEFAULTS
-      : SEEDANCE20_VIDEO_DEFAULTS;
+  let defaults: VideoGenerationSettings;
+  switch (model.platform) {
+    case 'minimax':
+      defaults = MINIMAX_VIDEO_DEFAULTS;
+      break;
+    case 'bailian':
+      defaults = BAILIAN_VIDEO_DEFAULTS;
+      break;
+    case 'kling':
+      defaults = KLING_VIDEO_DEFAULTS;
+      break;
+    default:
+      defaults = model.id === VIDEO_MODEL_IDS.seedance25
+        ? SEEDANCE25_VIDEO_DEFAULTS
+        : SEEDANCE20_VIDEO_DEFAULTS;
+  }
   return { ...defaults };
 }
 
@@ -245,6 +363,12 @@ export const VIDEO_STRINGS = {
     model_mini_overseas: 'Seedance 2.0 迷你（海外）',
     model_minimax_h3: '海螺 H3',
     model_minimax_h3_max: '海螺 H3 Max（极速）',
+    model_grok_video15: 'Grok Imagine 1.5',
+    model_wan30: '万相 3.0',
+    model_happyhorse_t2v: '快乐马 1.1 文生',
+    model_happyhorse_i2v: '快乐马 1.1 图生（首帧）',
+    model_kling_v3: '可灵 v3',
+    model_kling_v26: '可灵 v2.6',
     duration: '时长',
     duration_seconds: '秒',
     resolution: '分辨率',
@@ -280,6 +404,12 @@ export const VIDEO_STRINGS = {
     model_mini_overseas: 'Seedance 2.0 Mini (Overseas)',
     model_minimax_h3: 'Hailuo H3',
     model_minimax_h3_max: 'Hailuo H3 Max (Fast)',
+    model_grok_video15: 'Grok Imagine 1.5',
+    model_wan30: 'Wan 3.0',
+    model_happyhorse_t2v: 'HappyHorse 1.1 (Text)',
+    model_happyhorse_i2v: 'HappyHorse 1.1 (Image)',
+    model_kling_v3: 'Kling v3',
+    model_kling_v26: 'Kling v2.6',
     duration: 'Duration',
     duration_seconds: 's',
     resolution: 'Resolution',
@@ -315,6 +445,12 @@ export const VIDEO_STRINGS = {
     model_mini_overseas: 'Seedance 2.0 ミニ（海外）',
     model_minimax_h3: 'Hailuo H3',
     model_minimax_h3_max: 'Hailuo H3 Max（高速）',
+    model_grok_video15: 'Grok Imagine 1.5',
+    model_wan30: 'Wan 3.0（万相）',
+    model_happyhorse_t2v: 'HappyHorse 1.1（テキスト）',
+    model_happyhorse_i2v: 'HappyHorse 1.1（画像）',
+    model_kling_v3: 'Kling v3',
+    model_kling_v26: 'Kling v2.6',
     duration: '長さ',
     duration_seconds: '秒',
     resolution: '解像度',
@@ -350,6 +486,12 @@ export const VIDEO_STRINGS = {
     model_mini_overseas: 'Seedance 2.0 迷你（海外）',
     model_minimax_h3: '海螺 H3',
     model_minimax_h3_max: '海螺 H3 Max（極速）',
+    model_grok_video15: 'Grok Imagine 1.5',
+    model_wan30: '萬相 3.0',
+    model_happyhorse_t2v: '快樂馬 1.1 文生',
+    model_happyhorse_i2v: '快樂馬 1.1 圖生（首幀）',
+    model_kling_v3: '可靈 v3',
+    model_kling_v26: '可靈 v2.6',
     duration: '時長',
     duration_seconds: '秒',
     resolution: '解像度',
@@ -385,6 +527,12 @@ export const VIDEO_STRINGS = {
     model_mini_overseas: 'Seedance 2.0 Mini (internacional)',
     model_minimax_h3: 'Hailuo H3',
     model_minimax_h3_max: 'Hailuo H3 Max (rápido)',
+    model_grok_video15: 'Grok Imagine 1.5',
+    model_wan30: 'Wan 3.0',
+    model_happyhorse_t2v: 'HappyHorse 1.1 (texto)',
+    model_happyhorse_i2v: 'HappyHorse 1.1 (imagen)',
+    model_kling_v3: 'Kling v3',
+    model_kling_v26: 'Kling v2.6',
     duration: 'Duración',
     duration_seconds: 's',
     resolution: 'Resolución',

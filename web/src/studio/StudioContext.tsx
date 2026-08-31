@@ -2093,23 +2093,21 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask({ status: 'failed', error: vs('no_group') });
             return;
           }
-          // 参数域按平台分叉：MiniMax 契约只有 aigc_watermark（无音频/末帧开关），
-          // 多余键会被上游严格解码拒绝。
-          const parameters = routeModel.platform === 'minimax'
-            ? {
-                duration: submissionSettings.duration,
-                resolution: route.size,
-                ratio: submissionSettings.ratio,
-                aigc_watermark: videoWatermark,
-              }
-            : {
-                duration: submissionSettings.duration,
-                resolution: route.size,
-                ratio: submissionSettings.ratio,
-                generate_audio: videoAudio,
-                watermark: videoWatermark,
-                return_last_frame: videoReturnLastFrame,
-              };
+          // 参数域按模型能力构造：各上游严格解码，多余键会被 400。
+          // flags 缺省(undefined)=支持（seedance 全家桶默认）；MiniMax 的水印键
+          // 是 aigc_watermark；grok/可灵/百炼由各插件薄封装再做键名映射。
+          const parameters: Record<string, unknown> = {
+            duration: submissionSettings.duration,
+            resolution: route.size,
+          };
+          if (routeModel.supportsRatio !== false) parameters.ratio = submissionSettings.ratio;
+          if (routeModel.platform === 'minimax') {
+            parameters.aigc_watermark = videoWatermark;
+          } else {
+            if (routeModel.supportsAudio !== false) parameters.generate_audio = videoAudio;
+            if (routeModel.supportsWatermark !== false) parameters.watermark = videoWatermark;
+            if (routeModel.supportsReturnLastFrame !== false) parameters.return_last_frame = videoReturnLastFrame;
+          }
           const created = await api.createGenerationTask({
             kind: 'video',
             operation: 'generate',

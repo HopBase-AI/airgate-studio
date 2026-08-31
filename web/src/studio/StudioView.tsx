@@ -1393,6 +1393,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                 ratioOptions={videoModelById(videoModelId).ratioOptions}
                 showAudio={videoModelById(videoModelId).supportsAudio !== false}
                 showReturnLastFrame={videoModelById(videoModelId).supportsReturnLastFrame !== false}
+                showWatermark={videoModelById(videoModelId).supportsWatermark !== false}
+                showRatio={videoModelById(videoModelId).supportsRatio !== false}
                 vs={vs}
               />
               {videoGroups.length > 1 && (
