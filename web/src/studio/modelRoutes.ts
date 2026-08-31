@@ -37,9 +37,10 @@ export function sanitizeVendorTokens(text: string): string {
   return text
     .replace(VENDOR_TOKEN_PATTERN, '')
     .replace(VENDOR_CJK_PATTERN, '')
-    .replace(/\s{2,}/g, ' ')
     .replace(/[（(]\s*[)）]/g, '')
+    .replace(/\s{2,}/g, ' ')
     .replace(/^[\s·|,;，；、-]+/, '')
+    .replace(/[\s·|,;，；、-]+$/, '')
     .trim();
 }
 

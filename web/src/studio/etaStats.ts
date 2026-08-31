@@ -57,17 +57,20 @@ export function seedEtaSeconds(p: EtaParams): number {
     return Math.max(10, Math.round((base * resFactor * durFactor) / 5) * 5);
   }
   // 新平台粗种子：真实中位数很快由样本覆盖，只求量级正确。
+  // 独立时长阶梯：万相支持 30s 与 -1 自动，旧阶梯在 11s 就饱和会严重低估。
+  const fleetEffDur = dur === -1 ? 8 : dur;
+  const fleetDurFactor = fleetEffDur > 20 ? 3.2 : fleetEffDur > 10 ? 2.2 : fleetEffDur > 5 ? 1.6 : 1;
   if (/^grok-/i.test(model)) {
     const resFactor = size === '1080p' ? 1.4 : size === '480p' ? 0.8 : 1;
-    return Math.round((120 * resFactor * durFactor) / 10) * 10;
+    return Math.round((120 * resFactor * fleetDurFactor) / 10) * 10;
   }
   if (/^(wan|happyhorse)/i.test(model)) {
     const resFactor = size === '1080p' ? 1.4 : size === '480p' ? 0.8 : 1;
-    return Math.round((240 * resFactor * durFactor) / 10) * 10;
+    return Math.round((240 * resFactor * fleetDurFactor) / 10) * 10;
   }
   if (/^kling-/i.test(model)) {
     const resFactor = size === '4k' ? 2 : size === '2k' ? 1.5 : size === '1080p' ? 1.2 : 1;
-    return Math.round((300 * resFactor * durFactor) / 10) * 10;
+    return Math.round((300 * resFactor * fleetDurFactor) / 10) * 10;
   }
   const base = model.includes('-mini-') ? 150 : model.includes('-fast-') ? 210 : 330;
   const resFactor = size === '480p' ? 0.8 : size === '1080p' ? 1.5 : size === '4k' ? 2.5 : 1;

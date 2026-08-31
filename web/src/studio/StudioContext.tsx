@@ -573,11 +573,26 @@ function imageGroupCacheKey(platform: string, modelId: string): string {
 }
 
 async function fetchVideoGroupsByModel(signal: AbortSignal): Promise<VideoGroupsByModel> {
-  const entries = await Promise.all(VIDEO_MODEL_REGISTRY.map(async model => (
-    [model.id, await api.listImageGroups(model.platform, model.id, 'video', signal)] as const
+  // allSettled + 平台隔离：单个平台探询失败/超时只影响该平台的模型（无分组=
+  // 不展示），不再把全部视频模型清空（部署后冷启动实证过全清空的伤害）。
+  // 例外：seedance 的海外/国内互斥依赖同平台完整集合，任一查询失败则整个
+  // seedance 平台失败关闭，避免把国内兼容别名误判为海外路由。
+  const results = await Promise.allSettled(VIDEO_MODEL_REGISTRY.map(async model => (
+    await api.listImageGroups(model.platform, model.id, 'video', signal)
   )));
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   const groupsByModel: VideoGroupsByModel = {};
-  for (const [modelId, groups] of entries) groupsByModel[modelId] = groups;
+  let seedanceFailed = false;
+  results.forEach((res, i) => {
+    const model = VIDEO_MODEL_REGISTRY[i];
+    if (res.status === 'fulfilled') groupsByModel[model.id] = res.value;
+    else if (model.platform === 'seedance') seedanceFailed = true;
+  });
+  if (seedanceFailed) {
+    for (const model of VIDEO_MODEL_REGISTRY) {
+      if (model.platform === 'seedance') delete groupsByModel[model.id];
+    }
+  }
   return groupsByModel;
 }
 
