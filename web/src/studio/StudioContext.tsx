@@ -20,6 +20,7 @@ import {
   VIDEO_MODEL_REGISTRY,
   VIDEO_MODEL_IDS,
   canonicalVideoModelId,
+  videoModelById,
   videoGroupsForModel,
   videoDefaultsForModel,
   normalizeVideoSettingsForModel,
@@ -573,7 +574,7 @@ function imageGroupCacheKey(platform: string, modelId: string): string {
 
 async function fetchVideoGroupsByModel(signal: AbortSignal): Promise<VideoGroupsByModel> {
   const entries = await Promise.all(VIDEO_MODEL_REGISTRY.map(async model => (
-    [model.id, await api.listImageGroups('seedance', model.id, 'video', signal)] as const
+    [model.id, await api.listImageGroups(model.platform, model.id, 'video', signal)] as const
   )));
   const groupsByModel: VideoGroupsByModel = {};
   for (const [modelId, groups] of entries) groupsByModel[modelId] = groups;
@@ -1987,9 +1988,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     (prompt: string, options?: GenerateVideoOptions) => {
       if (!prompt.trim()) return false;
       const targetProjectID = options?.projectId ?? activeProjectIdRef.current;
+      const selectedPlatform = videoModelById(videoModelId).platform;
       const selectedRoute = buildGenerationRouteSnapshot(
-        modelRouteKey('seedance', videoModelId),
-        'seedance',
+        modelRouteKey(selectedPlatform, videoModelId),
+        selectedPlatform,
         videoModelId,
         selectedVideoGroupId ?? undefined,
         videoResolution,
@@ -2008,7 +2010,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         ? { ...canonicalRoute, size: submissionSettings.resolution }
         : canonicalRoute;
       const model = route?.model ?? videoModelId;
-      if (!route || route.platform !== 'seedance' || !routeModel || !submissionSettings) {
+      if (!route || !routeModel || route.platform !== routeModel.platform || !submissionSettings) {
         setTasks(prev => [{
           id: uid(),
           projectId: targetProjectID,
@@ -2017,7 +2019,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           status: 'failed',
           error: vs('no_group'),
           createdAt: new Date().toISOString(),
-          platform: route?.platform ?? 'seedance',
+          platform: route?.platform ?? selectedPlatform,
           model,
           groupId: route?.groupId,
           routeKey: route?.routeKey,
@@ -2091,6 +2093,23 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask({ status: 'failed', error: vs('no_group') });
             return;
           }
+          // 参数域按平台分叉：MiniMax 契约只有 aigc_watermark（无音频/末帧开关），
+          // 多余键会被上游严格解码拒绝。
+          const parameters = routeModel.platform === 'minimax'
+            ? {
+                duration: submissionSettings.duration,
+                resolution: route.size,
+                ratio: submissionSettings.ratio,
+                aigc_watermark: videoWatermark,
+              }
+            : {
+                duration: submissionSettings.duration,
+                resolution: route.size,
+                ratio: submissionSettings.ratio,
+                generate_audio: videoAudio,
+                watermark: videoWatermark,
+                return_last_frame: videoReturnLastFrame,
+              };
           const created = await api.createGenerationTask({
             kind: 'video',
             operation: 'generate',
@@ -2099,14 +2118,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             prompt,
             group_id: groupId,
             project_id: targetProjectID > ALL_VIEW_ID ? targetProjectID : undefined,
-            parameters: {
-              duration: submissionSettings.duration,
-              resolution: route.size,
-              ratio: submissionSettings.ratio,
-              generate_audio: videoAudio,
-              watermark: videoWatermark,
-              return_last_frame: videoReturnLastFrame,
-            },
+            parameters,
             inputs: sources.length > 0
               ? sources.map(url => ({ type: 'image' as const, role: 'reference_image' as const, url }))
               : undefined,

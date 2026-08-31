@@ -39,6 +39,8 @@ func generationExecutorPluginID(platform string) string {
 		return "gateway-gemini"
 	case "seedance":
 		return "gateway-seedance"
+	case "minimax":
+		return "gateway-minimax"
 	default:
 		return defaultExecutorPluginID
 	}
@@ -48,7 +50,19 @@ func generationExecutorPluginID(platform string) string {
 // 任务的 list/get/delete 都必须限定在这个集合内——tasks.* host 方法允许
 // 跨插件查询，不加限定会把同用户其他插件的任务泄漏进创作中心历史。
 func generationExecutorPluginIDs() []string {
-	return []string{defaultExecutorPluginID, "gateway-gemini", "gateway-seedance"}
+	return []string{defaultExecutorPluginID, "gateway-gemini", "gateway-seedance", "gateway-minimax"}
+}
+
+// studioTaskTypes 创作中心自己创建的任务类型。执行插件还会有别的任务
+// （ToB API 影子任务 video.api / minimax-api、审计任务等），历史列表必须
+// 排除，否则同一用户的 API 任务会以残缺卡片混进工作台画廊。
+func isStudioTaskType(taskType string) bool {
+	switch taskType {
+	case "image.generate", "image.edit", "video.generate":
+		return true
+	default:
+		return false
+	}
 }
 
 func isGenerationExecutor(pluginID string) bool {
@@ -70,6 +84,8 @@ func executorSupportsTaskType(executorID, taskType string) bool {
 		return taskType == "image.generate" || taskType == "image.edit"
 	case "gateway-seedance":
 		return taskType == "video.generate" || taskType == "image.generate"
+	case "gateway-minimax":
+		return taskType == "video.generate"
 	default:
 		return true
 	}
@@ -100,9 +116,65 @@ var seedance25VideoRatios = map[string]struct{}{
 	"9:16": {}, "21:9": {}, "adaptive": {},
 }
 
+// minimaxVideoSpecs 与 gateway-minimax registry 对齐的参数域：
+// H3 支持 768P/2K、4~15 秒；H3-Max 支持 480P/768P、5~15 秒（无 2K，无 -1 自动）。
+var minimaxVideoSpecs = map[string]struct {
+	resolutions map[string]struct{}
+	minDuration int
+	maxDuration int
+}{
+	"minimax-h3": {
+		resolutions: map[string]struct{}{"768p": {}, "2k": {}},
+		minDuration: 4,
+		maxDuration: 15,
+	},
+	"minimax-h3-max": {
+		resolutions: map[string]struct{}{"480p": {}, "768p": {}},
+		minDuration: 5,
+		maxDuration: 15,
+	},
+}
+
+var minimaxVideoRatios = map[string]struct{}{
+	"adaptive": {}, "21:9": {}, "16:9": {}, "4:3": {},
+	"1:1": {}, "3:4": {}, "9:16": {},
+}
+
+func validateMiniMaxVideoParams(model string, params map[string]interface{}) error {
+	spec, ok := minimaxVideoSpecs[strings.ToLower(strings.TrimSpace(model))]
+	if !ok {
+		return fmt.Errorf("模型 %s 不在 MiniMax 视频目录内", model)
+	}
+	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
+		normalized := strings.ToLower(strings.TrimSpace(res))
+		if _, allowed := spec.resolutions[normalized]; !allowed {
+			return fmt.Errorf("模型 %s 不支持分辨率 %s", model, res)
+		}
+	}
+	if v, ok := params["duration"]; ok {
+		d, ok := toInt(v)
+		if !ok {
+			return fmt.Errorf("duration 必须是整数")
+		}
+		if d < spec.minDuration || d > spec.maxDuration {
+			return fmt.Errorf("模型 %s 的 duration 需在 %d-%d 秒之间", model, spec.minDuration, spec.maxDuration)
+		}
+	}
+	if ratio, ok := params["ratio"].(string); ok && strings.TrimSpace(ratio) != "" {
+		normalized := strings.ToLower(strings.TrimSpace(ratio))
+		if _, allowed := minimaxVideoRatios[normalized]; !allowed {
+			return fmt.Errorf("模型 %s 不支持画幅 %s", model, ratio)
+		}
+	}
+	return nil
+}
+
 // validateVideoModelParams 视频任务的参数预校验：分辨率按档位、时长限幅，
 // 在创建入口给前端明确错误，避免排队后才在上游失败。
 func validateVideoModelParams(model string, params map[string]interface{}) error {
+	if _, isMiniMax := minimaxVideoSpecs[strings.ToLower(strings.TrimSpace(model))]; isMiniMax {
+		return validateMiniMaxVideoParams(model, params)
+	}
 	model = canonicalSeedanceVideoModel(model)
 	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
 		normalized := strings.ToLower(strings.TrimSpace(res))
@@ -381,6 +453,8 @@ func generationTaskPlatform(task *hostTask) string {
 		return "gemini"
 	case "gateway-seedance":
 		return "seedance"
+	case "gateway-minimax":
+		return "minimax"
 	case "gateway-openai":
 		return "openai"
 	default:
