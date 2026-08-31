@@ -28,7 +28,8 @@ export function parseModelRouteOptionValue(value: string): { modelKey: string; g
 
 // 工作台不暴露上游渠道:分组名/备注里的渠道品牌词在展示层剔除或中性化。
 // 数据层(DB 组名)保持原样——控制台其他页面(密钥/定价)仍按原名展示。
-const VENDOR_TOKEN_PATTERN = /\b(?:azure|adobe|byteplus|dreamina)\b/gi;
+// minimax 同样剔除——产品名一律用「海螺/Hailuo」,与 Banana/Seedance 惯例一致。
+const VENDOR_TOKEN_PATTERN = /\b(?:azure|adobe|byteplus|dreamina|minimax)\b/gi;
 
 export function sanitizeVendorTokens(text: string): string {
   return text

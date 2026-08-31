@@ -53,6 +53,8 @@ describe('vendor token sanitizing', () => {
       .toBe('海外｜Seedance 2.0/2.5 · Seedream 5.0 pro');
     expect(sanitizeVendorTokens('BytePlus 官方渠道，支持 Seedream 5.0 Pro 生图'))
       .toBe('官方渠道，支持 Seedream 5.0 Pro 生图');
+    expect(sanitizeVendorTokens('MiniMax H3 官方直连')).toBe('H3 官方直连');
+    expect(sanitizeVendorTokens('MiniMax H3 Max 官方直连')).toBe('H3 Max 官方直连');
   });
 
   it('leaves neutral text untouched', () => {
