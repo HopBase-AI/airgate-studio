@@ -8,6 +8,7 @@ import {
   formatModelRouteGroupLabel,
   modelRouteOptionValue,
   parseModelRouteOptionValue,
+  sanitizeVendorTokens,
   withImageGroupPrices,
 } from './modelRoutes';
 
@@ -44,10 +45,26 @@ describe('model route option values', () => {
   });
 });
 
+describe('vendor token sanitizing', () => {
+  it('strips upstream channel brands from display text', () => {
+    expect(sanitizeVendorTokens('Azure Gemini 支持生图')).toBe('Gemini 支持生图');
+    expect(sanitizeVendorTokens('Adobe Image (GPT Image 2.0)')).toBe('Image (GPT Image 2.0)');
+    expect(sanitizeVendorTokens('Dreamina 海外｜Seedance 2.0/2.5 · Seedream 5.0 pro'))
+      .toBe('海外｜Seedance 2.0/2.5 · Seedream 5.0 pro');
+    expect(sanitizeVendorTokens('BytePlus 官方渠道，支持 Seedream 5.0 Pro 生图'))
+      .toBe('官方渠道，支持 Seedream 5.0 Pro 生图');
+  });
+
+  it('leaves neutral text untouched', () => {
+    expect(sanitizeVendorTokens('Gemini 官方直连')).toBe('Gemini 官方直连');
+    expect(sanitizeVendorTokens('Seedance 2.0 国内（Doubao）')).toBe('Seedance 2.0 国内（Doubao）');
+  });
+});
+
 describe('model route labels', () => {
-  it('keeps configured group notes out of the visible label', () => {
+  it('keeps configured group notes out of the visible label and hides vendor names', () => {
     expect(formatImageGroupLabel(imageGroup({ note: '低价线路' })))
-      .toBe('Adobe · ×0.65');
+      .toBe('Group 12 · ×0.65');
   });
 
   it('does not invent a token multiplier for fixed-price image groups', () => {
@@ -55,7 +72,7 @@ describe('model route labels', () => {
       rate_multiplier: 3,
       effective_rate: 3,
       fixed_image_prices: { '1k': 0.08, '2k': 0.12, '4k': 0.15, currency: 'CNY' },
-    }))).toBe('Adobe');
+    }))).toBe('Group 12');
   });
 
   it('keeps generic multipliers out of compact route labels', () => {
@@ -66,10 +83,10 @@ describe('model route labels', () => {
     });
 
     expect(formatImageGroupLabel(group)).toContain('×3');
-    expect(formatModelRouteGroupLabel(group)).toBe('Adobe');
+    expect(formatModelRouteGroupLabel(group)).toBe('专线');
   });
 
-  it('builds concise Azure and official options for the same upstream model ID', () => {
+  it('builds neutral relay and official options for the same upstream model ID', () => {
     const azure = getModelConfig('openai:gemini-3.1-flash-image');
     const official = getModelConfig('gemini:gemini-3.1-flash-image');
     expect(azure).toBeDefined();
@@ -88,14 +105,14 @@ describe('model route labels', () => {
       'gemini:gemini-3.1-flash-image|24',
     ]);
     expect(options.map(option => option.label)).toEqual([
-      'Banana 2 · Azure',
+      'Banana 2 · 专线',
       'Banana 2 · 官方直连',
     ]);
   });
 
   it('removes redundant image capability wording from channel names', () => {
     expect(formatModelRouteGroupLabel(imageGroup({ name: 'Azure Gemini 支持生图' })))
-      .toBe('Azure');
+      .toBe('专线');
     expect(formatModelRouteGroupLabel(imageGroup({ name: 'Gemini 官方直连' })))
       .toBe('官方直连');
     expect(formatModelRouteGroupLabel(imageGroup({ name: 'Seedream 生图分组' })))
@@ -115,7 +132,7 @@ describe('model route labels', () => {
     expect(option.label).toBe('GPT Image 2');
   });
 
-  it('keeps a long group note available as option metadata', () => {
+  it('keeps a long group note available as sanitized option metadata', () => {
     const model = getModelConfig('openai:gpt-image-2');
     expect(model).toBeDefined();
     if (!model) throw new Error('expected GPT Image route');
@@ -123,8 +140,8 @@ describe('model route labels', () => {
 
     const [option] = buildModelRouteOptions([model], () => [imageGroup({ note })]);
 
-    expect(option.label).toBe('GPT Image 2 · Adobe');
-    expect(option.description).toBe(note);
+    expect(option.label).toBe('GPT Image 2 · 专线');
+    expect(option.description).toBe('Gemini 主线路; Banana 2 / Pro 生图备用。');
     expect(option.label).not.toContain(note);
   });
 });

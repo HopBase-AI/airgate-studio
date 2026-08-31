@@ -26,6 +26,18 @@ export function parseModelRouteOptionValue(value: string): { modelKey: string; g
   return { modelKey, groupId };
 }
 
+// 工作台不暴露上游渠道:分组名/备注里的渠道品牌词在展示层剔除或中性化。
+// 数据层(DB 组名)保持原样——控制台其他页面(密钥/定价)仍按原名展示。
+const VENDOR_TOKEN_PATTERN = /\b(?:azure|adobe|byteplus|dreamina)\b/gi;
+
+export function sanitizeVendorTokens(text: string): string {
+  return text
+    .replace(VENDOR_TOKEN_PATTERN, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s·|,;，；、-]+/, '')
+    .trim();
+}
+
 export function formatImageGroupLabel(group: ImageGroup): string {
   const parts = [imageGroupDisplayName(group)];
   if (!group.fixed_image_prices && group.rate_multiplier > 0 && group.effective_rate > 0) {
@@ -39,11 +51,12 @@ export function formatImageGroupLabel(group: ImageGroup): string {
 // it in every option. The generic effective rate is also not an image price
 // when a group uses per-resolution fixed pricing.
 export function formatModelRouteGroupLabel(group: ImageGroup): string {
-  const name = imageGroupDisplayName(group);
-  if (/azure/i.test(name)) return 'Azure';
-  if (/官方直[连聯]|official\s+direct|google\s+official/i.test(name)) return '官方直连';
-  if (/adobe/i.test(name)) return 'Adobe';
+  const rawName = group.name.trim() || `Group ${group.id}`;
+  // 中转/转售渠道(Azure、Adobe 等)统一显示为中性「专线」,不泄露上游身份。
+  if (/azure|adobe/i.test(rawName)) return '专线';
+  if (/官方直[连聯]|official\s+direct|google\s+official/i.test(rawName)) return '官方直连';
 
+  const name = imageGroupDisplayName(group);
   return name
     .replace(/\s*[（(]?\s*(?:支持)?生图(?:分组)?\s*[)）]?\s*$/u, '')
     .trim() || name;
@@ -77,7 +90,7 @@ export function buildModelRouteOptions(
     return {
       value: modelRouteOptionValue(model.routeKey, group.id),
       label,
-      description: group.note?.trim() || undefined,
+      description: sanitizeVendorTokens(group.note?.trim() ?? '') || undefined,
       modelKey: model.routeKey,
       groupId: group.id,
     };
@@ -85,7 +98,7 @@ export function buildModelRouteOptions(
 }
 
 function imageGroupDisplayName(group: ImageGroup): string {
-  return group.name.trim() || `Group ${group.id}`;
+  return sanitizeVendorTokens(group.name.trim()) || `Group ${group.id}`;
 }
 
 // ── Route label localization ────────────────────────────────────────────────
@@ -99,6 +112,7 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 const ROUTE_TOKEN_REPLACEMENTS: ReadonlyArray<{ token: string; key: string; defaultValue: string }> = [
   { token: '官方直连', key: 'playground.studio_route_official', defaultValue: 'Official' },
+  { token: '专线', key: 'playground.studio_route_dedicated', defaultValue: 'Dedicated' },
   { token: '海外', key: 'playground.studio_route_overseas', defaultValue: 'Global' },
   { token: '国内', key: 'playground.studio_route_domestic', defaultValue: 'CN' },
 ];

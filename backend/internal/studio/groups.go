@@ -150,6 +150,8 @@ func displayPlatformName(platform string) string {
 		return "Gemini"
 	case "openai":
 		return "OpenAI"
+	case "minimax":
+		return "MiniMax"
 	default:
 		return strings.TrimSpace(platform)
 	}

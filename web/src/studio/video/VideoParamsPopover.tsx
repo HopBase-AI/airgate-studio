@@ -22,6 +22,9 @@ interface Props {
   resolutions: string[];
   durationOptions?: readonly number[];
   ratioOptions?: readonly string[];
+  // MiniMax 等模型的契约没有音频/末帧开关，选中时隐藏对应行。
+  showAudio?: boolean;
+  showReturnLastFrame?: boolean;
   vs: (key: VideoStringKey) => string;
 }
 
@@ -30,7 +33,7 @@ type PanelPos = { bottom: number; left: number; width: number };
 export function VideoParamsPopover({
   duration, setDuration, resolution, setResolution, ratio, setRatio, audio, setAudio,
   watermark, setWatermark, returnLastFrame, setReturnLastFrame, resolutions,
-  durationOptions, ratioOptions, vs,
+  durationOptions, ratioOptions, showAudio = true, showReturnLastFrame = true, vs,
 }: Props) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -115,20 +118,24 @@ export function VideoParamsPopover({
               </button>
             ))}
           </ParamRow>
-          <div style={s.audioRow}>
-            <span style={s.rowLabel}>{vs('audio')}</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={audio}
-              style={{ ...s.switch, ...(audio ? s.switchOn : null) }}
-              onClick={() => setAudio(!audio)}
-            >
-              <span style={{ ...s.switchKnob, ...(audio ? s.switchKnobOn : null) }} />
-            </button>
-          </div>
+          {showAudio && (
+            <div style={s.audioRow}>
+              <span style={s.rowLabel}>{vs('audio')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={audio}
+                style={{ ...s.switch, ...(audio ? s.switchOn : null) }}
+                onClick={() => setAudio(!audio)}
+              >
+                <span style={{ ...s.switchKnob, ...(audio ? s.switchKnobOn : null) }} />
+              </button>
+            </div>
+          )}
           <ToggleRow label={vs('watermark')} enabled={watermark} onChange={setWatermark} />
-          <ToggleRow label={vs('return_last_frame')} enabled={returnLastFrame} onChange={setReturnLastFrame} />
+          {showReturnLastFrame && (
+            <ToggleRow label={vs('return_last_frame')} enabled={returnLastFrame} onChange={setReturnLastFrame} />
+          )}
         </div>,
         document.body,
       )
@@ -149,7 +156,7 @@ export function VideoParamsPopover({
           <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
         </svg>
         <span style={s.summary}>{summary}</span>
-        {audio && (
+        {showAudio && audio && (
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={cssVar('primary')} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
             <path d="M11 5 6 9H2v6h4l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" />
           </svg>

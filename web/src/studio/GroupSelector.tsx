@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useStudio } from './StudioContext';
 import { CustomSelect } from './CustomSelect';
-import { formatImageGroupLabel, localizeRouteLabel } from './modelRoutes';
+import { formatImageGroupLabel, localizeRouteLabel, sanitizeVendorTokens } from './modelRoutes';
 import { studioStyles as ss } from './studioStyles';
 
 // 计费分组（通道）选择器：让用户在同平台的不同倍率分组间自选（高质量/低价等）。
@@ -15,7 +15,7 @@ export function GroupSelector() {
   const options = imageGroups.map(g => ({
     value: String(g.id),
     label: localizeRouteLabel(formatImageGroupLabel(g), t, i18n.language),
-    description: g.note?.trim() || undefined,
+    description: sanitizeVendorTokens(g.note?.trim() ?? '') || undefined,
   }));
 
   return (

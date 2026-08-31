@@ -46,11 +46,18 @@ export function seedEtaSeconds(p: EtaParams): number {
     return 15;
   }
   const model = p.model || '';
-  const base = model.includes('-mini-') ? 150 : model.includes('-fast-') ? 210 : 330;
   const size = (p.size || '').toLowerCase();
-  const resFactor = size === '480p' ? 0.8 : size === '1080p' ? 1.5 : size === '4k' ? 2.5 : 1;
   const dur = p.durationSeconds ?? 0;
   const durFactor = dur > 10 ? 2.2 : dur > 5 ? 1.6 : 1;
+  // MiniMax H3 系明显快于 Seedance：H3-Max 官方主打极速（5s 片约 15s 出）；
+  // 真实中位数会很快由样本覆盖，种子只求量级正确。
+  if (/^minimax-/i.test(model)) {
+    const base = /-max$/i.test(model) ? 25 : 90;
+    const resFactor = size === '2k' ? 1.5 : size === '480p' ? 0.8 : 1;
+    return Math.max(10, Math.round((base * resFactor * durFactor) / 5) * 5);
+  }
+  const base = model.includes('-mini-') ? 150 : model.includes('-fast-') ? 210 : 330;
+  const resFactor = size === '480p' ? 0.8 : size === '1080p' ? 1.5 : size === '4k' ? 2.5 : 1;
   return Math.round((base * resFactor * durFactor) / 10) * 10;
 }
 

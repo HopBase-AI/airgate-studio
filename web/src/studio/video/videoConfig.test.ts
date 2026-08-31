@@ -31,7 +31,7 @@ function group(id: number, name: string): ImageGroup {
 
 describe('videoConfig', () => {
   it('注册国内外 Seedance 模型且分辨率边界正确', () => {
-    expect(VIDEO_MODEL_REGISTRY).toHaveLength(5);
+    expect(VIDEO_MODEL_REGISTRY).toHaveLength(7);
 	    expect(VIDEO_MODEL_IDS.seedance25).toBe('dreamina-seedance-2-5-260628');
 	    expect(VIDEO_MODEL_IDS.seedance25EP).toBe(VIDEO_MODEL_IDS.seedance25);
 	    expect(VIDEO_MODEL_REGISTRY.map(model => model.id)).not.toContain(LEGACY_SEEDANCE25_MODEL_ID);
@@ -43,7 +43,8 @@ describe('videoConfig', () => {
     const overseas = videoModelById(VIDEO_MODEL_IDS.standardOverseas);
     expect(overseas.region).toBe('overseas');
     expect(overseas.resolutions).toContain('4k');
-    for (const model of VIDEO_MODEL_REGISTRY.filter(item => item.id !== VIDEO_MODEL_IDS.seedance25EP)) {
+    const seedance20 = VIDEO_MODEL_REGISTRY.filter(item => item.platform === 'seedance' && item.id !== VIDEO_MODEL_IDS.seedance25EP);
+    for (const model of seedance20) {
       expect(model.durationOptions).toBeUndefined();
       expect(model.ratioOptions).toBeUndefined();
     }
@@ -56,6 +57,45 @@ describe('videoConfig', () => {
     expect(fast.resolutions).toEqual(['480p', '720p']);
     const mini = videoModelById(VIDEO_MODEL_IDS.miniOverseas);
     expect(mini.resolutions).toEqual(['480p', '720p']);
+  });
+
+  it('注册 MiniMax H3 系且与 gateway-minimax 契约对齐', () => {
+    const h3 = videoModelById(VIDEO_MODEL_IDS.minimaxH3);
+    expect(h3.platform).toBe('minimax');
+    expect(h3.resolutions).toEqual(['768P', '2K']);
+    expect(h3.durationOptions).toEqual([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    expect(h3.supportsAudio).toBe(false);
+    expect(h3.supportsReturnLastFrame).toBe(false);
+
+    const h3Max = videoModelById(VIDEO_MODEL_IDS.minimaxH3Max);
+    expect(h3Max.platform).toBe('minimax');
+    expect(h3Max.resolutions).toEqual(['480P', '768P']);
+    expect(h3Max.durationOptions?.[0]).toBe(5);
+    expect(h3Max.durationOptions?.at(-1)).toBe(15);
+
+    // 文生画幅不能是 adaptive，选项里不得出现。
+    for (const model of [h3, h3Max]) {
+      expect(model.ratioOptions).not.toContain('adaptive');
+    }
+
+    // MiniMax 默认档必须同时落在 H3 与 H3-Max 的合法区间。
+    const defaults = videoDefaultsForModel(VIDEO_MODEL_IDS.minimaxH3);
+    expect(defaults).toEqual({ duration: 5, resolution: '768P', ratio: '16:9' });
+    expect(videoDefaultsForModel(VIDEO_MODEL_IDS.minimaxH3Max)).toEqual(defaults);
+    expect(normalizeVideoSettingsForModel(VIDEO_MODEL_IDS.minimaxH3Max, defaults)).toEqual(defaults);
+  });
+
+  it('从 Seedance 切到 MiniMax 时越界参数收敛到 MiniMax 默认档', () => {
+    expect(normalizeVideoSettingsForModel(VIDEO_MODEL_IDS.minimaxH3, {
+      duration: -1,
+      resolution: '720p',
+      ratio: 'adaptive',
+    })).toEqual({ duration: 5, resolution: '768P', ratio: '16:9' });
+    expect(normalizeVideoSubmissionSettingsForModel(VIDEO_MODEL_IDS.minimaxH3Max, {
+      duration: 4,
+      resolution: '2K',
+      ratio: '21:9',
+    })).toEqual({ duration: 5, resolution: '768P', ratio: '21:9' });
   });
 
   it('从海外选项排除为 API 别名兼容而挂载的国内分组', () => {
@@ -96,7 +136,8 @@ describe('videoConfig', () => {
 
   it('从 SD2.5 切回每个 2.0 模型时移除 2.5 专有参数', () => {
     const sd25Settings = videoDefaultsForModel(VIDEO_MODEL_IDS.seedance25EP);
-    for (const model of VIDEO_MODEL_REGISTRY.filter(item => item.id !== VIDEO_MODEL_IDS.seedance25EP)) {
+    const seedance20 = VIDEO_MODEL_REGISTRY.filter(item => item.platform === 'seedance' && item.id !== VIDEO_MODEL_IDS.seedance25EP);
+    for (const model of seedance20) {
       const normalized = normalizeVideoSettingsForModel(model.id, sd25Settings);
       expect(normalized).toEqual(SEEDANCE20_VIDEO_DEFAULTS);
       expect(VIDEO_DURATIONS).toContain(normalized.duration);

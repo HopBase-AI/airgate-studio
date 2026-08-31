@@ -241,6 +241,11 @@ func (p *StudioPlugin) handleListGenerationTasks(w http.ResponseWriter, r *http.
 
 	tasks := make([]map[string]interface{}, 0, len(result.Tasks))
 	for _, t := range result.Tasks {
+		// 执行插件还有 ToB API 影子任务（video.api / minimax-api）与审计任务，
+		// 不属于工作台历史，滤掉避免以残缺卡片混进画廊。
+		if !isStudioTaskType(t.TaskType) {
+			continue
+		}
 		tasks = append(tasks, buildGenerationTaskResponse(t))
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": tasks, "total": result.Total})

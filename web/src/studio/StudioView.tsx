@@ -7,7 +7,7 @@ import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
-import { buildModelRouteOptions, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue } from './modelRoutes';
+import { buildModelRouteOptions, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue, sanitizeVendorTokens } from './modelRoutes';
 import { commitComposerSend, isComposerSubmitKey } from './composerSend';
 import { videoModelById, useVideoStrings } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
@@ -1391,13 +1391,15 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                 resolutions={videoModelById(videoModelId).resolutions}
                 durationOptions={videoModelById(videoModelId).durationOptions}
                 ratioOptions={videoModelById(videoModelId).ratioOptions}
+                showAudio={videoModelById(videoModelId).supportsAudio !== false}
+                showReturnLastFrame={videoModelById(videoModelId).supportsReturnLastFrame !== false}
                 vs={vs}
               />
               {videoGroups.length > 1 && (
                 <div style={c.videoOption}>
                   <CustomSelect
                     value={selectedVideoGroupId != null ? String(selectedVideoGroupId) : ''}
-                    options={videoGroups.map(g => ({ value: String(g.id), label: localizeRouteLabel(g.name, t, i18n.language) }))}
+                    options={videoGroups.map(g => ({ value: String(g.id), label: localizeRouteLabel(sanitizeVendorTokens(g.name), t, i18n.language) }))}
                     onChange={v => setSelectedVideoGroupId(Number(v))}
                     compact
                   />

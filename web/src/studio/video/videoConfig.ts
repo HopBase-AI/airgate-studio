@@ -13,6 +13,8 @@ export const VIDEO_MODEL_IDS = {
   standardDomestic: 'doubao-seedance-2-0-260128-a',
   fastOverseas: 'dreamina-seedance-2-0-fast-hc',
   miniOverseas: 'dreamina-seedance-2-0-mini-hc',
+  minimaxH3: 'MiniMax-H3',
+  minimaxH3Max: 'MiniMax-H3-Max',
 } as const;
 
 /** Legacy input accepted by the backend, never emitted by the Studio UI. */
@@ -25,14 +27,22 @@ export function canonicalVideoModelId(id: string): string {
 }
 
 export type VideoModelRegion = 'overseas' | 'domestic';
+export type VideoModelPlatform = 'seedance' | 'minimax';
 
 export interface VideoModelConfig {
   id: string;
   nameKey: keyof typeof VIDEO_STRINGS['zh'];
+  // 平台决定分组发现、提交参数域与执行插件；region 只用于 seedance 的
+  // 海外/国内分组互斥判断。
+  platform: VideoModelPlatform;
   region: VideoModelRegion;
   resolutions: string[];
   durationOptions?: readonly number[];
   ratioOptions?: readonly string[];
+  // MiniMax 契约没有 generate_audio / return_last_frame 开关；
+  // watermark 语义为 aigc_watermark。
+  supportsAudio?: boolean;
+  supportsReturnLastFrame?: boolean;
 }
 
 // Seedance 2.0's existing Studio presets. Keep these as the fallback for
@@ -47,6 +57,12 @@ export const SEEDANCE25_DURATIONS = [
   19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, -1,
 ] as const;
 export const SEEDANCE25_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'] as const;
+
+// MiniMax H3 系（与 gateway-minimax registry 对齐）：整数秒、无 -1 自动；
+// 文生必须显式画幅（不能 adaptive），故选项不含 adaptive。
+export const MINIMAX_H3_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+export const MINIMAX_H3MAX_DURATIONS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+export const MINIMAX_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'] as const;
 
 export interface VideoGenerationSettings {
   duration: number;
@@ -68,10 +84,18 @@ export const SEEDANCE25_VIDEO_DEFAULTS: VideoGenerationSettings = {
   ratio: 'adaptive',
 };
 
+// duration=5 同时落在 H3（4~15）与 H3-Max（5~15）区间内，换档不跳变。
+export const MINIMAX_VIDEO_DEFAULTS: VideoGenerationSettings = {
+  duration: 5,
+  resolution: '768P',
+  ratio: '16:9',
+};
+
 export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
   {
     id: VIDEO_MODEL_IDS.seedance25,
     nameKey: 'model_sd25_ep',
+    platform: 'seedance',
     region: 'overseas',
     resolutions: ['480p', '720p'],
     durationOptions: SEEDANCE25_DURATIONS,
@@ -80,26 +104,52 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
   {
     id: VIDEO_MODEL_IDS.standardOverseas,
     nameKey: 'model_standard_overseas',
+    platform: 'seedance',
     region: 'overseas',
     resolutions: ['480p', '720p', '1080p', '4k'],
   },
   {
     id: VIDEO_MODEL_IDS.standardDomestic,
     nameKey: 'model_standard_domestic',
+    platform: 'seedance',
     region: 'domestic',
     resolutions: ['480p', '720p', '1080p'],
   },
   {
     id: VIDEO_MODEL_IDS.fastOverseas,
     nameKey: 'model_fast_overseas',
+    platform: 'seedance',
     region: 'overseas',
     resolutions: ['480p', '720p'],
   },
   {
     id: VIDEO_MODEL_IDS.miniOverseas,
     nameKey: 'model_mini_overseas',
+    platform: 'seedance',
     region: 'overseas',
     resolutions: ['480p', '720p'],
+  },
+  {
+    id: VIDEO_MODEL_IDS.minimaxH3,
+    nameKey: 'model_minimax_h3',
+    platform: 'minimax',
+    region: 'domestic',
+    resolutions: ['768P', '2K'],
+    durationOptions: MINIMAX_H3_DURATIONS,
+    ratioOptions: MINIMAX_RATIOS,
+    supportsAudio: false,
+    supportsReturnLastFrame: false,
+  },
+  {
+    id: VIDEO_MODEL_IDS.minimaxH3Max,
+    nameKey: 'model_minimax_h3_max',
+    platform: 'minimax',
+    region: 'domestic',
+    resolutions: ['480P', '768P'],
+    durationOptions: MINIMAX_H3MAX_DURATIONS,
+    ratioOptions: MINIMAX_RATIOS,
+    supportsAudio: false,
+    supportsReturnLastFrame: false,
   },
 ];
 
@@ -109,9 +159,12 @@ export function videoModelById(id: string): VideoModelConfig {
 }
 
 export function videoDefaultsForModel(id: string): VideoGenerationSettings {
-  const defaults = videoModelById(id).id === VIDEO_MODEL_IDS.seedance25
-    ? SEEDANCE25_VIDEO_DEFAULTS
-    : SEEDANCE20_VIDEO_DEFAULTS;
+  const model = videoModelById(id);
+  const defaults = model.platform === 'minimax'
+    ? MINIMAX_VIDEO_DEFAULTS
+    : model.id === VIDEO_MODEL_IDS.seedance25
+      ? SEEDANCE25_VIDEO_DEFAULTS
+      : SEEDANCE20_VIDEO_DEFAULTS;
   return { ...defaults };
 }
 
@@ -164,7 +217,9 @@ export function videoGroupsForModel(
   const canonicalID = canonicalVideoModelId(modelId);
   const groups = groupsByModel[canonicalID] ?? [];
   const model = VIDEO_MODEL_REGISTRY.find(item => item.id === canonicalID);
-  if (!model || model.region === 'domestic') return groups;
+  // 海外/国内互斥只存在于 seedance（国内组会声明海外兼容别名）；
+  // 其他平台的分组集合原样返回。
+  if (!model || model.platform !== 'seedance' || model.region === 'domestic') return groups;
 
   const domesticGroupIds = new Set(
     (groupsByModel[VIDEO_MODEL_IDS.standardDomestic] ?? []).map(group => group.id),
@@ -188,6 +243,8 @@ export const VIDEO_STRINGS = {
     model_standard_domestic: 'Seedance 2.0 标准（国内）',
     model_fast_overseas: 'Seedance 2.0 快速（海外）',
     model_mini_overseas: 'Seedance 2.0 迷你（海外）',
+    model_minimax_h3: 'MiniMax 海螺 H3',
+    model_minimax_h3_max: 'MiniMax 海螺 H3 Max（极速）',
     duration: '时长',
     duration_seconds: '秒',
     resolution: '分辨率',
@@ -221,6 +278,8 @@ export const VIDEO_STRINGS = {
     model_standard_domestic: 'Seedance 2.0 Standard (China)',
     model_fast_overseas: 'Seedance 2.0 Fast (Overseas)',
     model_mini_overseas: 'Seedance 2.0 Mini (Overseas)',
+    model_minimax_h3: 'MiniMax Hailuo H3',
+    model_minimax_h3_max: 'MiniMax Hailuo H3 Max (Fast)',
     duration: 'Duration',
     duration_seconds: 's',
     resolution: 'Resolution',
@@ -254,6 +313,8 @@ export const VIDEO_STRINGS = {
     model_standard_domestic: 'Seedance 2.0 標準（中国）',
     model_fast_overseas: 'Seedance 2.0 高速（海外）',
     model_mini_overseas: 'Seedance 2.0 ミニ（海外）',
+    model_minimax_h3: 'MiniMax Hailuo H3',
+    model_minimax_h3_max: 'MiniMax Hailuo H3 Max（高速）',
     duration: '長さ',
     duration_seconds: '秒',
     resolution: '解像度',
@@ -287,6 +348,8 @@ export const VIDEO_STRINGS = {
     model_standard_domestic: 'Seedance 2.0 標準（國內）',
     model_fast_overseas: 'Seedance 2.0 快速（海外）',
     model_mini_overseas: 'Seedance 2.0 迷你（海外）',
+    model_minimax_h3: 'MiniMax 海螺 H3',
+    model_minimax_h3_max: 'MiniMax 海螺 H3 Max（極速）',
     duration: '時長',
     duration_seconds: '秒',
     resolution: '解像度',
@@ -320,6 +383,8 @@ export const VIDEO_STRINGS = {
     model_standard_domestic: 'Seedance 2.0 Estándar (China)',
     model_fast_overseas: 'Seedance 2.0 Rápido (internacional)',
     model_mini_overseas: 'Seedance 2.0 Mini (internacional)',
+    model_minimax_h3: 'MiniMax Hailuo H3',
+    model_minimax_h3_max: 'MiniMax Hailuo H3 Max (rápido)',
     duration: 'Duración',
     duration_seconds: 's',
     resolution: 'Resolución',
