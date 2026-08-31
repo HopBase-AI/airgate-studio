@@ -151,7 +151,8 @@ func displayPlatformName(platform string) string {
 	case "openai":
 		return "OpenAI"
 	case "minimax":
-		return "MiniMax"
+		// 工作台不暴露上游厂商名,统一用产品名「海螺」。
+		return "Hailuo"
 	default:
 		return strings.TrimSpace(platform)
 	}
