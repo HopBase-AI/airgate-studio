@@ -56,6 +56,19 @@ export function seedEtaSeconds(p: EtaParams): number {
     const resFactor = size === '2k' ? 1.5 : size === '480p' ? 0.8 : 1;
     return Math.max(10, Math.round((base * resFactor * durFactor) / 5) * 5);
   }
+  // 新平台粗种子：真实中位数很快由样本覆盖，只求量级正确。
+  if (/^grok-/i.test(model)) {
+    const resFactor = size === '1080p' ? 1.4 : size === '480p' ? 0.8 : 1;
+    return Math.round((120 * resFactor * durFactor) / 10) * 10;
+  }
+  if (/^(wan|happyhorse)/i.test(model)) {
+    const resFactor = size === '1080p' ? 1.4 : size === '480p' ? 0.8 : 1;
+    return Math.round((240 * resFactor * durFactor) / 10) * 10;
+  }
+  if (/^kling-/i.test(model)) {
+    const resFactor = size === '4k' ? 2 : size === '2k' ? 1.5 : size === '1080p' ? 1.2 : 1;
+    return Math.round((300 * resFactor * durFactor) / 10) * 10;
+  }
   const base = model.includes('-mini-') ? 150 : model.includes('-fast-') ? 210 : 330;
   const resFactor = size === '480p' ? 0.8 : size === '1080p' ? 1.5 : size === '4k' ? 2.5 : 1;
   return Math.round((base * resFactor * durFactor) / 10) * 10;

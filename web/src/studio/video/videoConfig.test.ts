@@ -31,7 +31,7 @@ function group(id: number, name: string): ImageGroup {
 
 describe('videoConfig', () => {
   it('注册国内外 Seedance 模型且分辨率边界正确', () => {
-    expect(VIDEO_MODEL_REGISTRY).toHaveLength(7);
+    expect(VIDEO_MODEL_REGISTRY).toHaveLength(13);
 	    expect(VIDEO_MODEL_IDS.seedance25).toBe('dreamina-seedance-2-5-260628');
 	    expect(VIDEO_MODEL_IDS.seedance25EP).toBe(VIDEO_MODEL_IDS.seedance25);
 	    expect(VIDEO_MODEL_REGISTRY.map(model => model.id)).not.toContain(LEGACY_SEEDANCE25_MODEL_ID);
@@ -43,7 +43,9 @@ describe('videoConfig', () => {
     const overseas = videoModelById(VIDEO_MODEL_IDS.standardOverseas);
     expect(overseas.region).toBe('overseas');
     expect(overseas.resolutions).toContain('4k');
-    const seedance20 = VIDEO_MODEL_REGISTRY.filter(item => item.platform === 'seedance' && item.id !== VIDEO_MODEL_IDS.seedance25EP);
+    // grok 虽挂 seedance 平台但契约独立（自带时长/画幅表），此处只断言 dreamina/doubao 系。
+    const seedance20 = VIDEO_MODEL_REGISTRY.filter(item => item.platform === 'seedance'
+      && item.id !== VIDEO_MODEL_IDS.seedance25EP && item.id !== VIDEO_MODEL_IDS.grokVideo15);
     for (const model of seedance20) {
       expect(model.durationOptions).toBeUndefined();
       expect(model.ratioOptions).toBeUndefined();
@@ -83,6 +85,44 @@ describe('videoConfig', () => {
     expect(defaults).toEqual({ duration: 5, resolution: '768P', ratio: '16:9' });
     expect(videoDefaultsForModel(VIDEO_MODEL_IDS.minimaxH3Max)).toEqual(defaults);
     expect(normalizeVideoSettingsForModel(VIDEO_MODEL_IDS.minimaxH3Max, defaults)).toEqual(defaults);
+  });
+
+  it('注册 grok/百炼/可灵视频模型且参数域与各插件契约对齐', () => {
+    const grok = videoModelById(VIDEO_MODEL_IDS.grokVideo15);
+    expect(grok.platform).toBe('seedance');
+    expect(grok.resolutions).toEqual(['480p', '720p', '1080p']);
+    expect(grok.durationOptions?.[0]).toBe(1);
+    expect(grok.durationOptions).not.toContain(-1);
+    expect(grok.ratioOptions).not.toContain('adaptive');
+    expect(grok.ratioOptions).not.toContain('21:9');
+    expect(grok.ratioOptions).toContain('3:2');
+    expect(grok.supportsWatermark).toBe(false);
+
+    const wan = videoModelById(VIDEO_MODEL_IDS.wan30);
+    expect(wan.platform).toBe('bailian');
+    expect(wan.durationOptions).toContain(-1);
+    expect(wan.ratioOptions).toContain('adaptive');
+    expect(wan.supportsAudio).not.toBe(false);
+
+    const hhI2V = videoModelById(VIDEO_MODEL_IDS.happyhorseI2V);
+    expect(hhI2V.supportsRatio).toBe(false);
+    expect(hhI2V.supportsAudio).toBe(false);
+
+    const klingV3 = videoModelById(VIDEO_MODEL_IDS.klingV3);
+    expect(klingV3.platform).toBe('kling');
+    expect(klingV3.resolutions).toEqual(['720p', '1080p', '2k', '4k']);
+    expect(klingV3.durationOptions?.[0]).toBe(3);
+    // v2.6 720p 有声档官方未定价，必须锁无声避免 fail-closed 400。
+    const klingV26 = videoModelById(VIDEO_MODEL_IDS.klingV26);
+    expect(klingV26.supportsAudio).toBe(false);
+    expect(klingV26.durationOptions).toEqual([5, 6, 7, 8, 9, 10]);
+
+    for (const id of [VIDEO_MODEL_IDS.grokVideo15, VIDEO_MODEL_IDS.wan30, VIDEO_MODEL_IDS.klingV3]) {
+      const defaults = videoDefaultsForModel(id);
+      const model = videoModelById(id);
+      expect(model.resolutions).toContain(defaults.resolution);
+      expect(model.durationOptions ?? []).toContain(defaults.duration);
+    }
   });
 
   it('从 Seedance 切到 MiniMax 时越界参数收敛到 MiniMax 默认档', () => {

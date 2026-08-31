@@ -41,6 +41,10 @@ func generationExecutorPluginID(platform string) string {
 		return "gateway-seedance"
 	case "minimax":
 		return "gateway-minimax"
+	case "bailian":
+		return "gateway-bailian"
+	case "kling":
+		return "gateway-kling"
 	default:
 		return defaultExecutorPluginID
 	}
@@ -50,7 +54,7 @@ func generationExecutorPluginID(platform string) string {
 // 任务的 list/get/delete 都必须限定在这个集合内——tasks.* host 方法允许
 // 跨插件查询，不加限定会把同用户其他插件的任务泄漏进创作中心历史。
 func generationExecutorPluginIDs() []string {
-	return []string{defaultExecutorPluginID, "gateway-gemini", "gateway-seedance", "gateway-minimax"}
+	return []string{defaultExecutorPluginID, "gateway-gemini", "gateway-seedance", "gateway-minimax", "gateway-bailian", "gateway-kling"}
 }
 
 // studioTaskTypes 创作中心自己创建的任务类型。执行插件还会有别的任务
@@ -84,7 +88,7 @@ func executorSupportsTaskType(executorID, taskType string) bool {
 		return taskType == "image.generate" || taskType == "image.edit"
 	case "gateway-seedance":
 		return taskType == "video.generate" || taskType == "image.generate"
-	case "gateway-minimax":
+	case "gateway-minimax", "gateway-bailian", "gateway-kling":
 		return taskType == "video.generate"
 	default:
 		return true
@@ -169,11 +173,94 @@ func validateMiniMaxVideoParams(model string, params map[string]interface{}) err
 	return nil
 }
 
+// fleetVideoSpecs grok/百炼/可灵各视频模型的参数域（与各插件 registry 对齐）。
+// key=小写模型 ID；ratios 为 nil 表示该模型不做画幅预校验（如快乐马 i2v
+// 比例随首帧图，画幅键在提交层被丢弃）。
+var fleetVideoSpecs = map[string]struct {
+	resolutions map[string]struct{}
+	minDuration int
+	maxDuration int
+	allowAuto   bool
+	ratios      map[string]struct{}
+}{
+	// grok（platform=seedance 按秒计费档）：分辨率必填 480p/720p/1080p、
+	// 时长 1~15 整数（无 -1 自动）、画幅白名单多 3:2/2:3、无 21:9/adaptive。
+	"grok-imagine-video-1.5": {
+		resolutions: map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}},
+		minDuration: 1, maxDuration: 15,
+		ratios: map[string]struct{}{"1:1": {}, "16:9": {}, "9:16": {}, "4:3": {}, "3:4": {}, "3:2": {}, "2:3": {}},
+	},
+	// 万相 3.0：2~30 秒且支持 -1 自动；ratio 含 adaptive。
+	"wan3.0-video": {
+		resolutions: map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}},
+		minDuration: 2, maxDuration: 30, allowAuto: true,
+		ratios: map[string]struct{}{"adaptive": {}, "16:9": {}, "4:3": {}, "1:1": {}, "3:4": {}, "9:16": {}},
+	},
+	"happyhorse-1.1-t2v": {
+		resolutions: map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}},
+		minDuration: 3, maxDuration: 15,
+		ratios: map[string]struct{}{"16:9": {}, "9:16": {}, "1:1": {}, "4:3": {}, "3:4": {}, "4:5": {}, "5:4": {}, "9:21": {}, "21:9": {}},
+	},
+	"happyhorse-1.1-i2v": {
+		resolutions: map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}},
+		minDuration: 3, maxDuration: 15,
+	},
+	"happyhorse-1.1-r2v": {
+		resolutions: map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}},
+		minDuration: 3, maxDuration: 15,
+		ratios: map[string]struct{}{"16:9": {}, "9:16": {}, "1:1": {}, "4:3": {}, "3:4": {}, "4:5": {}, "5:4": {}, "9:21": {}, "21:9": {}},
+	},
+	// 可灵：分辨率合法集合由插件价格表 fail-closed，这里对齐已定价的桶。
+	"kling-v3": {
+		resolutions: map[string]struct{}{"720p": {}, "1080p": {}, "2k": {}, "4k": {}},
+		minDuration: 3, maxDuration: 15,
+		ratios: map[string]struct{}{"16:9": {}, "9:16": {}, "1:1": {}},
+	},
+	"kling-v2-6": {
+		resolutions: map[string]struct{}{"720p": {}, "1080p": {}, "2k": {}, "4k": {}},
+		minDuration: 5, maxDuration: 10,
+		ratios: map[string]struct{}{"16:9": {}, "9:16": {}, "1:1": {}},
+	},
+}
+
+func validateFleetVideoParams(model string, params map[string]interface{}) error {
+	spec := fleetVideoSpecs[strings.ToLower(strings.TrimSpace(model))]
+	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
+		normalized := strings.ToLower(strings.TrimSpace(res))
+		if _, allowed := spec.resolutions[normalized]; !allowed {
+			return fmt.Errorf("模型 %s 不支持分辨率 %s", model, res)
+		}
+	}
+	if v, ok := params["duration"]; ok {
+		d, ok := toInt(v)
+		if !ok {
+			return fmt.Errorf("duration 必须是整数")
+		}
+		if d == -1 && spec.allowAuto {
+			// -1 = 自动时长
+		} else if d < spec.minDuration || d > spec.maxDuration {
+			return fmt.Errorf("模型 %s 的 duration 需在 %d-%d 秒之间", model, spec.minDuration, spec.maxDuration)
+		}
+	}
+	if spec.ratios != nil {
+		if ratio, ok := params["ratio"].(string); ok && strings.TrimSpace(ratio) != "" {
+			normalized := strings.ToLower(strings.TrimSpace(ratio))
+			if _, allowed := spec.ratios[normalized]; !allowed {
+				return fmt.Errorf("模型 %s 不支持画幅 %s", model, ratio)
+			}
+		}
+	}
+	return nil
+}
+
 // validateVideoModelParams 视频任务的参数预校验：分辨率按档位、时长限幅，
 // 在创建入口给前端明确错误，避免排队后才在上游失败。
 func validateVideoModelParams(model string, params map[string]interface{}) error {
 	if _, isMiniMax := minimaxVideoSpecs[strings.ToLower(strings.TrimSpace(model))]; isMiniMax {
 		return validateMiniMaxVideoParams(model, params)
+	}
+	if _, isFleet := fleetVideoSpecs[strings.ToLower(strings.TrimSpace(model))]; isFleet {
+		return validateFleetVideoParams(model, params)
 	}
 	model = canonicalSeedanceVideoModel(model)
 	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
@@ -455,6 +542,10 @@ func generationTaskPlatform(task *hostTask) string {
 		return "seedance"
 	case "gateway-minimax":
 		return "minimax"
+	case "gateway-bailian":
+		return "bailian"
+	case "gateway-kling":
+		return "kling"
 	case "gateway-openai":
 		return "openai"
 	default:

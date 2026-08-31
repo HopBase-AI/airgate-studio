@@ -22,9 +22,11 @@ interface Props {
   resolutions: string[];
   durationOptions?: readonly number[];
   ratioOptions?: readonly string[];
-  // MiniMax 等模型的契约没有音频/末帧开关，选中时隐藏对应行。
+  // 各平台契约不同：没有对应参数的模型隐藏该行（音频/末帧/水印/画幅）。
   showAudio?: boolean;
   showReturnLastFrame?: boolean;
+  showWatermark?: boolean;
+  showRatio?: boolean;
   vs: (key: VideoStringKey) => string;
 }
 
@@ -33,7 +35,8 @@ type PanelPos = { bottom: number; left: number; width: number };
 export function VideoParamsPopover({
   duration, setDuration, resolution, setResolution, ratio, setRatio, audio, setAudio,
   watermark, setWatermark, returnLastFrame, setReturnLastFrame, resolutions,
-  durationOptions, ratioOptions, showAudio = true, showReturnLastFrame = true, vs,
+  durationOptions, ratioOptions, showAudio = true, showReturnLastFrame = true,
+  showWatermark = true, showRatio = true, vs,
 }: Props) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -75,7 +78,9 @@ export function VideoParamsPopover({
   }, [open, calcPos]);
 
   const durationLabel = duration === -1 ? vs('duration_auto') : `${duration}${vs('duration_seconds')}`;
-  const summary = `${durationLabel} · ${resolution} · ${ratio}`;
+  const summary = showRatio
+    ? `${durationLabel} · ${resolution} · ${ratio}`
+    : `${durationLabel} · ${resolution}`;
   const durations = durationOptions ?? VIDEO_DURATIONS;
   const ratios = ratioOptions ?? VIDEO_RATIOS;
 
@@ -111,13 +116,15 @@ export function VideoParamsPopover({
               </button>
             ))}
           </ParamRow>
-          <ParamRow label={vs('ratio')}>
-            {ratios.map(r => (
-              <button key={r} type="button" style={chip(r === ratio)} onClick={() => setRatio(r)}>
-                {r}
-              </button>
-            ))}
-          </ParamRow>
+          {showRatio && (
+            <ParamRow label={vs('ratio')}>
+              {ratios.map(r => (
+                <button key={r} type="button" style={chip(r === ratio)} onClick={() => setRatio(r)}>
+                  {r}
+                </button>
+              ))}
+            </ParamRow>
+          )}
           {showAudio && (
             <div style={s.audioRow}>
               <span style={s.rowLabel}>{vs('audio')}</span>
@@ -132,7 +139,9 @@ export function VideoParamsPopover({
               </button>
             </div>
           )}
-          <ToggleRow label={vs('watermark')} enabled={watermark} onChange={setWatermark} />
+          {showWatermark && (
+            <ToggleRow label={vs('watermark')} enabled={watermark} onChange={setWatermark} />
+          )}
           {showReturnLastFrame && (
             <ToggleRow label={vs('return_last_frame')} enabled={returnLastFrame} onChange={setReturnLastFrame} />
           )}

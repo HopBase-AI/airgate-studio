@@ -29,12 +29,16 @@ export function parseModelRouteOptionValue(value: string): { modelKey: string; g
 // 工作台不暴露上游渠道:分组名/备注里的渠道品牌词在展示层剔除或中性化。
 // 数据层(DB 组名)保持原样——控制台其他页面(密钥/定价)仍按原名展示。
 // minimax 同样剔除——产品名一律用「海螺/Hailuo」,与 Banana/Seedance 惯例一致。
-const VENDOR_TOKEN_PATTERN = /\b(?:azure|adobe|byteplus|dreamina|minimax)\b/gi;
+const VENDOR_TOKEN_PATTERN = /\b(?:azure|adobe|byteplus|dreamina|minimax|dashscope)\b/gi;
+// 中文渠道词(腾讯/阿里系)没有 \b 词边界,单独剥。
+const VENDOR_CJK_PATTERN = /(?:腾讯云|腾讯|騰訊雲|騰訊|阿里云百炼|阿里雲百煉|阿里云|阿里雲|阿里巴巴|阿里|百炼|百煉)/g;
 
 export function sanitizeVendorTokens(text: string): string {
   return text
     .replace(VENDOR_TOKEN_PATTERN, '')
+    .replace(VENDOR_CJK_PATTERN, '')
     .replace(/\s{2,}/g, ' ')
+    .replace(/[（(]\s*[)）]/g, '')
     .replace(/^[\s·|,;，；、-]+/, '')
     .trim();
 }
