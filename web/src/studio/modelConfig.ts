@@ -173,8 +173,11 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     platform: 'seedance',
     defaultSize: '2048x2048',
     sizes: SEEDREAM_SIZES,
-    // 首期不支持编辑/参考图。
-    supportsImg2Img: false,
+    // 官方能力表：Seedream 5.0 Pro 支持单/多图生图（参考图走 image 数组）。
+    // 但它不吃传统 mask——官方的局部编辑靠「参考图上的标注 + prompt 里的
+    // <point>/<bbox> 坐标」表达，与 gateway-seedance images.go 的拒绝口径一致，
+    // 所以 inpaint 面板继续不暴露它。
+    supportsImg2Img: true,
     supportsInpaint: false,
   },
 ];
