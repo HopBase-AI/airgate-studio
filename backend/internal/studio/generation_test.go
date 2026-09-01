@@ -386,7 +386,7 @@ func TestExecutorSupportsTaskType(t *testing.T) {
 		{"gateway-gemini", "image.edit", true},
 		{"gateway-seedance", "video.generate", true},
 		{"gateway-seedance", "image.generate", true},
-		{"gateway-seedance", "image.edit", false},
+		{"gateway-seedance", "image.edit", true},
 		{"gateway-openai", "image.generate", true},
 		{"gateway-openai", "image.edit", true},
 	}
@@ -403,6 +403,14 @@ func TestExecutorSupportsOperation(t *testing.T) {
 	}
 	if executorSupportsOperation("gateway-gemini", "inpaint") {
 		t.Fatal("gateway-gemini must not accept mask-based inpainting")
+	}
+	if !executorSupportsOperation("gateway-seedance", "edit") {
+		t.Fatal("gateway-seedance should support image-to-image edits")
+	}
+	// Seedream 不吃传统 mask，局部编辑走标注 + <bbox> 坐标，见 gateway-seedance
+	// images.go 的拒绝口径。
+	if executorSupportsOperation("gateway-seedance", "inpaint") {
+		t.Fatal("gateway-seedance must not accept mask-based inpainting")
 	}
 	if !executorSupportsOperation("gateway-openai", "inpaint") {
 		t.Fatal("gateway-openai should retain inpainting support")
@@ -458,5 +466,36 @@ func TestHandleCreateGenerationTaskRejectsSeedream4K(t *testing.T) {
 	}
 	if body := recorder.Body.String(); !strings.Contains(body, "不支持尺寸 4096x4096") {
 		t.Fatalf("body = %q, want unsupported-size error", body)
+	}
+}
+
+// gateway-seedance 把参考图地址原样交给上游拉取，而 core 会把 ≥16KB 的
+// data:image/* 换成 /assets-runtime/... 相对地址。没有对外基地址，生图编辑任务
+// 会以「参考图是相对地址但任务未携带 public_base」失败——这是图生图必须依赖的一环。
+func TestPublicBaseFromRequest(t *testing.T) {
+	cases := []struct {
+		name  string
+		proto string
+		host  string
+		want  string
+	}{
+		{name: "forwarded https", proto: "https", host: "api.hop-base.com", want: "https://api.hop-base.com"},
+		{name: "defaults to https", host: "api.hop-base.com", want: "https://api.hop-base.com"},
+		{name: "keeps explicit http", proto: "http", host: "127.0.0.1:9517", want: "http://127.0.0.1:9517"},
+		{name: "no forwarded host", want: ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/generation-tasks", nil)
+			if c.host != "" {
+				req.Header.Set("X-Forwarded-Host", c.host)
+			}
+			if c.proto != "" {
+				req.Header.Set("X-Forwarded-Proto", c.proto)
+			}
+			if got := publicBaseFromRequest(req); got != c.want {
+				t.Fatalf("publicBaseFromRequest() = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

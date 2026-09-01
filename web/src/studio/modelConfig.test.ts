@@ -50,8 +50,10 @@ describe('image editing model capabilities', () => {
     expect(INPAINT_MODEL_REGISTRY.every(model => model.supportsInpaint)).toBe(true);
   });
 
-  it('keeps Seedream out of editing modes', () => {
-    expect(IMG2IMG_MODEL_REGISTRY.some(model => model.id === 'seedream-5-0-pro')).toBe(false);
+  // 官方能力表把「单/多图生图」列为 Seedream 5.0 Pro 的支持项，「交互编辑」
+  // 也只走标注 + 坐标而非 mask，所以图生图必须暴露、局部重绘必须不暴露。
+  it('exposes Seedream for image-to-image but never for mask-based inpainting', () => {
+    expect(IMG2IMG_MODEL_REGISTRY.some(model => model.id === 'seedream-5-0-pro')).toBe(true);
     expect(INPAINT_MODEL_REGISTRY.some(model => model.id === 'seedream-5-0-pro')).toBe(false);
   });
 

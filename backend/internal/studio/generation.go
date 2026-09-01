@@ -79,15 +79,15 @@ func isGenerationExecutor(pluginID string) bool {
 }
 
 // executorSupportsTaskType 校验执行插件是否支持该任务类型。
-// gateway-gemini 支持文生图和参考图编辑，但不支持 mask 局部重绘；Studio 的
-// capability registry 负责不在 inpaint UI 暴露 Gemini。gateway-seedance 首期
-// 不支持编辑/参考图，在创建入口拦下。
+// gateway-gemini 与 gateway-seedance 都支持文生图和参考图编辑，但都不支持 mask
+// 局部重绘；Studio 的 capability registry 负责不在 inpaint UI 暴露它们，
+// executorSupportsOperation 再兜一层。
 func executorSupportsTaskType(executorID, taskType string) bool {
 	switch executorID {
 	case "gateway-gemini":
 		return taskType == "image.generate" || taskType == "image.edit"
 	case "gateway-seedance":
-		return taskType == "video.generate" || taskType == "image.generate"
+		return taskType == "video.generate" || taskType == "image.generate" || taskType == "image.edit"
 	case "gateway-minimax", "gateway-bailian", "gateway-kling":
 		return taskType == "video.generate"
 	default:
@@ -95,8 +95,16 @@ func executorSupportsTaskType(executorID, taskType string) bool {
 	}
 }
 
+// executorSupportsOperation 拦下走不通的操作组合。Seedream 的局部编辑靠参考图
+// 上的标注 + prompt 里的 <point>/<bbox> 坐标表达，不吃传统 mask——放过去只会在
+// gateway-seedance 侧吃一个 400，不如在创建入口就拒。
 func executorSupportsOperation(executorID, operation string) bool {
-	return executorID != "gateway-gemini" || operation != "inpaint"
+	switch executorID {
+	case "gateway-gemini", "gateway-seedance":
+		return operation != "inpaint"
+	default:
+		return true
+	}
 }
 
 // videoModelResolutions Seedance 各版本允许的分辨率（与 gateway-seedance

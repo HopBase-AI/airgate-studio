@@ -149,12 +149,13 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 
 	taskType := resolveTaskType(req.Kind, req.Operation)
 	input := buildTaskInput(req)
-	if isVideo {
-		// 视频执行器要把相对地址的参考图（/assets-runtime/...）暴露给上游拉取，
-		// 需要本站对外基地址；从反代注入的 X-Forwarded-* 推断。
-		if base := publicBaseFromRequest(r); base != "" {
-			input["public_base"] = base
-		}
+	// 参考图落盘后在 input 里是相对地址（core 的 normalizeTaskInputAssets 把
+	// ≥16KB 的 data:image/* 换成 /assets-runtime/...）。把参考图直接交给上游拉取的
+	// 执行器（视频全家 + gateway-seedance 生图）需要本站对外基地址才能还原成绝对
+	// URL，否则任务会以「参考图是相对地址但任务未携带 public_base」失败；
+	// 从反代注入的 X-Forwarded-* 推断。其余执行器不读这个键，多带无害。
+	if base := publicBaseFromRequest(r); base != "" {
+		input["public_base"] = base
 	}
 	attributes := buildTaskAttributes(req)
 	executorID := generationExecutorPluginID(req.Platform)
