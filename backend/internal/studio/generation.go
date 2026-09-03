@@ -613,7 +613,7 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 			}
 		}
 	}
-	if task.ErrorMessage != "" {
+	if exposesTaskError(task) {
 		resp["error_message"] = task.ErrorMessage
 	}
 	// 路由身份必须使用请求模型；上游 output.model 可能是内部档位别名，不能
@@ -659,6 +659,42 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 		}
 	}
 	return resp
+}
+
+// exposesTaskError 决定 error_message 是否随响应下发。前端一见 error_message 就按失败
+// 渲染（图片执行器同步出错要快失败）。视频任务不同：单次 attempt 10 分钟到点插件会以
+// 「视频仍在生成中，等待下一轮继续」让位重排队，core 把这句写进 error_message、状态置
+// retrying，续跑完成后也不清空——进行中 / 重试间隙 / 已完成都不是失败，只有失败终态才
+// 把它当错误暴露；已完成的任务无论种类都不再下发残留的 error_message。
+func exposesTaskError(task *hostTask) bool {
+	if task == nil || strings.TrimSpace(task.ErrorMessage) == "" {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(task.Status))
+	if status == "completed" {
+		return false
+	}
+	if !isVideoGenerationTask(task) {
+		return true
+	}
+	switch status {
+	case "failed", "cancelled", "canceled", "error":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVideoGenerationTask(task *hostTask) bool {
+	if strings.HasPrefix(task.TaskType, "video.") {
+		return true
+	}
+	if task.Attributes != nil {
+		if kind, ok := task.Attributes["kind"]; ok && strings.EqualFold(strings.TrimSpace(fmt.Sprint(kind)), "video") {
+			return true
+		}
+	}
+	return false
 }
 
 func extractImageInputs(inputs []generationInput) []string {

@@ -360,7 +360,10 @@ function failedTaskPatchFromRemote(task: GenerationTask, fallback = 'Task failed
   };
 }
 
+// 已完成的任务不再因残留的 error_message 被判失败：core 重排队时写入的续跑提示
+// 完成后不会清空，历史恢复(recoverTasks)若据此归入 failed 会给已出片的任务再挂一张失败卡。
 function hasTerminalRemoteError(task: GenerationTask): boolean {
+  if (task.status === 'completed') return false;
   return stringsTrim(task.error_message) !== '';
 }
 
