@@ -499,3 +499,51 @@ func TestPublicBaseFromRequest(t *testing.T) {
 		})
 	}
 }
+
+// 视频任务的 error_message 只在失败终态下发：core 重排队（retrying）时写入的
+// 「视频仍在生成中，等待下一轮继续」是续跑提示，续跑期间与完成后都不能被前端当失败。
+func TestBuildGenerationTaskResponseHidesVideoRetryNote(t *testing.T) {
+	const note = "视频仍在生成中，等待下一轮继续"
+	video := func(status string) *hostTask {
+		return &hostTask{
+			ID:           31,
+			TaskType:     "video.generate",
+			Status:       status,
+			ErrorMessage: note,
+			Input:        map[string]interface{}{"model": "dreamina-seedance-2-5-260628"},
+			Attributes:   map[string]interface{}{"kind": "video"},
+		}
+	}
+	for _, status := range []string{"retrying", "processing", "pending", "completed"} {
+		if _, ok := buildGenerationTaskResponse(video(status))["error_message"]; ok {
+			t.Fatalf("视频任务 %s 态不应下发 error_message", status)
+		}
+	}
+	for _, status := range []string{"failed", "cancelled"} {
+		if got := buildGenerationTaskResponse(video(status))["error_message"]; got != note {
+			t.Fatalf("视频任务 %s 态应下发 error_message，got %v", status, got)
+		}
+	}
+	// 只有 attributes.kind 没有 task_type 前缀也按视频处理。
+	kindOnly := video("retrying")
+	kindOnly.TaskType = ""
+	if _, ok := buildGenerationTaskResponse(kindOnly)["error_message"]; ok {
+		t.Fatal("attributes.kind=video 的重试任务不应下发 error_message")
+	}
+
+	// 图片任务保持快失败：进行中带 error_message 照常下发；已完成的残留提示不下发。
+	image := &hostTask{
+		ID:           32,
+		TaskType:     "image.generate",
+		Status:       "processing",
+		ErrorMessage: "model not found",
+		Attributes:   map[string]interface{}{"kind": "image"},
+	}
+	if got := buildGenerationTaskResponse(image)["error_message"]; got != "model not found" {
+		t.Fatalf("图片任务进行中的 error_message 应下发，got %v", got)
+	}
+	image.Status = "completed"
+	if _, ok := buildGenerationTaskResponse(image)["error_message"]; ok {
+		t.Fatal("已完成任务不应下发残留 error_message")
+	}
+}
