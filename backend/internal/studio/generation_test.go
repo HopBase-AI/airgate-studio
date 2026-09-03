@@ -547,3 +547,26 @@ func TestBuildGenerationTaskResponseHidesVideoRetryNote(t *testing.T) {
 		t.Fatal("已完成任务不应下发残留 error_message")
 	}
 }
+
+// 失败终态随 error_message 一并下发执行器的分类码，前端据此给可执行提示；非终态一律不下发。
+func TestBuildGenerationTaskResponseExposesErrorCodeOnlyWithError(t *testing.T) {
+	task := &hostTask{
+		ID:           41,
+		TaskType:     "video.generate",
+		Status:       "failed",
+		ErrorMessage: "The request failed because the output audio may be related to copyright restrictions",
+		ErrorType:    "content_policy",
+		ErrorCode:    "output_audio_copyright",
+		Attributes:   map[string]interface{}{"kind": "video"},
+	}
+	resp := buildGenerationTaskResponse(task)
+	if resp["error_code"] != "output_audio_copyright" || resp["error_type"] != "content_policy" {
+		t.Fatalf("失败终态应下发 error_code / error_type: %v", resp)
+	}
+	task.Status = "retrying"
+	task.ErrorMessage = "视频仍在生成中，等待下一轮继续"
+	resp = buildGenerationTaskResponse(task)
+	if _, ok := resp["error_code"]; ok {
+		t.Fatalf("非终态不应下发 error_code: %v", resp)
+	}
+}

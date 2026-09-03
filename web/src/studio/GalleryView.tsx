@@ -8,11 +8,25 @@ import { downloadImage } from '../utils';
 import { getExpiryNotice, isVideoExpired, VIDEO_URL_TTL_MS } from './expiry';
 import { estimateEtaSeconds, etaDisplayState, formatElapsedCompact, formatEtaLabel } from './etaStats';
 import { useVideoStrings } from './video/videoConfig';
+import { videoFailureHintKey } from './video/failureHints';
 
 type NearViewportListener = (near: boolean) => void;
 
 const nearViewportListeners = new Map<Element, NearViewportListener>();
 let nearViewportObserver: IntersectionObserver | null = null;
+
+// TaskFailureText 失败卡的错误文案：视频任务优先按执行器分类码给可执行提示
+// （如「关闭生成音频后重试」），上游原文退居 tooltip；图片或未知码则原样显示。
+function TaskFailureText({ task }: { task: StudioGenerationTask }) {
+  const vs = useVideoStrings();
+  const hintKey = task.mode === 'video' ? videoFailureHintKey(task.errorCode) : undefined;
+  const text = hintKey ? vs(hintKey) : (task.error ?? '');
+  return (
+    <div style={taskCardStyles.errorText} title={hintKey ? task.error : undefined}>
+      {text}
+    </div>
+  );
+}
 
 function observeNearViewport(element: Element, listener: NearViewportListener): () => void {
   if (!nearViewportObserver) {
@@ -370,7 +384,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
           </div>
         )}
         {!batchProcessing && task.status === 'failed' && task.error && (
-          <div style={taskCardStyles.errorText}>{task.error}</div>
+          <TaskFailureText task={task} />
         )}
         {!batchProcessing && batchFailed && (
           <div style={taskCardStyles.failedActions}>
@@ -436,7 +450,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
         </>
       )}
       {task.status === 'failed' && task.error && (
-        <div style={taskCardStyles.errorText}>{task.error}</div>
+        <TaskFailureText task={task} />
       )}
       {task.prompt && (
         <div

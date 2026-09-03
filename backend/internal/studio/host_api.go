@@ -60,9 +60,13 @@ type hostTask struct {
 	Output       map[string]interface{} `json:"output"`
 	Attributes   map[string]interface{} `json:"attributes"`
 	ErrorMessage string                 `json:"error_message"`
-	CreatedAt    string                 `json:"created_at"`
-	UpdatedAt    string                 `json:"updated_at"`
-	CompletedAt  string                 `json:"completed_at,omitempty"`
+	// ErrorType / ErrorCode 执行器写入的失败分类（如 content_policy / output_audio_copyright），
+	// 前端据此给出可执行的提示，而不是只回放上游原文。
+	ErrorType   string `json:"error_type"`
+	ErrorCode   string `json:"error_code"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	CompletedAt string `json:"completed_at,omitempty"`
 }
 
 func hostCreateTask(ctx context.Context, host sdk.Host, pluginID, taskType string, userID int64, input map[string]interface{}, attributes map[string]interface{}) (*hostTask, error) {

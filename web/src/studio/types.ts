@@ -58,6 +58,8 @@ export interface StudioGenerationTask {
   result?: GalleryItem[];
   remoteTaskIds?: number[];
   error?: string;
+  // 后端分类错误码(如 output_audio_copyright);卡片优先按它渲染可执行提示,原文退居 tooltip。
+  errorCode?: string;
   createdAt: string;
   platform?: string;
   model?: string;

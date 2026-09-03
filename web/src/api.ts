@@ -99,6 +99,10 @@ export interface GenerationTask {
   // 官方上游直链(seedance 视频,与中继地址同为 24h 有效),用于「官方源链接」溯源。
   source_outputs?: string[];
   error_message?: string;
+  // 执行器写入的失败分类（如 content_policy / output_audio_copyright），只在失败终态下发；
+  // 展示层据此给可执行提示（见 studio/video/failureHints.ts）。
+  error_type?: string;
+  error_code?: string;
   created_at: string;
   updated_at?: string;
   completed_at?: string;
