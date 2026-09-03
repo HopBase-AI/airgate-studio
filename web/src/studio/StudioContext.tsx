@@ -355,6 +355,7 @@ function failedTaskPatchFromRemote(task: GenerationTask, fallback = 'Task failed
   return {
     status: 'failed',
     error: generationTaskError(task, fallback),
+    errorCode: stringsTrim(task.error_code) || undefined,
     progress: task.progress,
     remoteTaskIds: [task.id],
   };
@@ -1274,6 +1275,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           mode: remoteTaskMode(t),
           status: 'failed' as const,
           error: t.error_message || pollErrorMessages.failed,
+          errorCode: stringsTrim(t.error_code) || undefined,
           createdAt: t.created_at,
           platform: t.platform,
           model: t.model,

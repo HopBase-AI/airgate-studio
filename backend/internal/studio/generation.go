@@ -615,6 +615,12 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 	}
 	if exposesTaskError(task) {
 		resp["error_message"] = task.ErrorMessage
+		if code := strings.TrimSpace(task.ErrorCode); code != "" {
+			resp["error_code"] = code
+		}
+		if kind := strings.TrimSpace(task.ErrorType); kind != "" {
+			resp["error_type"] = kind
+		}
 	}
 	// 路由身份必须使用请求模型；上游 output.model 可能是内部档位别名，不能
 	// 覆盖重试/计费所需的原始模型。
