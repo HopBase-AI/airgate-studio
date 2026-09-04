@@ -389,12 +389,15 @@ export const VIDEO_STRINGS = {
     fail_video_sensitive: '生成的画面未通过内容审核，请调整提示词或更换参考素材后重试',
     fail_input_sensitive: '参考素材未通过审核（可能包含真人或敏感内容），请更换素材后重试',
     fail_timeout: '上游生成超时，请稍后重试',
+    fail_insufficient_balance: '余额不足，任务未提交。可先充值，或等在途的视频跑完释放预留额度后重试',
     watermark: '水印',
     return_last_frame: '返回末帧',
     video_placeholder: '描述你想生成的视频画面，可附参考图…',
     generating: '视频生成中（约 2-10 分钟）…',
     no_result: '生成完成但没有可用的视频输出',
     no_group: '当前没有可用的视频生成分组，请联系管理员配置',
+    estimate_label: '预计 ≈ {amount}',
+    estimate_insufficient: '余额不足',
     download: '下载视频',
     preview_video: '预览视频',
     source_link: '官方源链接',
@@ -436,12 +439,15 @@ export const VIDEO_STRINGS = {
     fail_video_sensitive: 'The generated video failed content review. Adjust the prompt or reference media and retry.',
     fail_input_sensitive: 'A reference asset failed review (it may contain a real person or sensitive content). Replace it and retry.',
     fail_timeout: 'The upstream generation timed out. Please try again later.',
+    fail_insufficient_balance: 'Not enough balance — the task was not submitted. Top up, or wait for the in-flight videos to finish and free up their reserved amount.',
     watermark: 'Watermark',
     return_last_frame: 'Return last frame',
     video_placeholder: 'Describe the video you want to create; reference images optional…',
     generating: 'Generating video (about 2-10 min)…',
     no_result: 'Task completed but returned no video output',
     no_group: 'No video generation group available. Please contact the administrator.',
+    estimate_label: 'Est. ≈ {amount}',
+    estimate_insufficient: 'Insufficient balance',
     download: 'Download video',
     preview_video: 'Preview video',
     source_link: 'Source URL',
@@ -483,12 +489,15 @@ export const VIDEO_STRINGS = {
     fail_video_sensitive: '生成された映像がコンテンツ審査を通過しませんでした。プロンプトまたは参考素材を変更して再試行してください',
     fail_input_sensitive: '参考素材が審査を通過しませんでした（実在の人物や機微な内容を含む可能性があります）。素材を差し替えて再試行してください',
     fail_timeout: '上流の生成がタイムアウトしました。しばらくしてから再試行してください',
+    fail_insufficient_balance: '残高が不足しているため、タスクは送信されませんでした。チャージするか、進行中の動画の完了で予約分が解放されるのをお待ちください',
     watermark: 'ウォーターマーク',
     return_last_frame: '最終フレームを返す',
     video_placeholder: '生成したい動画を説明してください。参考画像も添付できます…',
     generating: '動画を生成中（約 2〜10 分）…',
     no_result: 'タスクは完了しましたが動画出力がありません',
     no_group: '利用可能な動画生成グループがありません。管理者にお問い合わせください。',
+    estimate_label: '概算 ≈ {amount}',
+    estimate_insufficient: '残高不足',
     download: '動画をダウンロード',
     preview_video: '動画をプレビュー',
     source_link: '生成元リンク',
@@ -530,12 +539,15 @@ export const VIDEO_STRINGS = {
     fail_video_sensitive: '生成的畫面未通過內容審核，請調整提示詞或更換參考素材後重試',
     fail_input_sensitive: '參考素材未通過審核（可能包含真人或敏感內容），請更換素材後重試',
     fail_timeout: '上游生成逾時，請稍後重試',
+    fail_insufficient_balance: '餘額不足，任務未送出。可先儲值，或等在途的影片跑完釋放預留額度後重試',
     watermark: '浮水印',
     return_last_frame: '返回末幀',
     video_placeholder: '描述你想生成的影片畫面，可附參考圖…',
     generating: '影片生成中（約 2-10 分鐘）…',
     no_result: '生成完成但沒有可用的影片輸出',
     no_group: '目前沒有可用的影片生成分組，請聯絡管理員配置',
+    estimate_label: '預計 ≈ {amount}',
+    estimate_insufficient: '餘額不足',
     download: '下載影片',
     preview_video: '預覽影片',
     source_link: '官方源連結',
@@ -577,12 +589,15 @@ export const VIDEO_STRINGS = {
     fail_video_sensitive: 'El vídeo generado no pasó la revisión de contenido. Ajusta el prompt o el material de referencia y reintenta.',
     fail_input_sensitive: 'Un material de referencia no pasó la revisión (puede contener una persona real o contenido sensible). Reemplázalo y reintenta.',
     fail_timeout: 'La generación upstream agotó el tiempo de espera. Inténtalo de nuevo más tarde.',
+    fail_insufficient_balance: 'Saldo insuficiente: la tarea no se envió. Recarga o espera a que terminen los videos en curso para liberar el importe reservado.',
     watermark: 'Marca de agua',
     return_last_frame: 'Devolver el último fotograma',
     video_placeholder: 'Describa el video que desea crear; puede adjuntar imágenes de referencia…',
     generating: 'Generando video (aprox. 2-10 min)…',
     no_result: 'La tarea se completó pero no devolvió ningún video',
     no_group: 'No hay ningún grupo de generación de video disponible. Contacte al administrador.',
+    estimate_label: 'Est. ≈ {amount}',
+    estimate_insufficient: 'Saldo insuficiente',
     download: 'Descargar video',
     preview_video: 'Vista previa del video',
     source_link: 'Enlace de origen',
@@ -596,6 +611,14 @@ export const VIDEO_STRINGS = {
 } as const;
 
 export type VideoStringKey = keyof typeof VIDEO_STRINGS['zh'];
+
+// formatVideoCostEstimate 预算预览的金额文案：USD 用 $，其它币种前置代码，
+// 一律两位小数（与后端 message 里的金额同口径）。
+export function formatVideoCostEstimate(amount: number, currency: string): string {
+  const value = Number.isFinite(amount) ? amount : 0;
+  const code = (currency || 'USD').trim().toUpperCase();
+  return code === 'USD' ? `$${value.toFixed(2)}` : `${code} ${value.toFixed(2)}`;
+}
 
 // useVideoStrings 按当前界面语言取视频模块文案（缺失回退英文 → 中文）。
 export function useVideoStrings(): (key: VideoStringKey) => string {

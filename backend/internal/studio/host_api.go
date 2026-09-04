@@ -26,6 +26,7 @@ const (
 	hostMethodUsersGet       = "users.get"
 	hostMethodGatewayForward = "gateway.forward"
 	hostMethodAssetsGetBytes = "assets.get_bytes"
+	hostMethodBillingBudget  = "billing.budget"
 )
 
 func hostInvoke(ctx context.Context, host sdk.Host, method string, payload map[string]interface{}) (map[string]interface{}, error) {
@@ -313,9 +314,122 @@ func intFromAny(value interface{}) int {
 	}
 }
 
-// ── Gateway forward（skills 同步 LLM 调用）────────────────────────────────────
+// ── Video cost estimate（提交前问执行插件这条大概多少钱）──────────────────────
 
-type hostForwardRequest struct { //nolint:unused // Reserved for the intentionally disabled Skills routes.
+// videoEstimatePath 各视频网关插件统一的预估路由（metadata_only：不调度账号、
+// 不打上游、不计费）。它是 gateway 路由不是 ext-user 路由——core 的
+// /api/v1/ext-user/gateway-* 代理对网关插件是空路由表，只能经 gateway.forward 打。
+const videoEstimatePath = "/v1/video/estimate"
+
+// estimateReferencePlaceholder 估价只看参考图**张数**（首帧/参考图会切价格档），
+// 不看内容：用占位符保留张数，免得把几 MB 的 data URL 再多传一遍。
+const estimateReferencePlaceholder = "reference-image"
+
+// buildVideoEstimateBody 拼预估请求体。插件侧宽松解析：parameters 平铺或嵌套都认，
+// 参考图从 images 数组取长度。
+func buildVideoEstimateBody(model string, parameters map[string]interface{}, referenceImages int) ([]byte, error) {
+	payload := map[string]interface{}{"model": strings.TrimSpace(model)}
+	if len(parameters) > 0 {
+		payload["parameters"] = parameters
+	}
+	if referenceImages > 0 {
+		images := make([]string, 0, referenceImages)
+		for i := 0; i < referenceImages; i++ {
+			images = append(images, estimateReferencePlaceholder)
+		}
+		payload["images"] = images
+	}
+	return json.Marshal(payload)
+}
+
+// hostEstimateVideoOfficialCost 经 gateway.forward 问执行插件本条视频的官方成本
+// （USD、分组倍率前）。插件不认这个模型/分辨率时回 400，调用方按「拿不到预估」处理。
+func hostEstimateVideoOfficialCost(ctx context.Context, host sdk.Host, userID, groupID int64, platform, model string, body []byte) (float64, error) {
+	headers := http.Header{}
+	headers.Set("Content-Type", "application/json")
+	headers.Set("X-Airgate-Platform", strings.TrimSpace(platform))
+
+	resp, err := hostForward(ctx, host, hostForwardRequest{
+		UserID:  userID,
+		GroupID: groupID,
+		Model:   strings.TrimSpace(model),
+		Method:  http.MethodPost,
+		Path:    videoEstimatePath,
+		Headers: headers,
+		Body:    body,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("预估端点返回 %d: %s", resp.StatusCode, truncate(string(resp.Body), 200))
+	}
+	var payload struct {
+		EstimatedOfficialCost float64 `json:"estimated_official_cost"`
+	}
+	if err := json.Unmarshal(resp.Body, &payload); err != nil {
+		return 0, fmt.Errorf("预估响应解析失败: %w", err)
+	}
+	if payload.EstimatedOfficialCost <= 0 {
+		return 0, fmt.Errorf("预估结果非正数")
+	}
+	return payload.EstimatedOfficialCost, nil
+}
+
+// ── Billing budget（视频后付费的提交前预算预检）────────────────────────────────
+
+// budgetInfo 是 core billing.budget 的应答。
+// available = min(余额, 受限时的剩余额度) − 在途预留；estimate 是按路由分组倍率
+// 折算后的「用户侧」预估花费（插件回的 estimated_official_cost 是官方成本）。
+// sufficient=false 时 message 是 core 拼好的用户可读文案（含三个金额），
+// 必须原样透给用户——数字才是他要的信息。
+type budgetInfo struct {
+	Balance        float64 `json:"balance"`
+	Reserved       float64 `json:"reserved"`
+	Available      float64 `json:"available"`
+	Currency       string  `json:"currency"`
+	Limited        bool    `json:"limited"`
+	QuotaRemaining float64 `json:"quota_remaining"`
+	Estimate       float64 `json:"estimate"`
+	Sufficient     bool    `json:"sufficient"`
+	Message        string  `json:"message"`
+}
+
+// hostBudgetPayload 原样取回 core billing.budget 的载荷（/budget 路由透传用）。
+func hostBudgetPayload(ctx context.Context, host sdk.Host, userID int64, platform string, groupID int64, estimatedOfficialCost float64) (map[string]interface{}, error) {
+	payload := map[string]interface{}{
+		"user_id":  userID,
+		"platform": strings.TrimSpace(platform),
+	}
+	if groupID > 0 {
+		payload["group_id"] = groupID
+	}
+	if estimatedOfficialCost > 0 {
+		payload["estimated_official_cost"] = estimatedOfficialCost
+	}
+	return hostInvoke(ctx, host, hostMethodBillingBudget, payload)
+}
+
+// hostBudget 取类型化的预算判定。
+func hostBudget(ctx context.Context, host sdk.Host, userID int64, platform string, groupID int64, estimatedOfficialCost float64) (*budgetInfo, error) {
+	resp, err := hostBudgetPayload(ctx, host, userID, platform, groupID, estimatedOfficialCost)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		return nil, err
+	}
+	var info budgetInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// ── Gateway forward（视频估价的 metadata_only 路由；skills 同步 LLM 调用同走这条）──
+
+type hostForwardRequest struct {
 	UserID  int64
 	GroupID int64
 	Model   string
@@ -325,13 +439,13 @@ type hostForwardRequest struct { //nolint:unused // Reserved for the intentional
 	Body    []byte
 }
 
-type hostForwardResponse struct { //nolint:unused // Reserved for the intentionally disabled Skills routes.
+type hostForwardResponse struct {
 	StatusCode int
 	Body       []byte
 }
 
 // hostForward 通过 host gateway.forward 同步调用上游 LLM（非流式）。
-func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*hostForwardResponse, error) { //nolint:unused // Reserved for Skills.
+func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*hostForwardResponse, error) {
 	payload := map[string]interface{}{
 		"user_id":  req.UserID,
 		"group_id": req.GroupID,
@@ -352,7 +466,7 @@ func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*h
 	}, nil
 }
 
-func headerPayload(headers http.Header) map[string]interface{} { //nolint:unused // Reserved for Skills.
+func headerPayload(headers http.Header) map[string]interface{} {
 	out := make(map[string]interface{}, len(headers))
 	for key, values := range headers {
 		out[key] = append([]string(nil), values...)
@@ -377,7 +491,7 @@ func hostGetAssetDataURL(ctx context.Context, host sdk.Host, objectKey string) (
 	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-func bytesFromPayload(value interface{}) []byte { //nolint:unused // Reserved for Skills.
+func bytesFromPayload(value interface{}) []byte {
 	switch v := value.(type) {
 	case nil:
 		return nil
@@ -415,7 +529,7 @@ func binaryFromPayload(value interface{}) []byte {
 	}
 }
 
-func looksLikeJSON(body []byte) bool { //nolint:unused // Reserved for Skills.
+func looksLikeJSON(body []byte) bool {
 	trimmed := strings.TrimSpace(string(body))
 	return strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
 }

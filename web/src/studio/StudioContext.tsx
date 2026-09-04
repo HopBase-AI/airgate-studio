@@ -44,8 +44,19 @@ const DELETED_TASK_STORE_KEY = 'studio.deletedGenerationTaskIds';
 const DELETED_TASK_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const IMAGE_GROUP_DISCOVERY_TIMEOUT_MS = 8000;
 const EMPTY_IMAGE_GROUPS: ImageGroup[] = [];
+// 发送键旁「预计 ≈ $X」的预算查询：纯展示，宁可查不到也不能拖住创作。
+const VIDEO_BUDGET_TIMEOUT_MS = 6000;
+const VIDEO_BUDGET_DEBOUNCE_MS = 350;
 
 type ImageGroupDiscoveryStatus = 'pending' | 'loaded' | 'failed';
+
+// VideoBudgetPreview 提交前的「这条大概多少钱 / 余额够不够」。
+// estimate 是按所选分组倍率折算后的用户价；服务端两跳任一拿不到就整个不显示。
+export interface VideoBudgetPreview {
+  estimate: number;
+  currency: string;
+  sufficient: boolean;
+}
 
 interface PollErrorMessages {
   failed: string;
@@ -370,6 +381,30 @@ function hasTerminalRemoteError(task: GenerationTask): boolean {
 
 function stringsTrim(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+// buildVideoTaskParameters 按模型能力构造视频参数域：各上游严格解码，多余键会被 400。
+// flags 缺省(undefined)=支持（seedance 全家桶默认）；MiniMax 的水印键是 aigc_watermark；
+// grok/可灵/百炼由各插件薄封装再做键名映射。提交与提交前估价共用这一份，免得两边算的不是一条。
+function buildVideoTaskParameters(
+  routeModel: VideoModelConfig,
+  settings: VideoGenerationSettings,
+  resolution: string,
+  flags: { audio: boolean; watermark: boolean; returnLastFrame: boolean },
+): Record<string, unknown> {
+  const parameters: Record<string, unknown> = {
+    duration: settings.duration,
+    resolution,
+  };
+  if (routeModel.supportsRatio !== false) parameters.ratio = settings.ratio;
+  if (routeModel.platform === 'minimax') {
+    parameters.aigc_watermark = flags.watermark;
+  } else {
+    if (routeModel.supportsAudio !== false) parameters.generate_audio = flags.audio;
+    if (routeModel.supportsWatermark !== false) parameters.watermark = flags.watermark;
+    if (routeModel.supportsReturnLastFrame !== false) parameters.return_last_frame = flags.returnLastFrame;
+  }
+  return parameters;
 }
 
 function errorMessageFromUnknown(err: unknown, fallback = 'Generation failed'): string {
@@ -725,6 +760,8 @@ export interface StudioContextValue {
   videoRouteReady: boolean;
   selectedVideoGroupId: number | null;
   setSelectedVideoGroupId: (id: number) => void;
+  // 提交前的预算预览（拿不到估价/预算时为 null，展示层据此整块隐藏）。
+  videoBudget: VideoBudgetPreview | null;
   generateVideo: (prompt: string, options?: GenerateVideoOptions) => boolean;
 
   // Gallery
@@ -815,6 +852,85 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const videoRouteReady = videoGroupsLoaded
     && selectedVideoGroupId != null
     && videoGroups.some(group => group.id === selectedVideoGroupId);
+
+  // ── 提交前预算预览 ─────────────────────────────────────────────────────────
+  // 视频后付费：参数一定下来就先问一次后端「这条大概多少钱、余额够不够」，把
+  // 「预计 ≈ $X」摆到发送键旁边。估价那跳在后端经 gateway.forward 打执行插件的
+  // metadata_only 路由（浏览器够不着网关插件）。查不到就整块不显示，不打扰创作。
+  const [videoBudget, setVideoBudget] = useState<VideoBudgetPreview | null>(null);
+  useEffect(() => {
+    if (mediaType !== 'video' || !videoRouteReady || selectedVideoGroupId == null) {
+      setVideoBudget(null);
+      return;
+    }
+    const platform = videoModelById(videoModelId).platform;
+    const route = canonicalVideoRoute(buildGenerationRouteSnapshot(
+      modelRouteKey(platform, videoModelId),
+      platform,
+      videoModelId,
+      selectedVideoGroupId,
+      videoResolution,
+    ));
+    const routeModel = route ? VIDEO_MODEL_REGISTRY.find(model => model.id === route.model) : undefined;
+    if (!route || !routeModel) {
+      setVideoBudget(null);
+      return;
+    }
+    const settings = normalizeVideoSubmissionSettingsForModel(route.model, {
+      duration: videoDuration,
+      resolution: route.size,
+      ratio: videoRatio,
+    });
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), VIDEO_BUDGET_DEBOUNCE_MS + VIDEO_BUDGET_TIMEOUT_MS);
+    const debounce = window.setTimeout(() => {
+      void api.getBudget({
+        platform: route.platform,
+        group_id: route.groupId,
+        model: route.model,
+        parameters: buildVideoTaskParameters(routeModel, settings, route.size, {
+          audio: videoAudio,
+          watermark: videoWatermark,
+          returnLastFrame: videoReturnLastFrame,
+        }),
+      }, controller.signal)
+        .then(budget => {
+          if (cancelled) return;
+          const estimate = Number(budget?.estimate);
+          // 后端拿不到插件估价时 estimate 会是 0：没有数就别摆一个「$0.00」误导。
+          if (!Number.isFinite(estimate) || estimate <= 0) {
+            setVideoBudget(null);
+            return;
+          }
+          setVideoBudget({
+            estimate,
+            currency: budget.currency || 'USD',
+            sufficient: budget.sufficient !== false,
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setVideoBudget(null);
+        });
+    }, VIDEO_BUDGET_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(debounce);
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [
+    mediaType,
+    videoRouteReady,
+    selectedVideoGroupId,
+    videoModelId,
+    videoDuration,
+    videoResolution,
+    videoRatio,
+    videoAudio,
+    videoWatermark,
+    videoReturnLastFrame,
+  ]);
 
   // 换档时收敛参数到所选版本的公开规格，并清空上一版本的分组选择。
   const setVideoModelId = useCallback((id: string) => {
@@ -2113,21 +2229,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask({ status: 'failed', error: vs('no_group') });
             return;
           }
-          // 参数域按模型能力构造：各上游严格解码，多余键会被 400。
-          // flags 缺省(undefined)=支持（seedance 全家桶默认）；MiniMax 的水印键
-          // 是 aigc_watermark；grok/可灵/百炼由各插件薄封装再做键名映射。
-          const parameters: Record<string, unknown> = {
-            duration: submissionSettings.duration,
-            resolution: route.size,
-          };
-          if (routeModel.supportsRatio !== false) parameters.ratio = submissionSettings.ratio;
-          if (routeModel.platform === 'minimax') {
-            parameters.aigc_watermark = videoWatermark;
-          } else {
-            if (routeModel.supportsAudio !== false) parameters.generate_audio = videoAudio;
-            if (routeModel.supportsWatermark !== false) parameters.watermark = videoWatermark;
-            if (routeModel.supportsReturnLastFrame !== false) parameters.return_last_frame = videoReturnLastFrame;
-          }
+          const parameters = buildVideoTaskParameters(routeModel, submissionSettings, route.size, {
+            audio: videoAudio,
+            watermark: videoWatermark,
+            returnLastFrame: videoReturnLastFrame,
+          });
+          // 视频是后付费：后端在建任务前会自己估价并过一遍「可用余额 − 在途预留」，
+          // 不够就回 402（下面 catch 单独归类）。
           const created = await api.createGenerationTask({
             kind: 'video',
             operation: 'generate',
@@ -2185,6 +2293,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         } catch (err) {
           if (signal.aborted) {
             updateTask({ status: 'failed', error: t('playground.studio_error_generation_cancelled') });
+          } else if (err instanceof ApiRequestError && err.status === 402) {
+            // 余额预检拦下：服务端原文带着「可用 / 在途预留 / 本条预估」三个金额，
+            // 原样留在卡片上，分类码让展示层再补一句可执行提示。
+            updateTask({
+              status: 'failed',
+              error: err.message,
+              errorCode: err.code || 'insufficient_balance',
+            });
           } else {
             updateTask({ status: 'failed', error: errorMessageFromUnknown(err, pollErrorMessages.failed) });
           }
@@ -2551,6 +2667,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     videoRouteReady,
     selectedVideoGroupId,
     setSelectedVideoGroupId,
+    videoBudget,
     generateVideo,
     currentModel,
     selectedModelKey,

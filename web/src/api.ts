@@ -22,10 +22,14 @@ interface ApiEnvelope<T> {
 export class ApiRequestError extends Error {
   status: number;
 
-  constructor(status: number, message: string) {
+  // 服务端错误码（如余额预检的 insufficient_balance）；展示层据此给可执行提示。
+  code?: string;
+
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = 'ApiRequestError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -48,11 +52,12 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
     const err = (await resp.json().catch(() => ({ error: { message: resp.statusText } }))) as {
       error?: string | { message?: string };
       message?: string;
+      code?: string;
     };
     const detail = typeof err?.error === 'string'
       ? err.error
       : err?.error?.message || err?.message;
-    throw new ApiRequestError(resp.status, detail || `HTTP ${resp.status}`);
+    throw new ApiRequestError(resp.status, detail || `HTTP ${resp.status}`, err?.code);
   }
   return resp.json() as Promise<T>;
 }
@@ -142,6 +147,22 @@ export interface ImageGroup {
   };
 }
 
+// BudgetInfo studio /budget 的应答：core billing.budget 载荷原样透传，
+// 外加执行插件给出的官方成本预估（estimated_official_cost，倍率前）。
+// available = min(余额, 受限时的剩余额度) − 在途预留；estimate 是按分组倍率折算后的用户侧预估。
+export interface BudgetInfo {
+  balance: number;
+  reserved: number;
+  available: number;
+  currency: string;
+  limited: boolean;
+  quota_remaining: number;
+  estimate: number;
+  sufficient: boolean;
+  message: string;
+  estimated_official_cost?: number;
+}
+
 export interface Project {
   id: number;
   user_id: number;
@@ -207,6 +228,18 @@ export const api = {
     mask?: { type: string; role: string; url: string };
   }): Promise<GenerationTask> {
     return request('POST', '/generation-tasks', params);
+  },
+
+  // 余额 / 在途预留 / 本条预估。带上 model 与参数域时，后端会先经 gateway.forward
+  // 问执行插件估价再判定（浏览器够不着网关插件，这两跳必须在后端做）。
+  getBudget(params: {
+    platform: string;
+    group_id?: number;
+    model?: string;
+    parameters?: Record<string, unknown>;
+    reference_images?: number;
+  }, signal?: AbortSignal): Promise<BudgetInfo> {
+    return request<BudgetInfo>('POST', '/budget', params, signal);
   },
 
   getGenerationTask(taskId: number): Promise<GenerationTask> {

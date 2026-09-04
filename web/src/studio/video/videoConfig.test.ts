@@ -17,6 +17,7 @@ import {
   videoModelById,
   normalizeVideoSettingsForModel,
   normalizeVideoSubmissionSettingsForModel,
+  formatVideoCostEstimate,
 } from './videoConfig';
 
 function group(id: number, name: string): ImageGroup {
@@ -253,6 +254,23 @@ describe('videoConfig', () => {
       expect(VIDEO_STRINGS.zh[model.nameKey]).toBeTruthy();
       expect(VIDEO_STRINGS.en[model.nameKey]).toBeTruthy();
     }
+  });
+
+  // 「预计 ≈ $X」靠 {amount} 占位符注入金额：任一语言漏了占位符，界面上就只剩一句
+  // 没有数字的「预计 ≈」——五语一起断言。
+  it('预算预览文案五语都带 {amount} 占位符', () => {
+    for (const lang of ['zh', 'en', 'ja', 'zh-HK', 'es'] as const) {
+      expect(VIDEO_STRINGS[lang].estimate_label).toContain('{amount}');
+      expect(VIDEO_STRINGS[lang].estimate_insufficient).toBeTruthy();
+      expect(VIDEO_STRINGS[lang].fail_insufficient_balance).toBeTruthy();
+    }
+  });
+
+  it('金额一律两位小数，非美元前置币种代码', () => {
+    expect(formatVideoCostEstimate(1.5, 'USD')).toBe('$1.50');
+    expect(formatVideoCostEstimate(21, 'usd')).toBe('$21.00');
+    expect(formatVideoCostEstimate(0.123, '')).toBe('$0.12');
+    expect(formatVideoCostEstimate(3, 'CNY')).toBe('CNY 3.00');
   });
 
   it('过期文案与上游 24h 签名口径一致(防回归 30 天)', () => {
