@@ -23,6 +23,9 @@ func registerRoutes(p *StudioPlugin, r sdk.RouteRegistrar) {
 	r.Handle(http.MethodGet, "/platforms", p.handleListPlatforms)
 	r.Handle(http.MethodGet, "/models", p.handleListModels)
 	r.Handle(http.MethodGet, "/image-groups", p.requireUser(p.handleListImageGroups))
+	// 视频后付费的余额预览：估价（gateway.forward → 执行插件）与预算判定两跳都在这里做，
+	// 前端只问这一条，用于在发送键旁显示「预计 ≈ $X」。
+	r.Handle(http.MethodPost, "/budget", p.requireUser(p.handleBudget))
 	r.Handle(http.MethodGet, "/inspirations", p.handleListInspirations)
 
 	// 项目 / 资产（需要 DB；用 requireProjectService 守护，未配置态返回 503）。
@@ -162,6 +165,20 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 	if !executorSupportsTaskType(executorID, taskType) || !executorSupportsOperation(executorID, req.Operation) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该平台不支持当前图片编辑方式，请更换模型或模式"})
 		return
+	}
+
+	// 视频是后付费：出片后才结算，连发几条就可能把余额打穿（客户 $50 连发三条到 −$20）。
+	// 建任务前自己问一次执行插件「这条大概多少钱」，再让 core 判「可用余额 − 在途预留」，
+	// 不够就别建任务。预估一律服务端自取——金额判定不能采信客户端传来的数。
+	// core 转发侧同样会拦（ResourceExhausted），这里只是让用户在任务卡出现前就看到提示。
+	if isVideo {
+		if message, ok := p.videoBudgetRejection(r, userID, req); !ok {
+			writeJSON(w, http.StatusPaymentRequired, map[string]string{
+				"error": message,
+				"code":  "insufficient_balance",
+			})
+			return
+		}
 	}
 
 	task, err := hostCreateTask(r.Context(), p.host, executorID, taskType, userID, input, attributes)
@@ -307,6 +324,95 @@ func (p *StudioPlugin) handleListImageGroups(w http.ResponseWriter, r *http.Requ
 		groups = []imageGroup{}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"groups": groups})
+}
+
+// budgetRequest 是 /budget 的入参：平台必填（决定按哪条路由的分组倍率折算）。
+// 带上 model / parameters / reference_images 时，先由服务端问执行插件估价，
+// 再拿这个预估去问 core 的预算判定；只想看余额与在途预留就只传 platform。
+type budgetRequest struct {
+	Platform        string                 `json:"platform"`
+	GroupID         int64                  `json:"group_id,omitempty"`
+	Model           string                 `json:"model,omitempty"`
+	Parameters      map[string]interface{} `json:"parameters,omitempty"`
+	ReferenceImages int                    `json:"reference_images,omitempty"`
+}
+
+// handleBudget 一次问完两跳：gateway.forward → 执行插件 /v1/video/estimate 取官方成本，
+// 再经 billing.budget 换算成用户价并判定余额。应答＝core 载荷原样 +
+// estimated_official_cost（前端据此在发送键旁显示「预计 ≈ $X」）。
+func (p *StudioPlugin) handleBudget(w http.ResponseWriter, r *http.Request) {
+	var req budgetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	req.Platform = strings.TrimSpace(req.Platform)
+	if req.Platform == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "platform is required"})
+		return
+	}
+	userID := parseUserIDInt64(r)
+	estimated := p.estimateVideoOfficialCost(r, userID, req.GroupID, req.Platform, req.Model, req.Parameters, req.ReferenceImages)
+	payload, err := hostBudgetPayload(r.Context(), p.host, userID, req.Platform, req.GroupID, estimated)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Error("budget_query_failed", "user_id", userID, "platform", req.Platform, "error", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询预算失败: " + err.Error()})
+		return
+	}
+	if payload == nil {
+		payload = map[string]interface{}{}
+	}
+	if estimated > 0 {
+		payload["estimated_official_cost"] = estimated
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// estimateVideoOfficialCost 问执行插件本条视频的官方成本预估；拿不到（老插件没有这条
+// 路由、模型未定价、转发失败）返回 0＝「没有预估」，调用方据此跳过预算闸门。
+func (p *StudioPlugin) estimateVideoOfficialCost(r *http.Request, userID, groupID int64, platform, model string, parameters map[string]interface{}, referenceImages int) float64 {
+	if strings.TrimSpace(model) == "" {
+		return 0
+	}
+	body, err := buildVideoEstimateBody(model, parameters, referenceImages)
+	if err != nil {
+		return 0
+	}
+	cost, err := hostEstimateVideoOfficialCost(r.Context(), p.host, userID, groupID, platform, model, body)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("video_cost_estimate_failed", "user_id", userID, "platform", platform, "model", model, "error", err)
+		}
+		return 0
+	}
+	return cost
+}
+
+// videoBudgetRejection 提交前的预算闸门。返回 (message,false) 表示余额不足、不要建任务；
+// 拿不到预估或预检本身故障时一律放行（true）——core 转发侧仍是权威闸门，
+// 预检失败不能变成「谁也发不出去」。
+func (p *StudioPlugin) videoBudgetRejection(r *http.Request, userID int64, req createGenerationTaskRequest) (string, bool) {
+	estimated := p.estimateVideoOfficialCost(r, userID, req.GroupID, req.Platform, req.Model, req.Parameters, len(extractImageInputs(req.Inputs)))
+	if estimated <= 0 {
+		return "", true
+	}
+	budget, err := hostBudget(r.Context(), p.host, userID, req.Platform, req.GroupID, estimated)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("budget_precheck_failed", "user_id", userID, "platform", req.Platform, "error", err)
+		}
+		return "", true
+	}
+	if budget == nil || budget.Sufficient {
+		return "", true
+	}
+	message := strings.TrimSpace(budget.Message)
+	if message == "" {
+		message = "余额不足，请先充值后再提交视频任务"
+	}
+	return message, false
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

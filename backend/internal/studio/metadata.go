@@ -38,7 +38,13 @@ func buildPluginInfo() sdk.PluginInfo {
 			sdk.CapabilityForHostMethod(hostMethodModelsList),
 			sdk.CapabilityForHostMethod(hostMethodGroupsList),
 			sdk.CapabilityForHostMethod(hostMethodUsersGet),
-			// 暂停发布：增强 / 反推会触发额外同步 LLM 调用，先不声明 gateway.forward / assets.get_bytes。
+			// 视频后付费的提交前预算预检（可用余额 − 在途预留 − 本条预估）。
+			sdk.CapabilityForHostMethod(hostMethodBillingBudget),
+			// gateway.forward 用于打执行插件的 /v1/video/estimate（metadata_only 路由：
+			// 不调度账号、不打上游、不计费）。Skills 的同步 LLM 调用仍未放开——那是路由
+			// 未注册决定的，不靠不声明这条能力来兜底。
+			sdk.CapabilityForHostMethod(hostMethodGatewayForward),
+			// 暂停发布：增强 / 反推的图片反显需要 assets.get_bytes，先不声明。
 		},
 		FrontendPages: []sdk.FrontendPage{
 			{

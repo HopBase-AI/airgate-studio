@@ -8,7 +8,7 @@ import { downloadImage } from '../utils';
 import { getExpiryNotice, isVideoExpired, VIDEO_URL_TTL_MS } from './expiry';
 import { estimateEtaSeconds, etaDisplayState, formatElapsedCompact, formatEtaLabel } from './etaStats';
 import { useVideoStrings } from './video/videoConfig';
-import { videoFailureHintKey } from './video/failureHints';
+import { videoFailureHintKey, videoFailureShowsRawMessage } from './video/failureHints';
 
 type NearViewportListener = (near: boolean) => void;
 
@@ -17,14 +17,22 @@ let nearViewportObserver: IntersectionObserver | null = null;
 
 // TaskFailureText 失败卡的错误文案：视频任务优先按执行器分类码给可执行提示
 // （如「关闭生成音频后重试」），上游原文退居 tooltip；图片或未知码则原样显示。
+// 余额不足是例外：服务端原文里的「可用 / 在途预留 / 本条预估」三个金额要跟着提示
+// 一起摆在卡片上（见 videoFailureShowsRawMessage），tooltip 在触屏上等于没有。
 function TaskFailureText({ task }: { task: StudioGenerationTask }) {
   const vs = useVideoStrings();
   const hintKey = task.mode === 'video' ? videoFailureHintKey(task.errorCode) : undefined;
   const text = hintKey ? vs(hintKey) : (task.error ?? '');
+  const rawMessage = task.error?.trim() ?? '';
+  const showsRaw = hintKey != null && rawMessage !== '' && rawMessage !== text
+    && videoFailureShowsRawMessage(task.errorCode);
   return (
-    <div style={taskCardStyles.errorText} title={hintKey ? task.error : undefined}>
-      {text}
-    </div>
+    <>
+      <div style={taskCardStyles.errorText} title={hintKey ? task.error : undefined}>
+        {text}
+      </div>
+      {showsRaw && <div style={taskCardStyles.errorDetail}>{rawMessage}</div>}
+    </>
   );
 }
 
@@ -197,6 +205,14 @@ const taskCardStyles: Record<string, CSSProperties> = {
     WebkitLineClamp: 2,
     WebkitBoxOrient: 'vertical',
     opacity: 0.85,
+  },
+  // errorDetail 服务端原文（余额不足时带三个金额），跟在提示下面，不做行数截断。
+  errorDetail: {
+    fontSize: 10,
+    color: cssVar('textTertiary'),
+    textAlign: 'center',
+    lineHeight: 1.45,
+    wordBreak: 'break-word',
   },
   failedActions: {
     display: 'flex',

@@ -9,7 +9,7 @@ import { CustomSelect } from './CustomSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
 import { buildModelRouteOptions, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue, sanitizeVendorTokens } from './modelRoutes';
 import { commitComposerSend, isComposerSubmitKey } from './composerSend';
-import { videoModelById, useVideoStrings } from './video/videoConfig';
+import { videoModelById, useVideoStrings, formatVideoCostEstimate } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
 import { ProjectSidebar, ThemeToggleButton } from './ProjectSidebar';
 import { api, type InspirationCatalog, type InspirationItem } from '../api';
@@ -1006,6 +1006,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     videoReturnLastFrame, setVideoReturnLastFrame,
     videoGroups, videoRouteReady,
     selectedVideoGroupId, setSelectedVideoGroupId,
+    videoBudget,
     referenceImages, setReferenceImages,
     editRequest, clearEditRequest,
   } = useStudio();
@@ -1453,6 +1454,17 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
             </>
           )}
         </div>
+        {/* 视频后付费：提交前把这条的预估花费摆出来；余额不够时同一处变红提示，
+            真正的拦截与三个金额的原文由后端 402 给到失败卡。 */}
+        {isVideo && videoBudget && (
+          <span
+            style={videoBudget.sufficient ? c.estimateHint : c.estimateHintWarn}
+            title={videoBudget.sufficient ? undefined : vs('estimate_insufficient')}
+          >
+            {vs('estimate_label').replace('{amount}', formatVideoCostEstimate(videoBudget.estimate, videoBudget.currency))}
+            {!videoBudget.sufficient && ` · ${vs('estimate_insufficient')}`}
+          </span>
+        )}
         <button
           type="button"
           data-onboarding-target="studio-generate"
@@ -1796,6 +1808,22 @@ const c: Record<string, CSSProperties> = {
     padding: 0,
     flexShrink: 0,
     transition: 'all 0.15s',
+  },
+  // estimateHint 发送键旁的「预计 ≈ $X」。文案很短，整体不折行；发送键 flexShrink:0，
+  // 窄屏挤压时先收左侧工具区。
+  estimateHint: {
+    fontSize: 11,
+    color: cssVar('textTertiary'),
+    fontFamily: cssVar('fontMono'),
+    whiteSpace: 'nowrap',
+    marginRight: 2,
+  },
+  estimateHintWarn: {
+    fontSize: 11,
+    color: cssVar('danger'),
+    fontFamily: cssVar('fontMono'),
+    whiteSpace: 'nowrap',
+    marginRight: 2,
   },
   sendBtn: {
     display: 'inline-flex',
