@@ -13,14 +13,18 @@ import (
 )
 
 type taskHostCall struct {
-	Method   string
-	PluginID string
-	TaskID   int64
-	UserID   int64
+	Method    string
+	PluginID  string
+	PluginIDs []string
+	TaskID    int64
+	UserID    int64
 }
 
 type taskTestHost struct {
 	calls []taskHostCall
+	// supportsPluginIDs 模拟 2026-09-04 起认得 tasks.get plugin_ids 的 core:
+	// 集合内含 gateway-gemini 即命中;false 则模拟旧 core(忽略该字段 → NotFound)。
+	supportsPluginIDs bool
 }
 
 func (h *taskTestHost) Invoke(_ context.Context, req sdk.HostInvokeRequest) (*sdk.HostInvokeResponse, error) {
@@ -32,16 +36,27 @@ func (h *taskTestHost) Invoke(_ context.Context, req sdk.HostInvokeRequest) (*sd
 	if pluginID, _ := req.Payload["plugin_id"].(string); pluginID != "" {
 		call.PluginID = pluginID
 	}
+	if ids, _ := req.Payload["plugin_ids"].([]string); len(ids) > 0 {
+		call.PluginIDs = ids
+	}
 	h.calls = append(h.calls, call)
 
 	switch req.Method {
 	case hostMethodTasksGet:
-		if call.PluginID == "gateway-gemini" {
+		hit := call.PluginID == "gateway-gemini"
+		if h.supportsPluginIDs && len(call.PluginIDs) > 0 {
+			for _, id := range call.PluginIDs {
+				if id == "gateway-gemini" {
+					hit = true
+				}
+			}
+		}
+		if hit {
 			return &sdk.HostInvokeResponse{
 				Status: "ok",
 				Payload: map[string]interface{}{"task": map[string]interface{}{
 					"id":        float64(call.TaskID),
-					"plugin_id": call.PluginID,
+					"plugin_id": "gateway-gemini",
 					"status":    "failed",
 					"progress":  float64(30),
 					"input": map[string]interface{}{
@@ -80,7 +95,53 @@ func int64FromPayload(value interface{}) int64 {
 	}
 }
 
+func resetTasksGetPluginIDsSupport(t *testing.T) {
+	t.Helper()
+	tasksGetPluginIDsSupported.Store(false)
+	t.Cleanup(func() { tasksGetPluginIDsSupported.Store(false) })
+}
+
+// 新 core:一次 plugin_ids 查询即命中,不再逐插件试探。
+func TestHostGetTaskFromPluginsSingleCallWithPluginIDs(t *testing.T) {
+	resetTasksGetPluginIDsSupport(t)
+	host := &taskTestHost{supportsPluginIDs: true}
+
+	task, err := hostGetTaskFromPlugins(context.Background(), host, generationExecutorPluginIDs(), 7, 42)
+	if err != nil {
+		t.Fatalf("hostGetTaskFromPlugins returned err: %v", err)
+	}
+	if task.PluginID != "gateway-gemini" || task.ID != 42 {
+		t.Fatalf("task = %+v", task)
+	}
+	if len(host.calls) != 1 {
+		t.Fatalf("calls = %+v, want 1 call", host.calls)
+	}
+	if host.calls[0].PluginID != "" || len(host.calls[0].PluginIDs) != len(generationExecutorPluginIDs()) || host.calls[0].UserID != 7 {
+		t.Fatalf("call = %+v, want plugin_ids 全集且不带 plugin_id", host.calls[0])
+	}
+	if !tasksGetPluginIDsSupported.Load() {
+		t.Fatalf("命中后应记住 core 支持 plugin_ids")
+	}
+}
+
+// 新 core 且已确认支持 plugin_ids:真的不存在时直接 NotFound,不再退回逐插件试探。
+func TestHostGetTaskFromPluginsNotFoundDoesNotFanOutOnceSupported(t *testing.T) {
+	resetTasksGetPluginIDsSupport(t)
+	tasksGetPluginIDsSupported.Store(true)
+	host := &taskTestHost{supportsPluginIDs: true}
+
+	_, err := hostGetTaskFromPlugins(context.Background(), host, []string{"gateway-openai", "gateway-seedance"}, 7, 42)
+	if !isHostTaskNotFound(err) {
+		t.Fatalf("err = %v, want not found", err)
+	}
+	if len(host.calls) != 1 {
+		t.Fatalf("calls = %+v, want 1 call(不扇出)", host.calls)
+	}
+}
+
+// 旧 core:不认 plugin_ids 的集合查询 NotFound 后退回逐插件试探,行为与改前一致。
 func TestHostGetTaskFromPluginsFallsBackAcrossExecutors(t *testing.T) {
+	resetTasksGetPluginIDsSupport(t)
 	host := &taskTestHost{}
 
 	task, err := hostGetTaskFromPlugins(context.Background(), host, generationExecutorPluginIDs(), 7, 42)
@@ -90,11 +151,14 @@ func TestHostGetTaskFromPluginsFallsBackAcrossExecutors(t *testing.T) {
 	if task.PluginID != "gateway-gemini" || task.ID != 42 || task.ErrorMessage != "model not found" {
 		t.Fatalf("task = %+v", task)
 	}
-	if len(host.calls) != 2 {
-		t.Fatalf("calls = %+v, want 2 calls", host.calls)
+	if len(host.calls) != 3 {
+		t.Fatalf("calls = %+v, want 3 calls(集合查询 + openai + gemini)", host.calls)
 	}
-	if host.calls[0].PluginID != "gateway-openai" || host.calls[1].PluginID != "gateway-gemini" {
+	if len(host.calls[0].PluginIDs) == 0 || host.calls[1].PluginID != "gateway-openai" || host.calls[2].PluginID != "gateway-gemini" {
 		t.Fatalf("calls = %+v", host.calls)
+	}
+	if tasksGetPluginIDsSupported.Load() {
+		t.Fatalf("集合查询未命中而试探命中,不应记为支持 plugin_ids")
 	}
 }
 

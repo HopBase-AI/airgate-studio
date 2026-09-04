@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -109,7 +110,43 @@ func hostGetTask(ctx context.Context, host sdk.Host, pluginID string, userID, ta
 	return hostTaskFromPayload(firstValue(resp, "task", "data", "result", ""))
 }
 
+func hostGetTaskIn(ctx context.Context, host sdk.Host, pluginIDs []string, userID, taskID int64) (*hostTask, error) {
+	payload := map[string]interface{}{
+		"task_id":    taskID,
+		"user_id":    userID,
+		"plugin_ids": pluginIDs,
+	}
+	resp, err := hostInvoke(ctx, host, hostMethodTasksGet, payload)
+	if err != nil {
+		return nil, err
+	}
+	return hostTaskFromPayload(firstValue(resp, "task", "data", "result", ""))
+}
+
+// tasksGetPluginIDsSupported 记录 core 是否认得 tasks.get 的 plugin_ids(2026-09-04 起支持)。
+// 一旦按集合查询命中过一次就置 true,之后集合查询的 NotFound 就是真的不存在,不再逐插件试探。
+var tasksGetPluginIDsSupported atomic.Bool
+
+// hostGetTaskFromPlugins 在执行插件集合内查任务。
+//
+// 先带 plugin_ids 一次命中:旧实现逐插件试探,命中前每次未命中都在 core 与 SDK 两侧
+// 落 ERROR(Seedance 任务每次轮询固定撞 openai/gemini 两次,可灵撞五次;2026-09-03 生产
+// 单日 1.7 万条),把真实错误淹掉。旧 core 不认 plugin_ids 时会按调用方插件过滤而 NotFound,
+// 此时退回逐插件试探,发布窗口两侧任意版本组合都能工作。
 func hostGetTaskFromPlugins(ctx context.Context, host sdk.Host, pluginIDs []string, userID, taskID int64) (*hostTask, error) {
+	if len(pluginIDs) > 1 {
+		task, err := hostGetTaskIn(ctx, host, pluginIDs, userID, taskID)
+		if err == nil {
+			tasksGetPluginIDsSupported.Store(true)
+			return task, nil
+		}
+		if !isHostTaskNotFound(err) {
+			return nil, err
+		}
+		if tasksGetPluginIDsSupported.Load() {
+			return nil, err
+		}
+	}
 	var notFoundErr error
 	for _, pluginID := range pluginIDs {
 		task, err := hostGetTask(ctx, host, pluginID, userID, taskID)
