@@ -35,6 +35,13 @@ import { recordRemoteTaskSample } from './etaStats';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = 2000;
+// 轮询节奏：首检更快、随后指数退避到上限。
+// 固定 2s 对两端都不合适——图片常在 1-3 秒内出结果，首检等满 2s 是白等；
+// 视频常态 2-10 分钟，固定 2s 要打上百次「还在跑」的无效请求。
+// 总睡眠预算严格保持 maxAttempts × POLL_INTERVAL_MS 不变，只改节奏不改超时判定。
+const POLL_FIRST_DELAY_MS = 800;
+const POLL_MAX_DELAY_MS = 4000;
+const POLL_BACKOFF_FACTOR = 1.4;
 const POLL_MAX_ATTEMPTS = 300;
 // 视频远慢于图片（2-10 分钟常态，4K 更久）：放宽到 60 分钟。
 const VIDEO_POLL_MAX_ATTEMPTS = 1800;
@@ -635,6 +642,19 @@ async function fetchVideoGroupsByModel(signal: AbortSignal): Promise<VideoGroups
   return groupsByModel;
 }
 
+// pollDelayMs 第 attempt 次等待时长（attempt 从 0 起）。
+export function pollDelayMs(attempt: number): number {
+  if (attempt <= 0) return POLL_FIRST_DELAY_MS;
+  const raw = POLL_FIRST_DELAY_MS * Math.pow(POLL_BACKOFF_FACTOR, attempt);
+  return Math.min(Math.round(raw), POLL_MAX_DELAY_MS);
+}
+
+// pollSleepBudgetMs 总睡眠预算：与改造前「maxAttempts 次固定间隔」完全等价，
+// 保证超时时长不因退避而变化。
+export function pollSleepBudgetMs(maxAttempts: number): number {
+  return maxAttempts * POLL_INTERVAL_MS;
+}
+
 async function pollGenerationTask(
   taskId: number,
   signal: AbortSignal,
@@ -643,7 +663,11 @@ async function pollGenerationTask(
   errorMessages = DEFAULT_POLL_ERROR_MESSAGES,
 ): Promise<GenerationTask> {
   let networkErrors = 0;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  // 用「已睡眠总时长」而非「尝试次数」作为终止条件：退避后每次等待不再等长，
+  // 按次数计数会让实际超时随节奏漂移；按睡眠总时长计则与原口径分毫不差。
+  const budgetMs = pollSleepBudgetMs(maxAttempts);
+  let sleptMs = 0;
+  for (let attempt = 0; sleptMs < budgetMs; attempt++) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
     let task: GenerationTask | null = null;
     try {
@@ -667,8 +691,11 @@ async function pollGenerationTask(
         throw new Error(generationTaskError(task, errorMessages.stopped(task.status)));
       }
     }
-    const backoff = networkErrors > 0 ? Math.min(POLL_INTERVAL_MS * 2, 6000) : POLL_INTERVAL_MS;
+    const backoff = networkErrors > 0
+      ? Math.min(Math.max(pollDelayMs(attempt), POLL_INTERVAL_MS * 2), 6000)
+      : pollDelayMs(attempt);
     await delay(backoff, signal);
+    sleptMs += backoff;
   }
   throw new Error(errorMessages.timeout);
 }
@@ -735,7 +762,6 @@ export interface StudioContextValue {
 
   // Generation
   isGenerating: boolean;
-  tasks: StudioGenerationTask[];
   generate: (prompt: string, options?: GenerateOptions) => boolean;
   cancelGeneration: () => void;
 
@@ -798,10 +824,21 @@ export interface StudioContextValue {
 
 const StudioContext = createContext<StudioContextValue | null>(null);
 
+// tasks 单独开一个 context：生成中每 2s 回写一次进度，而 StudioContextValue 里的
+// 其余字段在一次生成里基本不变。合在一起会让每次进度回写把画廊里所有卡片
+// （GalleryCard 内部就订阅 useStudio）连同工具栏、参数面板一起重渲染。
+// 消费者只有 GalleryView 与 TaskCard。
+const EMPTY_TASKS: StudioGenerationTask[] = [];
+const StudioTasksContext = createContext<StudioGenerationTask[]>(EMPTY_TASKS);
+
 export function useStudio(): StudioContextValue {
   const ctx = useContext(StudioContext);
   if (!ctx) throw new Error('useStudio must be used within StudioProvider');
   return ctx;
+}
+
+export function useStudioTasks(): StudioGenerationTask[] {
+  return useContext(StudioTasksContext);
 }
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -1007,6 +1044,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // Generation
   const [isGenerating, setIsGenerating] = useState(false);
   const [tasks, setTasks] = useState<StudioGenerationTask[]>([]);
+  // 兜底刷新 effect 只在「触发时」需要读当前任务列表，不该因为 tasks 变化而重建定时器：
+  // 轮询每 2s 回写一次进度，effect 若依赖 tasks 就会被反复拆建，5s 的兜底刷新永远等不到触发。
+  const tasksRef = useRef<StudioGenerationTask[]>(tasks);
+  tasksRef.current = tasks;
   const abortRef = useRef<AbortController | null>(null);
   const deletedTaskRecordsRef = useRef<Record<string, number>>(readDeletedTaskRecords());
   const deletedLocalTaskIDsRef = useRef<Set<string>>(new Set());
@@ -1014,6 +1055,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   // Gallery
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
+  // 与 tasksRef 同理：删除/重试这类事件型回调只在触发时需要当前画廊，
+  // 把 gallery 写进依赖会让它们每次渲染换新引用，连带 context 值整体失稳。
+  const galleryRef = useRef<GalleryItem[]>(gallery);
+  galleryRef.current = gallery;
   const [previewItem, setPreviewItem] = useState<GalleryItem | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -1688,7 +1733,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // Re-check processing tasks on visibility change / timer fallback (e.g. tab switch back, service restart).
   useEffect(() => {
     const refresh = async () => {
-      const processing = tasks.filter(t => t.status === 'processing' || t.status === 'queued');
+      // 经 ref 读当前任务，避免把 tasks 写进依赖导致定时器被反复拆建
+      const processing = tasksRef.current.filter(t => t.status === 'processing' || t.status === 'queued');
       if (processing.length === 0) return;
       const checks = processing.map(async (uiTask) => {
         const remoteId = taskRemoteIds(uiTask)[0] ?? null;
@@ -1768,7 +1814,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', onFocus);
       window.clearInterval(timer);
     };
-  }, [persistProjectAssets, pollErrorMessages, prependGalleryForTarget, t, tasks, vs]);
+  }, [persistProjectAssets, pollErrorMessages, prependGalleryForTarget, t, vs]);
 
   // ── Generation ────────────────────────────────────────────────────────────
 
@@ -2338,14 +2384,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // ── Gallery helpers ───────────────────────────────────────────────────────
 
   const deleteTask = useCallback(async (uiId: string): Promise<void> => {
-    const task = tasks.find(t => t.id === uiId);
+    const task = tasksRef.current.find(t => t.id === uiId);
     const expectedViewEpoch = galleryViewEpochRef.current;
     const expectedProjectID = activeProjectIdRef.current;
     const remoteIds = uniqueNumbers([
       ...(task ? taskRemoteIds(task) : []),
       ...((uiId.startsWith('r-') ? [Number(uiId.slice(2))] : [])),
     ]);
-    const removedGalleryItems = gallery.filter(item => item.taskId && remoteIds.includes(item.taskId));
+    const removedGalleryItems = galleryRef.current.filter(item => item.taskId && remoteIds.includes(item.taskId));
     const hadLocalTombstone = deletedLocalTaskIDsRef.current.has(uiId);
     deletedLocalTaskIDsRef.current.add(uiId);
     const deletionSnapshot = markRemoteTaskIDsDeleted(remoteIds);
@@ -2384,10 +2430,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       }
       throw err;
     }
-  }, [gallery, markRemoteTaskIDsDeleted, restoreRemoteTaskDeletion, t, tasks]);
+  }, [markRemoteTaskIDsDeleted, restoreRemoteTaskDeletion, t]);
 
   const deleteGalleryItem = useCallback(async (id: string): Promise<void> => {
-    const item = gallery.find(g => g.id === id);
+    const item = galleryRef.current.find(g => g.id === id);
     if (!item) return;
     const expectedViewEpoch = galleryViewEpochRef.current;
     const expectedProjectID = activeProjectIdRef.current;
@@ -2412,14 +2458,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       return;
     }
     const matchingTask = item.taskId
-      ? tasks.find(task => taskRemoteIds(task).includes(item.taskId!))
+      ? tasksRef.current.find(task => taskRemoteIds(task).includes(item.taskId!))
       : undefined;
     if (matchingTask) {
       await deleteTask(matchingTask.id);
       return;
     }
     const removedGalleryItems = item.taskId
-      ? gallery.filter(g => g.taskId === item.taskId)
+      ? galleryRef.current.filter(g => g.taskId === item.taskId)
       : [item];
     setGallery(prev => (item.taskId
       ? prev.filter(g => g.taskId !== item.taskId)
@@ -2439,7 +2485,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     }
-  }, [deleteTask, gallery, markRemoteTaskIDsDeleted, restoreRemoteTaskDeletion, tasks]);
+  }, [deleteTask, markRemoteTaskIDsDeleted, restoreRemoteTaskDeletion]);
 
   const applyAsReference = useCallback((item: GalleryItem) => {
     // 视频不能作图像参考。
@@ -2508,7 +2554,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // 执行上下文（model/size/sources），不依赖当前 UI state，因此用户切换
   // 项目或模型后重试也不会错乱。成功的子任务原样保留，不重复消耗额度。
   const retryBatchFailures = useCallback((uiId: string) => {
-    const task = tasks.find(t => t.id === uiId);
+    const task = tasksRef.current.find(t => t.id === uiId);
     if (!task || !task.subtasks) return;
     const failed = task.subtasks.filter(s => s.status === 'failed');
     if (failed.length === 0) return;
@@ -2610,7 +2656,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       }
     };
     void runRetry();
-  }, [imageGroupsByModel, imageGroupStatusByModel, persistProjectAssets, pollErrorMessages, prependGalleryForTarget, stopCreatedTaskIfDeleted, t, tasks]);
+  }, [imageGroupsByModel, imageGroupStatusByModel, persistProjectAssets, pollErrorMessages, prependGalleryForTarget, stopCreatedTaskIfDeleted, t]);
 
   // ── Project CRUD ──────────────────────────────────────────────────────────
 
@@ -2641,7 +2687,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   // ── Context value ─────────────────────────────────────────────────────────
 
-  const value: StudioContextValue = {
+  const value = useMemo<StudioContextValue>(() => ({
     initialLoadComplete: galleryRecovered && projectsLoaded,
     mediaType,
     setMediaType,
@@ -2687,7 +2733,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     referenceImages,
     setReferenceImages,
     isGenerating,
-    tasks,
     generate,
     cancelGeneration,
     gallery,
@@ -2714,7 +2759,26 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     createProject,
     renameProject,
     deleteProject,
-  };
+  }), [
+    galleryRecovered, projectsLoaded, mediaType, setMediaType, imageMode, setImageMode,
+    videoModelId, setVideoModelId, availableVideoModels, videoDuration, setVideoDuration, videoResolution,
+    setVideoResolution, videoRatio, setVideoRatio, videoAudio, setVideoAudio, videoWatermark,
+    setVideoWatermark, videoReturnLastFrame, setVideoReturnLastFrame, videoGroups, videoGroupsLoaded, videoRouteReady,
+    selectedVideoGroupId, setSelectedVideoGroupId, videoBudget, generateVideo, currentModel, selectedModelKey,
+    setSelectedModelKey, selectedPlatform, imageSize, setImageSize, imageGroups, availableImagePlatforms,
+    getImageGroupsForModel, hasImageGroupsForModel, imageGroupsLoaded, imageRouteReady, selectedGroupId, setSelectedGroupId,
+    selectModelRoute, referenceImages, setReferenceImages, isGenerating, generate, cancelGeneration,
+    gallery, hasMore, loadingMore, loadMoreError, loadMore, generatedAssetRetentionDays,
+    previewItem, setPreviewItem, deleteGalleryItem, deleteTask, retryBatchFailures, applyAsReference,
+    regenerate, variations, editRequest, requestEdit, clearEditRequest, projectsEnabled,
+    projects, activeProjectId, selectProject, createProject, renameProject, deleteProject,
+  ]);
 
-  return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
+  return (
+    <StudioContext.Provider value={value}>
+      <StudioTasksContext.Provider value={tasks}>
+        {children}
+      </StudioTasksContext.Provider>
+    </StudioContext.Provider>
+  );
 }

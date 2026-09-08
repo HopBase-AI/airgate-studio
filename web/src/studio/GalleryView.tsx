@@ -1,7 +1,7 @@
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
-import { useStudio } from './StudioContext';
+import { useStudio, useStudioTasks } from './StudioContext';
 import type { GalleryItem, StudioGenerationTask } from './types';
 import { studioStyles as ss } from './studioStyles';
 import { downloadImage } from '../utils';
@@ -267,9 +267,11 @@ const batchCardStyles: Record<string, CSSProperties> = {
   },
 };
 
-function TaskCard({ task }: { task: StudioGenerationTask }) {
+// 同理：画廊里的任务卡也按 task 引用跳过重渲染。
+const TaskCard = memo(function TaskCard({ task }: { task: StudioGenerationTask }) {
   const { t } = useTranslation();
-  const { deleteTask, generate, generateVideo, selectModelRoute, setSelectedModelKey, setImageSize, setImageMode, setMediaType, setVideoModelId, retryBatchFailures, tasks } = useStudio();
+  const { deleteTask, generate, generateVideo, selectModelRoute, setSelectedModelKey, setImageSize, setImageMode, setMediaType, setVideoModelId, retryBatchFailures } = useStudio();
+  const tasks = useStudioTasks();
   const { copied, copy } = useCopyOnClick(task.prompt);
 
   // 生成反馈：已用时计时（每秒）、队列位置、按尺寸档的 ETA 估算。
@@ -504,7 +506,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
       )}
     </div>
   );
-}
+});
 
 // ── GalleryCard ─────────────────────────────────────────────────────────────
 
@@ -564,7 +566,10 @@ interface GalleryCardProps {
   index: number;
 }
 
-function GalleryCard({ item, index }: GalleryCardProps) {
+// GalleryView 订阅 tasks（进度条要用），生成期间每 2s 就要重渲染一次。
+// 卡片自身每次渲染都要做 Date.parse、srcSet 构造、过期计算，画廊几十上百张时
+// 这笔开销会直接表现为列表卡顿——item/index 未变时必须整张跳过。
+const GalleryCard = memo(function GalleryCard({ item, index }: GalleryCardProps) {
   const { t } = useTranslation();
   const vs = useVideoStrings();
   const { setPreviewItem, deleteGalleryItem, applyAsReference, regenerate, requestEdit, generatedAssetRetentionDays } = useStudio();
@@ -851,7 +856,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
       </div>
     </div>
   );
-}
+});
 
 // ── PreviewOverlay ──────────────────────────────────────────────────────────
 
@@ -1276,7 +1281,8 @@ function FilteredEmptyState({ filter }: { filter: Exclude<GalleryMediaFilter, 'a
 export function GalleryView() {
   const { t } = useTranslation();
   const vs = useVideoStrings();
-  const { gallery, tasks, previewItem, hasMore, loadingMore, loadMoreError, loadMore, activeProjectId } = useStudio();
+  const { gallery, previewItem, hasMore, loadingMore, loadMoreError, loadMore, activeProjectId } = useStudio();
+  const tasks = useStudioTasks();
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const [mediaFilter, setMediaFilter] = useState<GalleryMediaFilter>('all');
