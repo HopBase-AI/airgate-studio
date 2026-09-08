@@ -69,7 +69,10 @@ describe('轮询等待节奏', () => {
     expect(videoPolls).toBeLessThanOrEqual(VIDEO_MAX_ATTEMPTS / 1.9);
   });
 
-  it('一个 5 分钟视频的轮询次数从 150 次降到 80 次以内', () => {
+  // 注意口径：本文件只算主轮询自身的排期。工作台另有一条 5s 兜底刷新，
+  // 但它会跳过主轮询正在跟进的任务（isTaskPolledLive），不会叠加重复请求——
+  // 该行为由 studioRenderPath.test.ts 的「兜底刷新不与主轮询重复请求同一任务」守。
+  it('一个 5 分钟视频的主轮询次数从 150 次降到 80 次以内', () => {
     const delays = schedule(VIDEO_MAX_ATTEMPTS);
     let slept = 0;
     let polls = 0;

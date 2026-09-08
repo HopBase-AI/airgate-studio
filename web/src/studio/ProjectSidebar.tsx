@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
 import { useStudio } from './StudioContext';
@@ -154,7 +154,8 @@ function IconFolder() {
 
 
 
-export function ProjectSidebar() {
+// 同理：项目左栏不依赖 tasks，StudioLayout 每 2s 的重渲染不该带上它。
+export const ProjectSidebar = memo(function ProjectSidebar() {
   const { t } = useTranslation();
   const { projects, activeProjectId, selectProject, createProject, renameProject, deleteProject } = useStudio();
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -263,4 +264,4 @@ export function ProjectSidebar() {
       </div>
     </div>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type DragEvent, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type DragEvent, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
 import { useStudio, useStudioTasks } from './StudioContext';
@@ -896,7 +896,10 @@ function InspirationDrawer({ onSelect, onClose }: { onSelect: (prompt: string) =
 const COUNT_OPTIONS = [1, 2, 3, 4];
 const COMPOSER_TEXTAREA_HEIGHT = 112;
 
-function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.MutableRefObject<{ set: (v: string) => void } | null>; onOpenInspiration?: () => void }) {
+// StudioLayout 需要订阅 tasks 才能判断空状态，生成期间每 2s 就重渲染一次。
+// ComposerBar 是整个创作面板里最重的子树（模型/尺寸/分组/视频参数全在里面），
+// props 未变时必须整块跳过。
+const ComposerBar = memo(function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.MutableRefObject<{ set: (v: string) => void } | null>; onOpenInspiration?: () => void }) {
   const { t, i18n } = useTranslation();
   const vs = useVideoStrings();
   const {
@@ -1414,7 +1417,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       </div>
     </div>
   );
-}
+});
+
 
 // ── ComposerBar styles ──────────────────────────────────────────────────────
 
@@ -1992,10 +1996,12 @@ function StudioLayout() {
     !loadMoreError
   );
 
-  const handleTemplate = (prompt: string) => {
+  const handleTemplate = useCallback((prompt: string) => {
     promptRef.current?.set(prompt);
     setMobileTab('create');
-  };
+  }, []);
+  // memo 的 ComposerBar 需要稳定的回调，否则每次渲染都会击穿 memo
+  const openInspiration = useCallback(() => setInspirationOpen(true), []);
 
   // 项目左栏（仅在后端启用项目功能时显示）。移动端作为一个 tab。
   const projectPanel = projectsEnabled ? (
@@ -2039,7 +2045,7 @@ function StudioLayout() {
             ))}
           </div>
           <div style={galleryLayout.composerWrap}>
-            <ComposerBar promptRef={promptRef} onOpenInspiration={() => setInspirationOpen(true)} />
+            <ComposerBar promptRef={promptRef} onOpenInspiration={openInspiration} />
           </div>
         </div>
       </div>
@@ -2066,7 +2072,7 @@ function StudioLayout() {
               <div style={landing.title}>{t('playground.studio_workshop')}</div>
               <div style={landing.subtitle}>{t('playground.studio_quick_placeholder')}</div>
               <div style={{ width: '100%', maxWidth: 720, marginTop: 18 }}>
-                <ComposerBar promptRef={promptRef} onOpenInspiration={() => setInspirationOpen(true)} />
+                <ComposerBar promptRef={promptRef} onOpenInspiration={openInspiration} />
               </div>
             </div>
             {/* 空状态把灵感网格铺在主区，回收原本浪费的空白 */}
@@ -2090,7 +2096,7 @@ function StudioLayout() {
         {floatingControls}
         <GalleryView />
         <div style={galleryLayout.composerWrap}>
-          <ComposerBar promptRef={promptRef} onOpenInspiration={() => setInspirationOpen(true)} />
+          <ComposerBar promptRef={promptRef} onOpenInspiration={openInspiration} />
         </div>
         {drawer}
       </div>

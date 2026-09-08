@@ -655,12 +655,38 @@ export function pollSleepBudgetMs(maxAttempts: number): number {
   return maxAttempts * POLL_INTERVAL_MS;
 }
 
+// livePollTargets 记录主轮询正在跟进的远端任务 id。
+// 兜底刷新（5s 定时 + 可见性/聚焦事件）的职责是「主轮询已经死掉时接管」——
+// 页面被挂起、服务重启、轮询 promise 丢失等。主轮询活着时它查的是同一批任务，
+// 纯属重复请求，故据此跳过。放在模块级即可覆盖全部调用点
+// （含经 waitForGenerationTask 间接进入的路径）。
+const livePollTargets = new Set<number>();
+
+export function isTaskPolledLive(taskId: number): boolean {
+  return livePollTargets.has(taskId);
+}
+
 async function pollGenerationTask(
   taskId: number,
   signal: AbortSignal,
   maxAttempts = POLL_MAX_ATTEMPTS,
   onPoll?: (task: GenerationTask) => void,
   errorMessages = DEFAULT_POLL_ERROR_MESSAGES,
+): Promise<GenerationTask> {
+  livePollTargets.add(taskId);
+  try {
+    return await runGenerationTaskPoll(taskId, signal, maxAttempts, onPoll, errorMessages);
+  } finally {
+    livePollTargets.delete(taskId);
+  }
+}
+
+async function runGenerationTaskPoll(
+  taskId: number,
+  signal: AbortSignal,
+  maxAttempts: number,
+  onPoll: ((task: GenerationTask) => void) | undefined,
+  errorMessages: PollErrorMessages,
 ): Promise<GenerationTask> {
   let networkErrors = 0;
   // 用「已睡眠总时长」而非「尝试次数」作为终止条件：退避后每次等待不再等长，
@@ -828,8 +854,7 @@ const StudioContext = createContext<StudioContextValue | null>(null);
 // 其余字段在一次生成里基本不变。合在一起会让每次进度回写把画廊里所有卡片
 // （GalleryCard 内部就订阅 useStudio）连同工具栏、参数面板一起重渲染。
 // 消费者只有 GalleryView 与 TaskCard。
-const EMPTY_TASKS: StudioGenerationTask[] = [];
-const StudioTasksContext = createContext<StudioGenerationTask[]>(EMPTY_TASKS);
+const StudioTasksContext = createContext<StudioGenerationTask[] | null>(null);
 
 export function useStudio(): StudioContextValue {
   const ctx = useContext(StudioContext);
@@ -838,7 +863,11 @@ export function useStudio(): StudioContextValue {
 }
 
 export function useStudioTasks(): StudioGenerationTask[] {
-  return useContext(StudioTasksContext);
+  // 与 useStudio 一致地抛错：给默认值会让挂错位置的组件静默渲染出一个没有任务的
+  // 画廊（进度条、失败卡全部消失），比直接报错难查得多。
+  const ctx = useContext(StudioTasksContext);
+  if (!ctx) throw new Error('useStudioTasks must be used within StudioProvider');
+  return ctx;
 }
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -1739,6 +1768,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const checks = processing.map(async (uiTask) => {
         const remoteId = taskRemoteIds(uiTask)[0] ?? null;
         if (!remoteId) return;
+        // 主轮询还活着就交给它，别把同一个任务查两遍
+        if (isTaskPolledLive(remoteId)) return;
         if (
           deletedLocalTaskIDsRef.current.has(uiTask.id) ||
           hasDeletedRemoteTaskId(deletedTaskRecordsRef.current, remoteId)

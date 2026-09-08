@@ -189,6 +189,36 @@ describe('创作工作台渲染与轮询路径', () => {
     ).toBe(created);
   });
 
+  it('兜底刷新不与主轮询重复请求同一任务', async () => {
+    const mounted = await mountProvider(probe);
+    root = mounted.root;
+    container = mounted.container;
+    await startGeneration();
+
+    // 观测窗口 20s：主轮询按退避节奏 800/1120/1568/2195/3073/4000… 约 8 次；
+    // 兜底刷新每 5s 一次（4 次）。若两者不去重，总数会明显高出主轮询单独的次数。
+    const before = getGenerationTask.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    const total = getGenerationTask.mock.calls.length - before;
+
+    // 自检：确实发生了轮询
+    expect(total, '窗口内没有任何轮询请求，断言无意义').toBeGreaterThan(3);
+
+    // 20s 内主轮询自身的理论次数（动态导入：静态 import 会在 vi.mock 的
+    // 替身常量初始化前加载模块，触发 TDZ）
+    const { pollDelayMs } = await import('../StudioContext');
+    let slept = 0;
+    let mainPolls = 0;
+    for (let attempt = 0; slept < 20_000; attempt += 1) {
+      slept += pollDelayMs(attempt);
+      mainPolls += 1;
+    }
+    expect(
+      total,
+      `20s 内发出 ${total} 次请求，主轮询自身仅需 ${mainPolls} 次——兜底刷新在重复查同一任务`,
+    ).toBeLessThanOrEqual(mainPolls + 1);
+  });
+
   it('进度回写不连带重渲染 useStudio 消费者（画廊卡片）', async () => {
     const mounted = await mountProvider(probe);
     root = mounted.root;
