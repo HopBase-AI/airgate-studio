@@ -88,8 +88,9 @@ lint: ## 代码检查（需要安装 golangci-lint）
 type-check: ## 前端 TypeScript 类型检查
 	cd web && pnpm type-check
 
-test: ensure-webdist ## 运行后端测试
+test: ensure-webdist ## 运行前后端测试
 	cd backend && $(GO) test ./...
+	cd web && pnpm test
 
 vet: ensure-webdist ## 静态分析
 	cd backend && $(GO) vet ./...

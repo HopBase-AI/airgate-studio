@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type DragEvent, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
-import { useStudio } from './StudioContext';
+import { useStudio, useStudioTasks } from './StudioContext';
 import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
@@ -1968,7 +1968,6 @@ function StudioLayout() {
   const { t } = useTranslation();
   const {
     gallery,
-    tasks,
     projectsEnabled,
     initialLoadComplete,
     activeProjectId,
@@ -1976,6 +1975,7 @@ function StudioLayout() {
     loadingMore,
     loadMoreError,
   } = useStudio();
+  const tasks = useStudioTasks();
   const promptRef = useRef<{ set: (v: string) => void } | null>(null);
   const [mobileTab, setMobileTab] = useState<'projects' | 'create'>('create');
   const [inspirationOpen, setInspirationOpen] = useState(false);

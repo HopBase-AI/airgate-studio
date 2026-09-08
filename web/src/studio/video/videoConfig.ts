@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ImageGroup } from '../../api';
 
@@ -672,15 +673,23 @@ export function formatVideoCostEstimate(amount: number, currency: string): strin
 }
 
 // useVideoStrings 按当前界面语言取视频模块文案（缺失回退英文 → 中文）。
+// 返回值必须按语言 memo：这个取词函数被 StudioContext 的多个 useCallback 当依赖，
+// 每次渲染换新引用会沿依赖链把 recoverTasks / selectProject / generateVideo 等一并
+// 变成不稳定引用，最终让整个 context 值每帧失稳、画廊全量重渲染。
 export function useVideoStrings(): (key: VideoStringKey) => string {
   const { i18n } = useTranslation();
   const lang = (i18n.language || 'zh').toLowerCase();
-  const dict = lang.startsWith('zh')
-    ? (lang.includes('hk') || lang.includes('hant') || lang.includes('tw') ? VIDEO_STRINGS['zh-HK'] : VIDEO_STRINGS.zh)
-    : lang.startsWith('ja')
-      ? VIDEO_STRINGS.ja
-      : lang.startsWith('es')
-        ? VIDEO_STRINGS.es
-        : VIDEO_STRINGS.en;
-  return (key: VideoStringKey) => dict[key] ?? VIDEO_STRINGS.en[key] ?? VIDEO_STRINGS.zh[key];
+  const dict = useMemo(() => (
+    lang.startsWith('zh')
+      ? (lang.includes('hk') || lang.includes('hant') || lang.includes('tw') ? VIDEO_STRINGS['zh-HK'] : VIDEO_STRINGS.zh)
+      : lang.startsWith('ja')
+        ? VIDEO_STRINGS.ja
+        : lang.startsWith('es')
+          ? VIDEO_STRINGS.es
+          : VIDEO_STRINGS.en
+  ), [lang]);
+  return useCallback(
+    (key: VideoStringKey) => dict[key] ?? VIDEO_STRINGS.en[key] ?? VIDEO_STRINGS.zh[key],
+    [dict],
+  );
 }
