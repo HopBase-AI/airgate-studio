@@ -390,13 +390,13 @@ func (p *StudioPlugin) estimateVideoOfficialCost(r *http.Request, userID, groupI
 	return cost
 }
 
-// videoBudgetRejection 提交前的预算闸门。返回 (message,false) 表示余额不足、不要建任务；
-// 拿不到预估或预检本身故障时一律放行（true）——core 转发侧仍是权威闸门，
 // videoBudgetInsufficientMessage 预检判定余额不足、但 core 没给出带金额明细的原文时的兜底。
 // 客户可见文案一律英文：创作工作坊面向多语言用户，本地化由前端按分类码完成
 // （web/src/studio/video/failureHints.ts → VIDEO_STRINGS.fail_insufficient_balance 五语）。
 const videoBudgetInsufficientMessage = "Insufficient balance. Top up before submitting a video task."
 
+// videoBudgetRejection 提交前的预算闸门。返回 (message,false) 表示余额不足、不要建任务；
+// 拿不到预估或预检本身故障时一律放行（true）——core 转发侧仍是权威闸门，
 // 预检失败不能变成「谁也发不出去」。
 func (p *StudioPlugin) videoBudgetRejection(r *http.Request, userID int64, req createGenerationTaskRequest) (string, bool) {
 	estimated := p.estimateVideoOfficialCost(r, userID, req.GroupID, req.Platform, req.Model, req.Parameters, len(extractImageInputs(req.Inputs)))
