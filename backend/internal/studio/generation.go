@@ -430,6 +430,15 @@ var imageModelSupportedSizes = map[string]map[string]struct{}{
 	"seedream-5-0-pro": {
 		"1024x1024": {}, "2048x2048": {},
 	},
+	// seedream-5-0-lite / seedream-4-5 走上游大图档：输出像素必须 ≥ 3,686,400
+	// （gateway-seedance images.go min4KOutputPixels），所以没有 1K 档，
+	// 2048x2048 是下限之上最小的可用尺寸。与前端 SEEDREAM_LARGE_SIZES 一致。
+	"seedream-5-0-lite": {
+		"2048x2048": {}, "3840x2160": {}, "2160x3840": {},
+	},
+	"seedream-4-5": {
+		"2048x2048": {}, "3840x2160": {}, "2160x3840": {},
+	},
 }
 
 func validateImageModelSize(model string, params map[string]interface{}) error {

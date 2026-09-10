@@ -1,5 +1,5 @@
 import type { ImageGroup } from '../api';
-import type { ModelConfig, ModelFamily } from './modelConfig';
+import { isNewlyLaunchedModel, type ModelConfig, type ModelFamily } from './modelConfig';
 
 const ROUTE_VALUE_SEPARATOR = '|';
 
@@ -153,13 +153,17 @@ function popularityOf(groups: ImageGroup[]): number | undefined {
 // buildModelRouteOptions 生成选择器候选：一个供给一行（R1，value = routeKey|groupId）。
 // - 标签 = 模型名 [· 官方直连]（R2），不解析分组名；
 // - 同模型（按显示名）多供给相邻、价低在前；同模型同限定词只留价低的一行（R3）；
-// - 模型间按近 30 天使用人数降序，缺数据的排在有数据的之后、按注册表顺序（R3）。
+// - 新模型（注册表 launchedAt 在置顶窗口内）整体排在最前，彼此按注册表顺序；
+// - 其余模型按近 30 天使用人数降序，缺数据的排在有数据的之后、按注册表顺序（R3）。
+// now 只为测试可注入，生产按当前时间判断置顶窗口。
 export function buildModelRouteOptions(
   models: ModelConfig[],
   groupsForModel: (model: ModelConfig) => ImageGroup[],
+  now: number = Date.now(),
 ): ModelRouteOption[] {
   interface ModelBucket {
     order: number;
+    isNew: boolean;
     popularity: number | undefined;
     options: ModelRouteOption[];
   }
@@ -170,9 +174,11 @@ export function buildModelRouteOptions(
     if (groups.length === 0) return;
     let bucket = buckets.get(model.name);
     if (!bucket) {
-      bucket = { order: index, popularity: undefined, options: [] };
+      bucket = { order: index, isNew: false, popularity: undefined, options: [] };
       buckets.set(model.name, bucket);
     }
+    // 同名模型可能有多条注册表记录（同模型的不同平台供给），任一条标了上线日期就算新。
+    bucket.isNew = bucket.isNew || isNewlyLaunchedModel(model, now);
     const popularity = popularityOf(groups);
     if (popularity != null) {
       bucket.popularity = bucket.popularity == null ? popularity : Math.max(bucket.popularity, popularity);
@@ -194,6 +200,9 @@ export function buildModelRouteOptions(
   });
 
   const ordered = Array.from(buckets.values()).sort((a, b) => {
+    // 新模型置顶：零 users_30d 的新品按热度会沉底，用户根本看不到。
+    if (a.isNew !== b.isNew) return a.isNew ? -1 : 1;
+    if (a.isNew && b.isNew) return a.order - b.order;
     const aHas = a.popularity != null;
     const bHas = b.popularity != null;
     if (aHas && bHas && a.popularity !== b.popularity) return (b.popularity as number) - (a.popularity as number);

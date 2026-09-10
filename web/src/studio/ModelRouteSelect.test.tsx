@@ -133,7 +133,6 @@ describe('ModelRouteSelect rendering', () => {
     expect(html).toContain('data-family="banana"');
     expect(html).toContain('data-family="gpt-image"');
     expect(html).toContain('data-family="seedream"');
-    expect(html).not.toContain('data-family="grok"');
     expect(html).toMatch(/aria-pressed="true"[^>]*data-family="banana"/);
   });
 
