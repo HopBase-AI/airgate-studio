@@ -162,27 +162,27 @@ var minimaxVideoRatios = map[string]struct{}{
 func validateMiniMaxVideoParams(model string, params map[string]interface{}) error {
 	spec, ok := minimaxVideoSpecs[strings.ToLower(strings.TrimSpace(model))]
 	if !ok {
-		return fmt.Errorf("模型 %s 不在 MiniMax 视频目录内", model)
+		return fmt.Errorf("model %s is not in the MiniMax video catalog", model)
 	}
 	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
 		normalized := strings.ToLower(strings.TrimSpace(res))
 		if _, allowed := spec.resolutions[normalized]; !allowed {
-			return fmt.Errorf("模型 %s 不支持分辨率 %s", model, res)
+			return fmt.Errorf("model %s does not support resolution %s", model, res)
 		}
 	}
 	if v, ok := params["duration"]; ok {
 		d, ok := toInt(v)
 		if !ok {
-			return fmt.Errorf("duration 必须是整数")
+			return fmt.Errorf("duration must be an integer")
 		}
 		if d < spec.minDuration || d > spec.maxDuration {
-			return fmt.Errorf("模型 %s 的 duration 需在 %d-%d 秒之间", model, spec.minDuration, spec.maxDuration)
+			return fmt.Errorf("model %s requires a duration between %d and %d seconds", model, spec.minDuration, spec.maxDuration)
 		}
 	}
 	if ratio, ok := params["ratio"].(string); ok && strings.TrimSpace(ratio) != "" {
 		normalized := strings.ToLower(strings.TrimSpace(ratio))
 		if _, allowed := minimaxVideoRatios[normalized]; !allowed {
-			return fmt.Errorf("模型 %s 不支持画幅 %s", model, ratio)
+			return fmt.Errorf("model %s does not support aspect ratio %s", model, ratio)
 		}
 	}
 	return nil
@@ -241,30 +241,30 @@ var fleetVideoSpecs = map[string]struct {
 func validateFleetVideoParams(model string, params map[string]interface{}) error {
 	spec, ok := fleetVideoSpecs[strings.ToLower(strings.TrimSpace(model))]
 	if !ok {
-		return fmt.Errorf("模型 %s 不在视频参数目录内", model)
+		return fmt.Errorf("model %s is not in the video parameter catalog", model)
 	}
 	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
 		normalized := strings.ToLower(strings.TrimSpace(res))
 		if _, allowed := spec.resolutions[normalized]; !allowed {
-			return fmt.Errorf("模型 %s 不支持分辨率 %s", model, res)
+			return fmt.Errorf("model %s does not support resolution %s", model, res)
 		}
 	}
 	if v, ok := params["duration"]; ok {
 		d, ok := toInt(v)
 		if !ok {
-			return fmt.Errorf("duration 必须是整数")
+			return fmt.Errorf("duration must be an integer")
 		}
 		if d == -1 && spec.allowAuto {
 			// -1 = 自动时长
 		} else if d < spec.minDuration || d > spec.maxDuration {
-			return fmt.Errorf("模型 %s 的 duration 需在 %d-%d 秒之间", model, spec.minDuration, spec.maxDuration)
+			return fmt.Errorf("model %s requires a duration between %d and %d seconds", model, spec.minDuration, spec.maxDuration)
 		}
 	}
 	if spec.ratios != nil {
 		if ratio, ok := params["ratio"].(string); ok && strings.TrimSpace(ratio) != "" {
 			normalized := strings.ToLower(strings.TrimSpace(ratio))
 			if _, allowed := spec.ratios[normalized]; !allowed {
-				return fmt.Errorf("模型 %s 不支持画幅 %s", model, ratio)
+				return fmt.Errorf("model %s does not support aspect ratio %s", model, ratio)
 			}
 		}
 	}
@@ -284,27 +284,27 @@ func validateVideoModelParams(model string, params map[string]interface{}) error
 	if res, ok := params["resolution"].(string); ok && strings.TrimSpace(res) != "" {
 		normalized := strings.ToLower(strings.TrimSpace(res))
 		if _, allowed := videoModelResolutions(model)[normalized]; !allowed {
-			return fmt.Errorf("模型 %s 不支持分辨率 %s", model, res)
+			return fmt.Errorf("model %s does not support resolution %s", model, res)
 		}
 	}
 	if v, ok := params["duration"]; ok {
 		d, ok := toInt(v)
 		if !ok {
-			return fmt.Errorf("duration 必须是整数")
+			return fmt.Errorf("duration must be an integer")
 		}
 		maxDuration := 15
 		if isSeedance25VideoModel(model) {
 			maxDuration = 30
 		}
 		if d != -1 && (d < 4 || d > maxDuration) {
-			return fmt.Errorf("模型 %s 的 duration 需在 4-%d 秒之间，或使用 -1 自动选择", model, maxDuration)
+			return fmt.Errorf("model %s requires a duration between 4 and %d seconds, or -1 to pick automatically", model, maxDuration)
 		}
 	}
 	if isSeedance25VideoModel(model) {
 		if ratio, ok := params["ratio"].(string); ok && strings.TrimSpace(ratio) != "" {
 			normalized := strings.ToLower(strings.TrimSpace(ratio))
 			if _, allowed := seedance25VideoRatios[normalized]; !allowed {
-				return fmt.Errorf("模型 %s 不支持画幅 %s", model, ratio)
+				return fmt.Errorf("model %s does not support aspect ratio %s", model, ratio)
 			}
 		}
 	}
@@ -448,7 +448,7 @@ func validateImageModelSize(model string, params map[string]interface{}) error {
 	if _, ok := allowed[size]; ok {
 		return nil
 	}
-	return fmt.Errorf("模型 %s 不支持尺寸 %s", model, size)
+	return fmt.Errorf("model %s does not support size %s", model, size)
 }
 
 func normalizeGenerationRequest(req *createGenerationTaskRequest) {

@@ -83,7 +83,7 @@ func hostListImageGroups(ctx context.Context, host sdk.Host, userID int64, platf
 func hostListEligibleGroups(ctx context.Context, host sdk.Host, userID int64, platform, model string, needsImage bool) ([]imageGroup, error) {
 	platform = strings.TrimSpace(platform)
 	if platform == "" {
-		return nil, fmt.Errorf("platform 不能为空")
+		return nil, fmt.Errorf("platform must not be empty")
 	}
 	models := []string{strings.TrimSpace(model)}
 	// 海外 2.5 要兼并旧 -ep 别名的分组；国内 2.5 是独立原生 ID，不做别名合并。
@@ -151,20 +151,20 @@ func validateGenerationGroup(ctx context.Context, host sdk.Host, userID, groupID
 func validateVideoGenerationAccess(ctx context.Context, host sdk.Host, userID, groupID int64, platform, model string) error {
 	groups, err := hostListEligibleGroups(ctx, host, userID, platform, model, false)
 	if err != nil {
-		return fmt.Errorf("查询可用分组失败: %w", err)
+		return fmt.Errorf("failed to query available groups: %w", err)
 	}
 	if len(groups) == 0 {
-		return fmt.Errorf("当前没有可用的视频生成分组，请先在后台创建 %s 分组并绑定可用账号", displayPlatformName(platform))
+		return fmt.Errorf("No video generation group is available. Create a %s group in the console and bind a usable account first.", displayPlatformName(platform))
 	}
 	if groupID <= 0 {
-		return fmt.Errorf("请选择一个可用的视频生成分组")
+		return fmt.Errorf("select an available video generation group")
 	}
 	for _, g := range groups {
 		if g.ID == groupID {
 			return nil
 		}
 	}
-	return fmt.Errorf("分组不可用或无权访问")
+	return fmt.Errorf("group is unavailable or not accessible")
 }
 
 // validateGenerationAccess 校验显式 group_id 属于当前用户在指定平台和模型下
@@ -172,20 +172,20 @@ func validateVideoGenerationAccess(ctx context.Context, host sdk.Host, userID, g
 func validateGenerationAccess(ctx context.Context, host sdk.Host, userID, groupID int64, platform, model string) error {
 	groups, err := hostListImageGroups(ctx, host, userID, platform, model)
 	if err != nil {
-		return fmt.Errorf("查询可用分组失败: %w", err)
+		return fmt.Errorf("failed to query available groups: %w", err)
 	}
 	if len(groups) == 0 {
-		return fmt.Errorf("当前没有可用的 %s 图片分组，请先在后台创建分组并绑定可用账号", displayPlatformName(platform))
+		return fmt.Errorf("No %s image group is available. Create a group in the console and bind a usable account first.", displayPlatformName(platform))
 	}
 	if groupID <= 0 {
-		return fmt.Errorf("请选择一个可用的图片生成分组")
+		return fmt.Errorf("select an available image generation group")
 	}
 	for _, g := range groups {
 		if g.ID == groupID {
 			return nil
 		}
 	}
-	return fmt.Errorf("分组不可用或无权访问")
+	return fmt.Errorf("group is unavailable or not accessible")
 }
 
 func displayPlatformName(platform string) string {
@@ -199,9 +199,9 @@ func displayPlatformName(platform string) string {
 		return "Hailuo"
 	case "bailian":
 		// 同上:不暴露「百炼/阿里云」,用产品名。
-		return "万相/快乐马"
+		return "Wan / Happyhorse"
 	case "kling":
-		return "可灵"
+		return "Kling"
 	default:
 		return strings.TrimSpace(platform)
 	}

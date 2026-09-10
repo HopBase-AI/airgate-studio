@@ -42,7 +42,7 @@ func (s *Service) CreateProject(ctx context.Context, userID int, name string) (*
 		 RETURNING id, created_at, updated_at`,
 		userID, name,
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt); err != nil {
-		return nil, fmt.Errorf("写入项目失败: %w", err)
+		return nil, fmt.Errorf("insert project: %w", err)
 	}
 	return p, nil
 }
@@ -73,7 +73,7 @@ func (s *Service) ListProjects(ctx context.Context, userID int) ([]Project, erro
 func (s *Service) RenameProject(ctx context.Context, userID int, projectID int64, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("项目名不能为空")
+		return fmt.Errorf("project name must not be empty")
 	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE studio_projects SET name = $1, updated_at = NOW()
@@ -110,12 +110,12 @@ func (s *Service) DeleteProject(ctx context.Context, userID int, projectID int64
 func (s *Service) EnsureDefaultProject(ctx context.Context, userID int) (*Project, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("开启事务失败: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, defaultProjectLockKey(userID)); err != nil {
-		return nil, fmt.Errorf("锁定默认项目失败: %w", err)
+		return nil, fmt.Errorf("lock default project: %w", err)
 	}
 
 	p := &Project{UserID: userID}
@@ -140,7 +140,7 @@ func (s *Service) EnsureDefaultProject(ctx context.Context, userID int) (*Projec
 		 RETURNING id, created_at, updated_at`,
 		userID, defaultProjectName,
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt); err != nil {
-		return nil, fmt.Errorf("创建默认项目失败: %w", err)
+		return nil, fmt.Errorf("create default project: %w", err)
 	}
 	return p, tx.Commit()
 }
@@ -181,7 +181,7 @@ func (s *Service) assetByTaskURL(ctx context.Context, userID int, projectID, tas
 // AddAsset 把一张已生成图的持久 URL + 元数据写入项目。仅记引用，不调用任何 host assets 方法。
 func (s *Service) AddAsset(ctx context.Context, userID int, projectID int64, rec AssetRecord) (*AssetRecord, error) {
 	if strings.TrimSpace(rec.URL) == "" {
-		return nil, fmt.Errorf("url 不能为空")
+		return nil, fmt.Errorf("url must not be empty")
 	}
 	ok, err := s.projectExists(ctx, userID, projectID)
 	if err != nil {
@@ -214,7 +214,7 @@ func (s *Service) AddAsset(ctx context.Context, userID int, projectID int64, rec
 		if errors.Is(err, sql.ErrNoRows) && rec.TaskID > 0 {
 			return s.assetByTaskURL(ctx, userID, projectID, rec.TaskID, rec.URL)
 		}
-		return nil, fmt.Errorf("写入资产失败: %w", err)
+		return nil, fmt.Errorf("insert asset: %w", err)
 	}
 	// 触碰项目 updated_at，让最近活跃的项目排在前面
 	_, _ = s.db.ExecContext(ctx, `UPDATE studio_projects SET updated_at = NOW() WHERE id = $1`, projectID)

@@ -62,7 +62,7 @@ func (p *StudioPlugin) requireProjectService(next http.HandlerFunc) http.Handler
 			return
 		}
 		if !p.Configured() {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "studio 项目功能未配置（缺少数据库）"})
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "studio project storage is not configured (database missing)"})
 			return
 		}
 		next(w, r)
@@ -163,7 +163,7 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 	attributes := buildTaskAttributes(req)
 	executorID := generationExecutorPluginID(req.Platform)
 	if !executorSupportsTaskType(executorID, taskType) || !executorSupportsOperation(executorID, req.Operation) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该平台不支持当前图片编辑方式，请更换模型或模式"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "This platform does not support the selected image editing mode. Pick another model or mode."})
 		return
 	}
 
@@ -184,7 +184,7 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 	task, err := hostCreateTask(r.Context(), p.host, executorID, taskType, userID, input, attributes)
 	if err != nil {
 		p.logger.Error("create_generation_task_failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "创建任务失败: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create task: " + err.Error()})
 		return
 	}
 
@@ -206,7 +206,7 @@ func (p *StudioPlugin) handleGetGenerationTask(w http.ResponseWriter, r *http.Re
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询任务失败: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to query task: " + err.Error()})
 		return
 	}
 
@@ -223,7 +223,7 @@ func (p *StudioPlugin) handleDeleteGenerationTask(w http.ResponseWriter, r *http
 
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
 	if err := hostDeleteTaskFromPlugins(r.Context(), p.host, generationExecutorPluginIDs(), userID, taskID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "删除任务失败: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete task: " + err.Error()})
 		return
 	}
 	if p.svc != nil {
@@ -253,7 +253,7 @@ func (p *StudioPlugin) handleListGenerationTasks(w http.ResponseWriter, r *http.
 
 	result, err := hostListTasks(r.Context(), p.host, generationExecutorPluginIDs(), userID, "", status, limit, offset)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询任务列表失败: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list tasks: " + err.Error()})
 		return
 	}
 
@@ -317,7 +317,7 @@ func (p *StudioPlugin) handleListImageGroups(w http.ResponseWriter, r *http.Requ
 	groups, err := hostListEligibleGroups(r.Context(), p.host, userID, platform, model, needsImage)
 	if err != nil {
 		p.logger.Error("list_image_groups_failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询可用分组失败"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to query available groups"})
 		return
 	}
 	if groups == nil {
@@ -358,7 +358,7 @@ func (p *StudioPlugin) handleBudget(w http.ResponseWriter, r *http.Request) {
 		if p.logger != nil {
 			p.logger.Error("budget_query_failed", "user_id", userID, "platform", req.Platform, "error", err)
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询预算失败: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to query budget: " + err.Error()})
 		return
 	}
 	if payload == nil {
@@ -390,6 +390,11 @@ func (p *StudioPlugin) estimateVideoOfficialCost(r *http.Request, userID, groupI
 	return cost
 }
 
+// videoBudgetInsufficientMessage 预检判定余额不足、但 core 没给出带金额明细的原文时的兜底。
+// 客户可见文案一律英文：创作工作坊面向多语言用户，本地化由前端按分类码完成
+// （web/src/studio/video/failureHints.ts → VIDEO_STRINGS.fail_insufficient_balance 五语）。
+const videoBudgetInsufficientMessage = "Insufficient balance. Top up before submitting a video task."
+
 // videoBudgetRejection 提交前的预算闸门。返回 (message,false) 表示余额不足、不要建任务；
 // 拿不到预估或预检本身故障时一律放行（true）——core 转发侧仍是权威闸门，
 // 预检失败不能变成「谁也发不出去」。
@@ -410,7 +415,7 @@ func (p *StudioPlugin) videoBudgetRejection(r *http.Request, userID int64, req c
 	}
 	message := strings.TrimSpace(budget.Message)
 	if message == "" {
-		message = "余额不足，请先充值后再提交视频任务"
+		message = videoBudgetInsufficientMessage
 	}
 	return message, false
 }
