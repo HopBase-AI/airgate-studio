@@ -146,7 +146,7 @@ func TestValidateVideoModelParamsKeepsSeedance20DurationBoundary(t *testing.T) {
 func TestValidateVideoModelParamsRejectsFractionalDuration(t *testing.T) {
 	for _, duration := range []interface{}{float64(4.5), json.Number("4.5")} {
 		err := validateVideoModelParams(videoModelSeedance25, map[string]interface{}{"duration": duration})
-		if err == nil || !strings.Contains(err.Error(), "duration 必须是整数") {
+		if err == nil || !strings.Contains(err.Error(), "duration must be an integer") {
 			t.Fatalf("fractional duration %v error = %v, want integer validation error", duration, err)
 		}
 	}
@@ -473,7 +473,7 @@ func TestHandleCreateGenerationTaskRejectsSeedream4K(t *testing.T) {
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
-	if body := recorder.Body.String(); !strings.Contains(body, "不支持尺寸 4096x4096") {
+	if body := recorder.Body.String(); !strings.Contains(body, "does not support size 4096x4096") {
 		t.Fatalf("body = %q, want unsupported-size error", body)
 	}
 }

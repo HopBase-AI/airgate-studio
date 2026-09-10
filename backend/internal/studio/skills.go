@@ -61,7 +61,7 @@ func (p *StudioPlugin) handleRewritePrompt(w http.ResponseWriter, r *http.Reques
 
 	platform, model := p.resolveSkillModel(r.Context(), req.Platform, req.Model, false)
 	if model == "" {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "没有可用的对话模型，请在插件配置里设置 skill_text_model"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "No chat model is available. Set skill_text_model in the plugin configuration."})
 		return
 	}
 
@@ -71,7 +71,7 @@ func (p *StudioPlugin) handleRewritePrompt(w http.ResponseWriter, r *http.Reques
 	}
 	content, err := p.callChat(r.Context(), userID, platform, model, messages, 0.7)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "改写失败: " + err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "prompt rewrite failed: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"result": content, "model": model})
@@ -96,7 +96,7 @@ func (p *StudioPlugin) handleCaptionImage(w http.ResponseWriter, r *http.Request
 
 	platform, model := p.resolveSkillModel(r.Context(), req.Platform, req.Model, true)
 	if model == "" {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "没有可用的视觉模型，请在插件配置里设置 skill_vision_model"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "No vision model is available. Set skill_vision_model in the plugin configuration."})
 		return
 	}
 
@@ -111,7 +111,7 @@ func (p *StudioPlugin) handleCaptionImage(w http.ResponseWriter, r *http.Request
 	}
 	content, err := p.callChat(r.Context(), userID, platform, model, messages, 0.5)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "反推失败: " + err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "image captioning failed: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"result": content, "model": model})
@@ -129,7 +129,7 @@ func (p *StudioPlugin) resolveImageURL(ctx context.Context, userID int64, req ca
 	}
 	raw := strings.TrimSpace(req.ImageURL)
 	if raw == "" {
-		return "", fmt.Errorf("image_url 或 image_base64 必填")
+		return "", fmt.Errorf("image_url or image_base64 is required")
 	}
 	if strings.HasPrefix(raw, "data:") || strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
 		return raw, nil
@@ -138,11 +138,11 @@ func (p *StudioPlugin) resolveImageURL(ctx context.Context, userID int64, req ca
 	if key, ok := assetObjectKeyFromRuntimeURL(raw); ok {
 		dataURL, err := hostGetAssetDataURL(ctx, p.host, key)
 		if err != nil {
-			return "", fmt.Errorf("读取图片失败: %w", err)
+			return "", fmt.Errorf("failed to read image: %w", err)
 		}
 		return dataURL, nil
 	}
-	return "", fmt.Errorf("不支持的图片地址")
+	return "", fmt.Errorf("unsupported image url")
 }
 
 // resolveSkillModel 解析 skills 使用的 platform/model：
@@ -290,11 +290,11 @@ func (p *StudioPlugin) callChat(ctx context.Context, userID int64, platform, mod
 		return "", err
 	}
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("上游返回 %d: %s", resp.StatusCode, truncate(string(resp.Body), 300))
+		return "", fmt.Errorf("upstream returned %d: %s", resp.StatusCode, truncate(string(resp.Body), 300))
 	}
 	content := extractChatContent(resp.Body)
 	if strings.TrimSpace(content) == "" {
-		return "", fmt.Errorf("模型未返回内容")
+		return "", fmt.Errorf("model returned no content")
 	}
 	return content, nil
 }

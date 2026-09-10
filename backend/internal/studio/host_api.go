@@ -31,7 +31,7 @@ const (
 
 func hostInvoke(ctx context.Context, host sdk.Host, method string, payload map[string]interface{}) (map[string]interface{}, error) {
 	if host == nil {
-		return nil, fmt.Errorf("host 未启用")
+		return nil, fmt.Errorf("host is not enabled")
 	}
 	resp, err := host.Invoke(ctx, sdk.HostInvokeRequest{
 		Method:  method,
@@ -47,7 +47,7 @@ func hostInvoke(ctx context.Context, host sdk.Host, method string, payload map[s
 		if msg, _ := resp.Payload["message"].(string); msg != "" {
 			return nil, fmt.Errorf("%s", msg)
 		}
-		return nil, fmt.Errorf("host method %s 返回错误", method)
+		return nil, fmt.Errorf("host method %s returned an error", method)
 	}
 	return resp.Payload, nil
 }
@@ -362,16 +362,16 @@ func hostEstimateVideoOfficialCost(ctx context.Context, host sdk.Host, userID, g
 		return 0, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("预估端点返回 %d: %s", resp.StatusCode, truncate(string(resp.Body), 200))
+		return 0, fmt.Errorf("estimate endpoint returned %d: %s", resp.StatusCode, truncate(string(resp.Body), 200))
 	}
 	var payload struct {
 		EstimatedOfficialCost float64 `json:"estimated_official_cost"`
 	}
 	if err := json.Unmarshal(resp.Body, &payload); err != nil {
-		return 0, fmt.Errorf("预估响应解析失败: %w", err)
+		return 0, fmt.Errorf("estimate response parse failed: %w", err)
 	}
 	if payload.EstimatedOfficialCost <= 0 {
-		return 0, fmt.Errorf("预估结果非正数")
+		return 0, fmt.Errorf("estimate result is not a positive number")
 	}
 	return payload.EstimatedOfficialCost, nil
 }
@@ -482,7 +482,7 @@ func hostGetAssetDataURL(ctx context.Context, host sdk.Host, objectKey string) (
 	}
 	data := binaryFromPayload(firstValue(resp, "data"))
 	if len(data) == 0 {
-		return "", fmt.Errorf("asset 字节为空")
+		return "", fmt.Errorf("asset bytes are empty")
 	}
 	contentType := stringFromAny(firstValue(resp, "content_type"))
 	if contentType == "" {

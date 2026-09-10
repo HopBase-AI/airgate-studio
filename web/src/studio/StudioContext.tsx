@@ -413,6 +413,9 @@ function errorMessageFromUnknown(err: unknown, fallback = 'Generation failed'): 
   return fallback;
 }
 
+// 2026-09-10：后端已把「项目不存在 / 资产不存在」改成 project not found / asset not found
+// （客户可见文案统一英文），命中的是下面的 /\bnot\s*found\b/i；中文分支保留用于兜住
+// core 或存量上游仍可能回中文的场景，两边都要留。
 function isNotFoundError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err ?? '');
   return /\bnot\s*found\b/i.test(msg) || /\bNotFound\b/.test(msg) || /\b404\b/.test(msg) || msg.includes('不存在');

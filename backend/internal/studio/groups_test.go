@@ -147,7 +147,7 @@ func TestValidateGenerationAccessRequiresAvailablePlatformGroup(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected no available gemini group to be rejected")
 	}
-	if got, want := err.Error(), "当前没有可用的 Gemini 图片分组"; !strings.Contains(got, want) {
+	if got, want := err.Error(), "No Gemini image group is available"; !strings.Contains(got, want) {
 		t.Fatalf("error = %q, want contains %q", got, want)
 	}
 }

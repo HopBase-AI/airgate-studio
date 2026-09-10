@@ -16,12 +16,12 @@ func (p *StudioPlugin) handleListProjects(w http.ResponseWriter, r *http.Request
 	// 首次访问自动确保有一个默认项目，避免前端拿到空列表无处落图。
 	if _, err := p.svc.EnsureDefaultProject(r.Context(), userID); err != nil {
 		p.logger.Error("ensure_default_project_failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "初始化默认项目失败: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to initialize the default project: " + err.Error()})
 		return
 	}
 	projects, err := p.svc.ListProjects(r.Context(), userID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询项目列表失败: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list projects: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"projects": projects})
@@ -57,7 +57,7 @@ func (p *StudioPlugin) handleUpdateProject(w http.ResponseWriter, r *http.Reques
 	}
 	if err := p.svc.RenameProject(r.Context(), userID, projectID, req.Name); err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "项目不存在"})
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 			return
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -75,7 +75,7 @@ func (p *StudioPlugin) handleDeleteProject(w http.ResponseWriter, r *http.Reques
 	}
 	if err := p.svc.DeleteProject(r.Context(), userID, projectID); err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "项目不存在"})
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -103,7 +103,7 @@ func (p *StudioPlugin) handleListProjectAssets(w http.ResponseWriter, r *http.Re
 	}
 	assets, total, err := p.svc.ListAssets(r.Context(), userID, projectID, limit, offset)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产失败: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list assets: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"assets": assets, "total": total})
@@ -156,11 +156,11 @@ func (p *StudioPlugin) handleAddProjectAsset(w http.ResponseWriter, r *http.Requ
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "项目不存在"})
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 			return
 		}
 		if errors.Is(err, ErrAssetDeleted) {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "资产已被删除"})
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "asset has been deleted"})
 			return
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -178,7 +178,7 @@ func (p *StudioPlugin) handleDeleteProjectAsset(w http.ResponseWriter, r *http.R
 	}
 	if err := p.svc.DeleteAsset(r.Context(), userID, assetID); err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "asset not found"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
