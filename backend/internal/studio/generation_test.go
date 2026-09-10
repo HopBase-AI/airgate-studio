@@ -430,6 +430,10 @@ func TestValidateImageModelSize(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "gpt image 4k", model: "gpt-image-2", size: "3840x2160"},
+		{name: "gpt image 2.5 auto", model: "gpt-image-2.5-flare", size: "auto"},
+		{name: "gpt image 2.5 4k", model: "gpt-image-2.5-flare", size: "3840x2160"},
+		{name: "gpt image 2.5 max 2k", model: "gpt-image-2.5-sunburst", size: "2000x1600"},
+		{name: "gpt image 2.5 max rejects off-table size", model: "gpt-image-2.5-sunburst", size: "4096x4096", wantErr: true},
 		{name: "banana lite 1k", model: "gemini-3.1-flash-lite-image", size: "1024x1536"},
 		{name: "banana lite rejects 2k", model: "gemini-3.1-flash-lite-image", size: "2048x2048", wantErr: true},
 		{name: "banana 2 rejects 4k", model: "gemini-3.1-flash-image", size: "3840x2160", wantErr: true},

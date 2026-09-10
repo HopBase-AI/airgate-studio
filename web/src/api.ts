@@ -145,6 +145,12 @@ export interface ImageGroup {
     '4k'?: number;
     currency?: string;
   };
+  // 通道（数据契约 plugin_settings.studio.channel）：standard / official /
+  // domestic / overseas；插件后端从 groups.list 项透传，缺省按 standard。
+  channel?: string;
+  // 该模型在本分组近 30 天使用人数（热度排序）；core 未统计时缺省，
+  // 前端按注册表顺序兜底。
+  users_30d?: number;
 }
 
 // BudgetInfo studio /budget 的应答：core billing.budget 载荷原样透传，

@@ -6,8 +6,9 @@ import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
+import { ModelRouteSelect } from './ModelRouteSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
-import { buildModelRouteOptions, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue, sanitizeVendorTokens } from './modelRoutes';
+import { buildModelRouteOptions, imageGroupChannel, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue, sanitizeVendorTokens } from './modelRoutes';
 import { commitComposerSend, isComposerSubmitKey } from './composerSend';
 import { videoModelById, useVideoStrings, formatVideoCostEstimate } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
@@ -972,10 +973,11 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     const filtered = baseModelOptions.filter(model => hasImageGroupsForModel(model));
     return filtered;
   }, [baseModelOptions, hasImageGroupsForModel, imageGroupsLoaded]);
+  // 一供给一行、标签/价格列/排序/去重全在 buildModelRouteOptions；语言本地化在
+  // ModelRouteSelect 渲染层做（localizeRouteLabel），这里只保留纯数据。
   const modelRouteOptions = useMemo(
-    () => buildModelRouteOptions(modelOptions, getImageGroupsForModel)
-      .map(option => ({ ...option, label: localizeRouteLabel(option.label, t, i18n.language) })),
-    [getImageGroupsForModel, modelOptions, t, i18n.language],
+    () => buildModelRouteOptions(modelOptions, getImageGroupsForModel),
+    [getImageGroupsForModel, modelOptions],
   );
   const selectedModelRouteValue = selectedGroupId != null
     ? modelRouteOptionValue(selectedModelKey, selectedGroupId)
@@ -988,6 +990,22 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       setSelectedModelKey(modelOptions[0].routeKey);
     }
   }, [modelOptions, selectedModelKey, setSelectedModelKey]);
+
+  // R3 去重后同模型同限定词只露价低的一行；若记忆的分组确实是该模型的候选、
+  // 只是被去重隐藏了，把选中切到同通道的可见行（即更便宜的同类供给），避免触发器
+  // 落到占位文案。记忆的分组根本不在候选里时不动——那是 StudioContext 默认选组的事。
+  useEffect(() => {
+    if (isVideo || !imageGroupsLoaded || selectedGroupId == null || modelRouteOptions.length === 0) return;
+    if (modelRouteOptions.some(option => option.value === selectedModelRouteValue)) return;
+    const model = modelOptions.find(m => m.routeKey === selectedModelKey);
+    if (!model) return;
+    const savedGroup = getImageGroupsForModel(model).find(group => group.id === selectedGroupId);
+    if (!savedGroup) return;
+    const savedChannel = imageGroupChannel(savedGroup);
+    const candidates = modelRouteOptions.filter(option => option.modelKey === selectedModelKey);
+    const fallback = candidates.find(option => option.channel === savedChannel) ?? candidates[0];
+    if (fallback) selectModelRoute(fallback.modelKey, fallback.groupId);
+  }, [getImageGroupsForModel, imageGroupsLoaded, isVideo, modelOptions, modelRouteOptions, selectModelRoute, selectedGroupId, selectedModelKey, selectedModelRouteValue]);
 
   const handleSend = (): boolean => {
     const trimmed = prompt.trim();
@@ -1342,7 +1360,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           ) : (
             <>
               <div style={c.modelSelect}>
-                <CustomSelect
+                <ModelRouteSelect
                   value={selectedModelRouteValue}
                   options={modelRouteOptions}
                   onChange={value => {

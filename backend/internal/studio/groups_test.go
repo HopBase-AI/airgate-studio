@@ -2,6 +2,7 @@ package studio
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -161,5 +162,59 @@ func TestValidateGenerationAccessRequiresExplicitGroup(t *testing.T) {
 	}
 	if err := validateVideoGenerationAccess(context.Background(), host, 7, 0, "seedance", "seedance-model"); err == nil {
 		t.Fatal("missing video group_id must fail closed")
+	}
+}
+
+// TestImageGroupChannelPassthrough 覆盖数据契约 §4 的 channel / users_30d：
+// core 直接给 channel 或透传 plugin_settings.studio.channel 都能落到 channel 字段，
+// 值归一到封闭词表；plugin_settings 本身绝不带给前端。
+func TestImageGroupChannelPassthrough(t *testing.T) {
+	users := int64(42)
+	host := &groupTestHost{groups: []interface{}{
+		map[string]interface{}{"id": 23, "name": "Gemini 官方直连", "platform": "gemini", "rate_multiplier": 5.1, "effective_rate": 5.1, "channel": "Official"},
+		map[string]interface{}{
+			"id": 34, "name": "Gemini 生图(Banana 系)", "platform": "gemini", "rate_multiplier": 4.76, "effective_rate": 4.76,
+			"plugin_settings": map[string]interface{}{"studio": map[string]interface{}{"channel": "official", "secret": "x"}},
+			"users_30d":       users,
+		},
+		map[string]interface{}{"id": 18, "name": "Gemini 全系(含生图)", "platform": "openai", "rate_multiplier": 5.1, "effective_rate": 5.1, "channel": "vip"},
+		map[string]interface{}{"id": 15, "name": "GPT Image 全系", "platform": "openai", "rate_multiplier": 5.1, "effective_rate": 5.1},
+	}}
+
+	groups, err := hostListImageGroups(context.Background(), host, 7, "gemini", "gemini-3-pro-image")
+	if err != nil {
+		t.Fatalf("hostListImageGroups: %v", err)
+	}
+	if len(groups) != 4 {
+		t.Fatalf("groups = %+v", groups)
+	}
+	if groups[0].Channel != "official" {
+		t.Fatalf("top-level channel should normalise to official, got %q", groups[0].Channel)
+	}
+	if groups[1].Channel != "official" {
+		t.Fatalf("plugin_settings.studio.channel should surface as channel, got %q", groups[1].Channel)
+	}
+	if groups[1].Users30d == nil || *groups[1].Users30d != users {
+		t.Fatalf("users_30d lost: %+v", groups[1].Users30d)
+	}
+	if groups[2].Channel != "" || groups[3].Channel != "" {
+		t.Fatalf("unknown/missing channel must be dropped: %q %q", groups[2].Channel, groups[3].Channel)
+	}
+	if groups[0].Users30d != nil {
+		t.Fatalf("users_30d should be absent when core does not report it: %v", *groups[0].Users30d)
+	}
+
+	raw, err := json.Marshal(groups)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "plugin_settings") || strings.Contains(string(raw), "secret") {
+		t.Fatalf("plugin_settings must not leak to the frontend: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"channel":"official"`) || !strings.Contains(string(raw), `"users_30d":42`) {
+		t.Fatalf("channel/users_30d missing from payload: %s", raw)
+	}
+	if strings.Contains(string(raw), `"channel":""`) {
+		t.Fatalf("empty channel should be omitted: %s", raw)
 	}
 }

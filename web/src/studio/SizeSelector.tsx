@@ -19,6 +19,12 @@ function imagePriceSymbol(currency?: string): string {
   return currency?.toUpperCase() === 'CNY' ? '¥' : '$';
 }
 
+// 每档价只在分组固定张价存在时显示（withImageGroupPrices 会同时写入 price 与
+// showPrice）；注册表尺寸本身不带价，按实际消耗计费的模型永远不显示每档价。
+function hasTierPrice(size: SizeOption): size is SizeOption & { price: number } {
+  return size.showPrice === true && typeof size.price === 'number' && Number.isFinite(size.price);
+}
+
 function AspectIcon({ aspect, size = 16 }: { aspect?: string; size?: number }) {
   if (!aspect) return null;
   const [aw, ah] = aspect.split(':').map(Number);
@@ -236,7 +242,7 @@ export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSe
         <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {triggerLabel}
         </span>
-        {selected?.showPrice && (
+        {selected && hasTierPrice(selected) && (
           <span style={s.price}>{imagePriceSymbol(selected.currency)}{formatImagePrice(selected.price)}{priceUnit}</span>
         )}
         <svg
@@ -279,10 +285,10 @@ export function SizeSelector({ value, sizes, onChange, upward, compact }: SizeSe
                   >
                     {opt.aspect && <AspectIcon aspect={opt.aspect} />}
                     <span>{opt.label}</span>
-                    {(opt.aspect || opt.showPrice) && (
+                    {(opt.aspect || hasTierPrice(opt)) && (
                       <span style={s.optionMeta}>
                         {opt.aspect && <span style={s.optionAspect}>{opt.aspect}</span>}
-                        {opt.showPrice && <span style={s.price}>{imagePriceSymbol(opt.currency)}{formatImagePrice(opt.price)}{priceUnit}</span>}
+                        {hasTierPrice(opt) && <span style={s.price}>{imagePriceSymbol(opt.currency)}{formatImagePrice(opt.price)}{priceUnit}</span>}
                       </span>
                     )}
                   </button>
