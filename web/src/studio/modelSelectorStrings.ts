@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // ── 模型选择器本地多语言 ──────────────────────────────────────────────────────
@@ -74,7 +75,10 @@ export function modelSelectorStringsFor(language: string): ModelSelectorStrings 
 }
 
 // useModelSelectorStrings 按当前界面语言取选择器文案（缺失回退英文 → 中文）。
+// 按语言 memo：返回的闭包是下游 useMemo/useCallback 的依赖，每次渲染都换新会让
+// CustomSelect 的高亮同步 effect 在轮询重渲染时反复重置键盘高亮。
 export function useModelSelectorStrings(): ModelSelectorStrings {
   const { i18n } = useTranslation();
-  return modelSelectorStringsFor(i18n.language);
+  const language = i18n.language;
+  return useMemo(() => modelSelectorStringsFor(language), [language]);
 }

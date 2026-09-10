@@ -8,7 +8,7 @@ import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
 import { ModelRouteSelect } from './ModelRouteSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
-import { buildModelRouteOptions, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue, sanitizeVendorTokens } from './modelRoutes';
+import { buildModelRouteOptions, imageGroupChannel, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue, sanitizeVendorTokens } from './modelRoutes';
 import { commitComposerSend, isComposerSubmitKey } from './composerSend';
 import { videoModelById, useVideoStrings, formatVideoCostEstimate } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
@@ -991,14 +991,21 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     }
   }, [modelOptions, selectedModelKey, setSelectedModelKey]);
 
-  // R3 去重后同模型同限定词只露价低的一行；若记忆的分组正好是被隐藏的那一行，
-  // 把选中切到该模型可见的第一行（更便宜的供给），避免触发器落到占位文案。
+  // R3 去重后同模型同限定词只露价低的一行；若记忆的分组确实是该模型的候选、
+  // 只是被去重隐藏了，把选中切到同通道的可见行（即更便宜的同类供给），避免触发器
+  // 落到占位文案。记忆的分组根本不在候选里时不动——那是 StudioContext 默认选组的事。
   useEffect(() => {
-    if (isVideo || !imageGroupsLoaded || modelRouteOptions.length === 0) return;
+    if (isVideo || !imageGroupsLoaded || selectedGroupId == null || modelRouteOptions.length === 0) return;
     if (modelRouteOptions.some(option => option.value === selectedModelRouteValue)) return;
-    const fallback = modelRouteOptions.find(option => option.modelKey === selectedModelKey);
+    const model = modelOptions.find(m => m.routeKey === selectedModelKey);
+    if (!model) return;
+    const savedGroup = getImageGroupsForModel(model).find(group => group.id === selectedGroupId);
+    if (!savedGroup) return;
+    const savedChannel = imageGroupChannel(savedGroup);
+    const candidates = modelRouteOptions.filter(option => option.modelKey === selectedModelKey);
+    const fallback = candidates.find(option => option.channel === savedChannel) ?? candidates[0];
     if (fallback) selectModelRoute(fallback.modelKey, fallback.groupId);
-  }, [imageGroupsLoaded, isVideo, modelRouteOptions, selectModelRoute, selectedModelKey, selectedModelRouteValue]);
+  }, [getImageGroupsForModel, imageGroupsLoaded, isVideo, modelOptions, modelRouteOptions, selectModelRoute, selectedGroupId, selectedModelKey, selectedModelRouteValue]);
 
   const handleSend = (): boolean => {
     const trimmed = prompt.trim();

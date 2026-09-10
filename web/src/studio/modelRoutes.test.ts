@@ -40,7 +40,8 @@ const GROUP_18 = imageGroup({
   fixed_image_prices: { '1k': 0.4, '2k': 0.8, '4k': 1.6, currency: 'CNY' },
 });
 const GROUP_23 = imageGroup({ id: 23, name: 'Gemini 官方直连', platform: 'gemini', rate_multiplier: 5.1, effective_rate: 5.1 });
-const GROUP_34 = imageGroup({ id: 34, name: 'Gemini 生图(Banana 系)', platform: 'gemini', rate_multiplier: 4.76, effective_rate: 4.76, channel: 'official' });
+// 组 34 故意不带 channel：生产 groups.list 今天不透传 channel，靠 platform=gemini 认 official。
+const GROUP_34 = imageGroup({ id: 34, name: 'Gemini 生图（Banana 系）', platform: 'gemini', rate_multiplier: 4.76, effective_rate: 4.76 });
 const GROUP_24 = imageGroup({ id: 24, name: 'Seedream 生图分组', platform: 'seedance', rate_multiplier: 4.62, effective_rate: 4.62 });
 const GROUP_21 = imageGroup({ id: 21, name: 'Dreamina 海外｜Seedance 2.0/2.5 · Seedream 5.0 pro', platform: 'seedance', rate_multiplier: 4.8, effective_rate: 4.8 });
 
@@ -137,9 +138,17 @@ describe('image group channel (R2 / R5)', () => {
     expect(imageGroupChannel(imageGroup({ name: 'Azure Gemini 全系(含生图)' }))).toBe('standard');
   });
 
-  it('falls back to recognising 官方直连 in the group name until ops fill the field', () => {
-    expect(imageGroupChannel(imageGroup({ name: 'Gemini 官方直连' }))).toBe('official');
-    expect(imageGroupChannel(imageGroup({ name: 'Google Official' }))).toBe('official');
+  it('treats every platform=gemini group as the Google official channel until ops fill the field', () => {
+    expect(imageGroupChannel(GROUP_34)).toBe('official');
+    expect(imageGroupChannel(GROUP_23)).toBe('official');
+    expect(imageGroupChannel(imageGroup({ name: 'Gemini 生图（Banana 系）', platform: 'Gemini' }))).toBe('official');
+    // 显式 channel 仍是权威，platform 只是兜底。
+    expect(imageGroupChannel(imageGroup({ name: 'Gemini 生图（Banana 系）', platform: 'gemini', channel: 'standard' }))).toBe('standard');
+  });
+
+  it('falls back to recognising 官方直连 in the group name as a secondary signal', () => {
+    expect(imageGroupChannel(imageGroup({ name: 'Gemini 官方直连', platform: 'openai' }))).toBe('official');
+    expect(imageGroupChannel(imageGroup({ name: 'Google Official', platform: 'openai' }))).toBe('official');
   });
 
   it('only ever appends the closed 官方直连 qualifier to the model name', () => {
@@ -213,6 +222,26 @@ describe('model route options on the production snapshot', () => {
     expect(banana2[1].index - banana2[0].index).toBe(1);
     expect(banana2[0].option.pricing).toEqual({ kind: 'fixed', price: 0.4, currency: 'CNY' });
     expect(banana2[1].option.pricing).toEqual({ kind: 'rate', rate: 4.76 });
+  });
+
+  it('keeps the cheaper official group 34 over 23 and leaves relay group 18 as the standard row (no channel field)', () => {
+    // 与生产一致：三组都不带 channel，名字里只有组 23 含「官方直连」。
+    const relay = { ...GROUP_18, channel: undefined };
+    const official51 = { ...GROUP_23, channel: undefined };
+    const official476 = { ...GROUP_34, channel: undefined };
+    const rows = buildModelRouteOptions(MODEL_REGISTRY, model => {
+      if (model.routeKey === 'openai:gemini-3-pro-image') return [relay];
+      if (model.routeKey === 'gemini:gemini-3-pro-image') return [official51, official476];
+      return [];
+    });
+
+    expect(rows.map(row => [row.label, row.groupId])).toEqual([
+      ['Banana Pro', 18],
+      ['Banana Pro · 官方直连', 34],
+    ]);
+    expect(rows[0]).toMatchObject({ channel: 'standard', pricing: { kind: 'fixed', price: 0.4, currency: 'CNY' } });
+    expect(rows[1]).toMatchObject({ channel: 'official', pricing: { kind: 'rate', rate: 4.76 } });
+    expect(rows.some(row => row.groupId === 23)).toBe(false);
   });
 
   it('labels the GPT Image family by model name only, never by the group name', () => {

@@ -78,11 +78,17 @@ export function formatImageGroupLabel(group: ImageGroup): string {
 // imageGroupChannel 读分组通道。权威来源是后端透传的 channel 字段；缺省 standard。
 //
 // 过渡兜底（待运营补齐 channel 后删除）：core 的 groups.list 目前不透传
-// plugin_settings，生产分组还没有 channel 值，只能从分组名认「官方直连」。
-// 这是唯一允许解析分组名的地方，且只产出封闭词表里的值，不会把分组名带进标签。
+// plugin_settings，生产分组还没有 channel 值，只能按已有事实推断：
+// 1) platform=gemini 的分组就是 Google 官方账号（注册表同一约定：OpenAI 兼容
+//    中继走 platform=openai，Google 官方走 platform=gemini），一律 official——
+//    否则组 34「Gemini 生图（Banana 系）」会被当成标准通道，与组 18 的固定价行
+//    撞标签、再被去重掉；
+// 2) 其次才看分组名里的「官方直连 / official」。
+// 两条只产出封闭词表里的值，不会把分组名或平台名带进标签。
 export function imageGroupChannel(group: ImageGroup): ImageGroupChannel {
   const raw = (group.channel ?? '').trim().toLowerCase();
   if (raw && KNOWN_CHANNELS.has(raw)) return raw as ImageGroupChannel;
+  if ((group.platform ?? '').trim().toLowerCase() === 'gemini') return 'official';
   if (/官方直[连聯]|official/i.test(group.name)) return 'official';
   return 'standard';
 }
