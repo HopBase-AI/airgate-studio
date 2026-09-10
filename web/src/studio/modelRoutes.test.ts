@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ImageGroup } from '../api';
-import { getModelConfig, MODEL_REGISTRY, type ModelConfig } from './modelConfig';
+import {
+  getModelConfig,
+  MODEL_FAMILY_LABELS,
+  MODEL_REGISTRY,
+  type ModelConfig,
+  type ModelFamily,
+} from './modelConfig';
 import {
   buildModelRouteOptions,
   compareModelRoutePricing,
@@ -45,23 +51,52 @@ const GROUP_34 = imageGroup({ id: 34, name: 'Gemini 生图（Banana 系）', pla
 const GROUP_24 = imageGroup({ id: 24, name: 'Seedream 生图分组', platform: 'seedance', rate_multiplier: 4.62, effective_rate: 4.62 });
 const GROUP_21 = imageGroup({ id: 21, name: 'Dreamina 海外｜Seedance 2.0/2.5 · Seedream 5.0 pro', platform: 'seedance', rate_multiplier: 4.8, effective_rate: 4.8 });
 
-const PRODUCTION_GROUPS: Record<string, ImageGroup[]> = {
-  'openai:gpt-image-2': [GROUP_15],
-  'openai:gpt-image-2.5-flare': [GROUP_15],
-  'openai:gpt-image-2.5-sunburst': [GROUP_15],
-  'openai:gemini-2.5-flash-image': [GROUP_18],
-  'openai:gemini-3-pro-image': [GROUP_18],
-  'openai:gemini-3.1-flash-image': [GROUP_18],
-  'openai:gemini-3.1-flash-lite-image': [GROUP_18],
-  'gemini:gemini-2.5-flash-image': [GROUP_34, GROUP_23],
-  'gemini:gemini-3-pro-image': [GROUP_23, GROUP_34],
-  'gemini:gemini-3.1-flash-image': [GROUP_23, GROUP_34],
-  'gemini:gemini-3.1-flash-lite-image': [GROUP_23, GROUP_34],
-  'seedance:seedream-5-0-pro': [GROUP_24, GROUP_21],
-};
+// 分组 → 该组实际能服务的生图模型 ID，2026-09-10 抄自生产 groups.model_routing。
+// 快照的另一半用途是防「注册表登记了生产根本不供给的模型 / 系列」——grok 系列
+// 空挂就是这么漏出去的。
+const PRODUCTION_SNAPSHOT: ReadonlyArray<{ group: ImageGroup; models: string[] }> = [
+  { group: GROUP_15, models: ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'] },
+  {
+    group: GROUP_18,
+    models: [
+      'gemini-2.5-flash-image',
+      'gemini-3-pro-image',
+      'gemini-3.1-flash-image',
+      'gemini-3.1-flash-image-preview',
+      'gemini-3.1-flash-lite-image',
+    ],
+  },
+  {
+    group: GROUP_23,
+    models: [
+      'gemini-2.5-flash-image',
+      'gemini-3-pro-image',
+      'gemini-3-pro-image-preview',
+      'gemini-3.1-flash-image',
+      'gemini-3.1-flash-lite-image',
+    ],
+  },
+  { group: GROUP_34, models: ['gemini-2.5-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-image'] },
+  { group: GROUP_24, models: ['seedream-5-0-pro', 'seedream-5-0-lite', 'seedream-4-5'] },
+  { group: GROUP_21, models: ['seedream-5-0-pro'] },
+];
 
 function productionGroups(model: ModelConfig): ImageGroup[] {
-  return PRODUCTION_GROUPS[model.routeKey] ?? [];
+  return PRODUCTION_SNAPSHOT
+    .filter(entry => entry.group.platform === model.platform && entry.models.includes(model.id))
+    .map(entry => entry.group);
+}
+
+// 置顶窗口内 / 窗口外两个时点：排序里唯一的时间相关行为就是新模型置顶，
+// 测试一律显式传时间，免得跑到 2026-10 之后同一份断言忽然翻篇。
+const NOW = Date.parse('2026-09-10T12:00:00Z');
+const AFTER_PIN_WINDOW = Date.parse('2026-10-20T00:00:00Z');
+
+// 生产快照里能供给的模型，按注册表顺序去重后的显示名序列。
+function registryOrderOfServedModels(): string[] {
+  return Array.from(new Set(
+    MODEL_REGISTRY.filter(model => productionGroups(model).length > 0).map(model => model.name),
+  ));
 }
 
 function mustModel(routeKey: string): ModelConfig {
@@ -187,7 +222,7 @@ describe('image group pricing (R4)', () => {
 });
 
 describe('model route options on the production snapshot', () => {
-  const options = buildModelRouteOptions(MODEL_REGISTRY, productionGroups);
+  const options = buildModelRouteOptions(MODEL_REGISTRY, productionGroups, NOW);
   const labels = options.map(option => option.label);
 
   it('keeps one row per offering with a closed qualifier vocabulary', () => {
@@ -246,16 +281,44 @@ describe('model route options on the production snapshot', () => {
 
   it('labels the GPT Image family by model name only, never by the group name', () => {
     const gpt = options.filter(option => option.family === 'gpt-image');
-    expect(gpt.map(option => option.label)).toEqual(['GPT Image 2', 'GPT Image 2.5', 'GPT Image 2.5 Max']);
+    // 2.5 两档在置顶窗口内，排在 GPT Image 2 之前。
+    expect(gpt.map(option => option.label)).toEqual(['GPT Image 2.5', 'GPT Image 2.5 Max', 'GPT Image 2']);
     expect(gpt.every(option => option.pricing.kind === 'rate' && option.pricing.rate === 5.1)).toBe(true);
   });
 
-  it('follows registry order when no popularity data is available', () => {
+  it('follows registry order when no popularity data is available, once the pin window has passed', () => {
+    const expired = buildModelRouteOptions(MODEL_REGISTRY, productionGroups, AFTER_PIN_WINDOW);
+    const firstOfEachModel = Array.from(new Map(expired.map(option => [option.modelName, option])).keys());
+
+    expect(firstOfEachModel).toEqual(registryOrderOfServedModels());
+  });
+
+  it('pins the newly launched models above registry order while the window lasts', () => {
     const firstOfEachModel = Array.from(new Map(options.map(option => [option.modelName, option])).keys());
-    const registryOrder = Array.from(new Set(
-      MODEL_REGISTRY.filter(model => productionGroups(model).length > 0).map(model => model.name),
-    ));
-    expect(firstOfEachModel).toEqual(registryOrder);
+    const pinned = ['GPT Image 2.5', 'GPT Image 2.5 Max'];
+
+    expect(firstOfEachModel.slice(0, pinned.length)).toEqual(pinned);
+    // 其余模型之间的相对顺序原样不动。
+    expect(firstOfEachModel.slice(pinned.length))
+      .toEqual(registryOrderOfServedModels().filter(name => !pinned.includes(name)));
+  });
+
+  it('serves every registered model and every declared family from the production snapshot', () => {
+    const servedIds = new Set(PRODUCTION_SNAPSHOT.flatMap(entry => entry.models));
+    const unserved = MODEL_REGISTRY.filter(model => !servedIds.has(model.id)).map(model => model.routeKey);
+    expect(unserved).toEqual([]);
+
+    const familiesWithRows = new Set(options.map(option => option.family));
+    const emptyFamilies = (Object.keys(MODEL_FAMILY_LABELS) as ModelFamily[])
+      .filter(family => !familiesWithRows.has(family));
+    expect(emptyFamilies).toEqual([]);
+  });
+
+  it('lists both new Seedream offerings from the group that actually serves them', () => {
+    const seedream = options.filter(option => option.family === 'seedream');
+
+    expect(seedream.map(option => [option.label, option.groupId]))
+      .toEqual([['Seedream 5.0 Pro', 24], ['Seedream 5.0 Lite', 24], ['Seedream 4.5', 24]]);
   });
 
   it('exposes the sanitized group note as option metadata, not in the label', () => {
@@ -266,25 +329,47 @@ describe('model route options on the production snapshot', () => {
 });
 
 describe('model route popularity ordering (R3)', () => {
-  it('sorts models by users_30d descending and appends models without data in registry order', () => {
-    const groupsForModel = (model: ModelConfig): ImageGroup[] => {
-      if (model.routeKey === 'openai:gpt-image-2') return [{ ...GROUP_15, users_30d: 120 }];
-      if (model.routeKey === 'openai:gemini-3-pro-image') return [{ ...GROUP_18, users_30d: 40 }];
-      if (model.routeKey === 'gemini:gemini-3-pro-image') return [{ ...GROUP_34, users_30d: 300 }];
-      if (model.routeKey === 'seedance:seedream-5-0-pro') return [GROUP_24];
-      if (model.routeKey === 'openai:gpt-image-2.5-flare') return [{ ...GROUP_15, users_30d: 200 }];
-      return [];
-    };
+  // 新模型上线当天 users_30d = 0：纯按热度会被老模型全部压在下面，用户在下拉里
+  // 根本翻不到（2026-09-10 GPT Image 2.5 上线即沉底的线上现象）。
+  const groupsForModel = (model: ModelConfig): ImageGroup[] => {
+    if (model.routeKey === 'openai:gpt-image-2') return [{ ...GROUP_15, users_30d: 120 }];
+    if (model.routeKey === 'openai:gemini-3-pro-image') return [{ ...GROUP_18, users_30d: 40 }];
+    if (model.routeKey === 'gemini:gemini-3-pro-image') return [{ ...GROUP_34, users_30d: 300 }];
+    if (model.routeKey === 'seedance:seedream-5-0-pro') return [GROUP_24];
+    if (model.routeKey === 'openai:gpt-image-2.5-flare') return [{ ...GROUP_15, users_30d: 0 }];
+    if (model.routeKey === 'openai:gpt-image-2.5-sunburst') return [{ ...GROUP_15, users_30d: 0 }];
+    return [];
+  };
 
-    const options = buildModelRouteOptions(MODEL_REGISTRY, groupsForModel);
+  it('pins a zero-usage new model above the most popular old one', () => {
+    const options = buildModelRouteOptions(MODEL_REGISTRY, groupsForModel, NOW);
 
     expect(options.map(option => option.label)).toEqual([
+      'GPT Image 2.5',        // users_30d = 0，靠 launchedAt 置顶
+      'GPT Image 2.5 Max',    // 新模型之间按注册表顺序
+      'Banana Pro',           // 300
+      'Banana Pro · 官方直连',
+      'GPT Image 2',          // 120
+      'Seedream 5.0 Pro',     // 无 users_30d，垫底
+    ]);
+  });
+
+  it('leaves the order among non-new models untouched and restores it after the window', () => {
+    const pinnedNames = ['GPT Image 2.5', 'GPT Image 2.5 Max'];
+    const withPin = buildModelRouteOptions(MODEL_REGISTRY, groupsForModel, NOW).map(option => option.label);
+    const expired = buildModelRouteOptions(MODEL_REGISTRY, groupsForModel, AFTER_PIN_WINDOW).map(option => option.label);
+
+    expect(expired).toEqual([
       'Banana Pro',
       'Banana Pro · 官方直连',
-      'GPT Image 2.5',
       'GPT Image 2',
+      'GPT Image 2.5',        // users_30d = 0：排在有用量的之后、无数据的之前
+      'GPT Image 2.5 Max',
       'Seedream 5.0 Pro',
     ]);
+    // 去掉被钉起来的两行，其余顺序两个时点完全一致。
+    const withoutPinned = (labels: string[]) => labels.filter(label => !pinnedNames.includes(label));
+    expect(withoutPinned(withPin)).toEqual(withoutPinned(expired));
   });
 });
 

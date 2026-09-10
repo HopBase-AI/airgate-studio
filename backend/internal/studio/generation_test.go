@@ -442,6 +442,13 @@ func TestValidateImageModelSize(t *testing.T) {
 		{name: "seedream 2k", model: "seedream-5-0-pro", size: "2048x2048"},
 		{name: "seedream rejects 4k", model: "seedream-5-0-pro", size: "4096x4096", wantErr: true},
 		{name: "seedream rejects non-tier size", model: "seedream-5-0-pro", size: "1536x1024", wantErr: true},
+		// 5.0 Lite / 4.5 走上游大图档：像素下限 3,686,400，所以没有 1K 档。
+		{name: "seedream lite 2k", model: "seedream-5-0-lite", size: "2048x2048"},
+		{name: "seedream lite 4k", model: "seedream-5-0-lite", size: "3840x2160"},
+		{name: "seedream lite rejects 1k", model: "seedream-5-0-lite", size: "1024x1024", wantErr: true},
+		{name: "seedream 4.5 2k", model: "seedream-4-5", size: "2048x2048"},
+		{name: "seedream 4.5 portrait 4k", model: "seedream-4-5", size: "2160x3840"},
+		{name: "seedream 4.5 rejects 1k", model: "seedream-4-5", size: "1024x1024", wantErr: true},
 		{name: "unknown model passes through", model: "custom-image-model", size: "2048x2048"},
 		{name: "empty size passes through", model: "gemini-3.1-flash-lite-image", size: ""},
 	}
