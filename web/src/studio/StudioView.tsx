@@ -6,6 +6,7 @@ import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
 import { CustomSelect } from './CustomSelect';
+import { ModelRouteSelect } from './ModelRouteSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
 import { buildModelRouteOptions, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue, sanitizeVendorTokens } from './modelRoutes';
 import { commitComposerSend, isComposerSubmitKey } from './composerSend';
@@ -972,10 +973,11 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     const filtered = baseModelOptions.filter(model => hasImageGroupsForModel(model));
     return filtered;
   }, [baseModelOptions, hasImageGroupsForModel, imageGroupsLoaded]);
+  // 一供给一行、标签/价格列/排序/去重全在 buildModelRouteOptions；语言本地化在
+  // ModelRouteSelect 渲染层做（localizeRouteLabel），这里只保留纯数据。
   const modelRouteOptions = useMemo(
-    () => buildModelRouteOptions(modelOptions, getImageGroupsForModel)
-      .map(option => ({ ...option, label: localizeRouteLabel(option.label, t, i18n.language) })),
-    [getImageGroupsForModel, modelOptions, t, i18n.language],
+    () => buildModelRouteOptions(modelOptions, getImageGroupsForModel),
+    [getImageGroupsForModel, modelOptions],
   );
   const selectedModelRouteValue = selectedGroupId != null
     ? modelRouteOptionValue(selectedModelKey, selectedGroupId)
@@ -988,6 +990,15 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       setSelectedModelKey(modelOptions[0].routeKey);
     }
   }, [modelOptions, selectedModelKey, setSelectedModelKey]);
+
+  // R3 去重后同模型同限定词只露价低的一行；若记忆的分组正好是被隐藏的那一行，
+  // 把选中切到该模型可见的第一行（更便宜的供给），避免触发器落到占位文案。
+  useEffect(() => {
+    if (isVideo || !imageGroupsLoaded || modelRouteOptions.length === 0) return;
+    if (modelRouteOptions.some(option => option.value === selectedModelRouteValue)) return;
+    const fallback = modelRouteOptions.find(option => option.modelKey === selectedModelKey);
+    if (fallback) selectModelRoute(fallback.modelKey, fallback.groupId);
+  }, [imageGroupsLoaded, isVideo, modelRouteOptions, selectModelRoute, selectedModelKey, selectedModelRouteValue]);
 
   const handleSend = (): boolean => {
     const trimmed = prompt.trim();
@@ -1342,7 +1353,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           ) : (
             <>
               <div style={c.modelSelect}>
-                <CustomSelect
+                <ModelRouteSelect
                   value={selectedModelRouteValue}
                   options={modelRouteOptions}
                   onChange={value => {

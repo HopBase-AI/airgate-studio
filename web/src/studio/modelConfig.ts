@@ -2,11 +2,25 @@ export interface SizeOption {
   value: string;
   label: string;
   tier: '1K' | '2K' | '4K';
-  price: number;
+  // 每张价只来自分组的 fixed_image_prices（见 modelRoutes.withImageGroupPrices）。
+  // 注册表本身不写死任何单价：按实际消耗计费的模型（GPT Image / Seedream）
+  // 没有稳定的每张价，写死只会失真。
+  price?: number;
   currency?: string;
   aspect?: string;
   showPrice?: boolean;
 }
+
+// 模型系列：驱动选择器顶部的「系列」chips 与搜索匹配（见 ModelRouteSelect）。
+export type ModelFamily = 'gpt-image' | 'banana' | 'seedream' | 'grok';
+
+// 系列展示名（chips 文案 + 搜索匹配目标）。系列名是产品线名，不含供应商词。
+export const MODEL_FAMILY_LABELS: Record<ModelFamily, string> = {
+  'gpt-image': 'GPT Image',
+  banana: 'Banana',
+  seedream: 'Seedream',
+  grok: 'Grok',
+};
 
 export interface ModelConfig {
   // routeKey is the stable UI identity. The same upstream model ID can be
@@ -15,6 +29,7 @@ export interface ModelConfig {
   id: string;
   name: string;
   platform: string;
+  family: ModelFamily;
   defaultSize: string;
   sizes: SizeOption[];
   // 图生图只需要参考图；局部重绘还要求上游理解 mask，二者不能共用能力开关。
@@ -23,48 +38,49 @@ export interface ModelConfig {
 }
 
 // ── Model Registry ─────────────────────────────────────────────────────────
-// Add new models here. Each model defines its supported sizes and pricing.
+// Add new models here. Each model defines its supported sizes; prices are
+// never hardcoded (they come from the selected group's fixed_image_prices).
 
 const GPT_IMAGE_SIZES: SizeOption[] = [
   // 1K (≤1536)
-  { value: 'auto',      label: 'Auto',      tier: '1K', price: 0.10 },
-  { value: '1024x1024', label: '1024×1024',  tier: '1K', price: 0.10, aspect: '1:1' },
-  { value: '1536x1024', label: '1536×1024',  tier: '1K', price: 0.10, aspect: '3:2' },
-  { value: '1024x1536', label: '1024×1536',  tier: '1K', price: 0.10, aspect: '2:3' },
-  { value: '1536x864',  label: '1536×864',   tier: '1K', price: 0.10, aspect: '16:9' },
-  { value: '864x1536',  label: '864×1536',   tier: '1K', price: 0.10, aspect: '9:16' },
-  { value: '1536x1152', label: '1536×1152',  tier: '1K', price: 0.10, aspect: '4:3' },
-  { value: '1152x1536', label: '1152×1536',  tier: '1K', price: 0.10, aspect: '3:4' },
+  { value: 'auto',      label: 'Auto',      tier: '1K' },
+  { value: '1024x1024', label: '1024×1024',  tier: '1K', aspect: '1:1' },
+  { value: '1536x1024', label: '1536×1024',  tier: '1K', aspect: '3:2' },
+  { value: '1024x1536', label: '1024×1536',  tier: '1K', aspect: '2:3' },
+  { value: '1536x864',  label: '1536×864',   tier: '1K', aspect: '16:9' },
+  { value: '864x1536',  label: '864×1536',   tier: '1K', aspect: '9:16' },
+  { value: '1536x1152', label: '1536×1152',  tier: '1K', aspect: '4:3' },
+  { value: '1152x1536', label: '1152×1536',  tier: '1K', aspect: '3:4' },
   // 2K (1537-2048)
-  { value: '2048x2048', label: '2048×2048',  tier: '2K', price: 0.20, aspect: '1:1' },
-  { value: '2048x1152', label: '2048×1152',  tier: '2K', price: 0.20, aspect: '16:9' },
-  { value: '1152x2048', label: '1152×2048',  tier: '2K', price: 0.20, aspect: '9:16' },
-  { value: '2048x1536', label: '2048×1536',  tier: '2K', price: 0.20, aspect: '4:3' },
-  { value: '1536x2048', label: '1536×2048',  tier: '2K', price: 0.20, aspect: '3:4' },
-  { value: '2000x1600', label: '2000×1600',  tier: '2K', price: 0.20, aspect: '5:4' },
-  { value: '1600x2000', label: '1600×2000',  tier: '2K', price: 0.20, aspect: '4:5' },
+  { value: '2048x2048', label: '2048×2048',  tier: '2K', aspect: '1:1' },
+  { value: '2048x1152', label: '2048×1152',  tier: '2K', aspect: '16:9' },
+  { value: '1152x2048', label: '1152×2048',  tier: '2K', aspect: '9:16' },
+  { value: '2048x1536', label: '2048×1536',  tier: '2K', aspect: '4:3' },
+  { value: '1536x2048', label: '1536×2048',  tier: '2K', aspect: '3:4' },
+  { value: '2000x1600', label: '2000×1600',  tier: '2K', aspect: '5:4' },
+  { value: '1600x2000', label: '1600×2000',  tier: '2K', aspect: '4:5' },
   // 4K (>2048)
-  { value: '3840x2160', label: '3840×2160',  tier: '4K', price: 0.40, aspect: '16:9' },
-  { value: '2160x3840', label: '2160×3840',  tier: '4K', price: 0.40, aspect: '9:16' },
-  { value: '3360x1440', label: '3360×1440',  tier: '4K', price: 0.40, aspect: '21:9' },
-  { value: '1440x3360', label: '1440×3360',  tier: '4K', price: 0.40, aspect: '9:21' },
+  { value: '3840x2160', label: '3840×2160',  tier: '4K', aspect: '16:9' },
+  { value: '2160x3840', label: '2160×3840',  tier: '4K', aspect: '9:16' },
+  { value: '3360x1440', label: '3360×1440',  tier: '4K', aspect: '21:9' },
+  { value: '1440x3360', label: '1440×3360',  tier: '4K', aspect: '9:21' },
 ];
 
 const GOOGLE_IMAGE_1K_SIZES: SizeOption[] = [
-  { value: '1024x1024', label: '1024×1024', tier: '1K', price: 0, aspect: '1:1' },
-  { value: '1536x1024', label: '1536×1024', tier: '1K', price: 0, aspect: '3:2' },
-  { value: '1024x1536', label: '1024×1536', tier: '1K', price: 0, aspect: '2:3' },
+  { value: '1024x1024', label: '1024×1024', tier: '1K', aspect: '1:1' },
+  { value: '1536x1024', label: '1536×1024', tier: '1K', aspect: '3:2' },
+  { value: '1024x1536', label: '1024×1536', tier: '1K', aspect: '2:3' },
 ];
 
 const GOOGLE_IMAGE_2K_SIZES: SizeOption[] = [
-  { value: '2048x2048', label: '2048×2048', tier: '2K', price: 0, aspect: '1:1' },
-  { value: '2048x1152', label: '2048×1152', tier: '2K', price: 0, aspect: '16:9' },
-  { value: '1152x2048', label: '1152×2048', tier: '2K', price: 0, aspect: '9:16' },
+  { value: '2048x2048', label: '2048×2048', tier: '2K', aspect: '1:1' },
+  { value: '2048x1152', label: '2048×1152', tier: '2K', aspect: '16:9' },
+  { value: '1152x2048', label: '1152×2048', tier: '2K', aspect: '9:16' },
 ];
 
 const GOOGLE_IMAGE_4K_SIZES: SizeOption[] = [
-  { value: '3840x2160', label: '3840×2160', tier: '4K', price: 0, aspect: '16:9' },
-  { value: '2160x3840', label: '2160×3840', tier: '4K', price: 0, aspect: '9:16' },
+  { value: '3840x2160', label: '3840×2160', tier: '4K', aspect: '16:9' },
+  { value: '2160x3840', label: '2160×3840', tier: '4K', aspect: '9:16' },
 ];
 
 const GOOGLE_IMAGE_1K_ONLY_SIZES: SizeOption[] = GOOGLE_IMAGE_1K_SIZES;
@@ -78,14 +94,14 @@ const GOOGLE_IMAGE_ALL_SIZES: SizeOption[] = [
   ...GOOGLE_IMAGE_4K_SIZES,
 ];
 
-// Seedream 5.0 Pro 仅支持 1K/2K。BytePlus 官方按 2.61MP 分档；这两个
-// 固定正方形尺寸分别落入 $0.045 / $0.09 档。
+// Seedream 5.0 Pro 仅支持 1K/2K（BytePlus 官方按 2.61MP 分档）。按实际消耗
+// 计费，每张价不在这里写死。
 const SEEDREAM_SIZES: SizeOption[] = [
-  { value: '1024x1024', label: '1024×1024', tier: '1K', price: 0.045, aspect: '1:1', showPrice: true },
-  { value: '2048x2048', label: '2048×2048', tier: '2K', price: 0.09, aspect: '1:1', showPrice: true },
+  { value: '1024x1024', label: '1024×1024', tier: '1K', aspect: '1:1' },
+  { value: '2048x2048', label: '2048×2048', tier: '2K', aspect: '1:1' },
 ];
 
-type GeminiImageModel = Omit<ModelConfig, 'routeKey' | 'platform'>;
+type GeminiImageModel = Omit<ModelConfig, 'routeKey' | 'platform' | 'family'>;
 
 const GEMINI_IMAGE_MODELS: GeminiImageModel[] = [
   {
@@ -147,20 +163,27 @@ function geminiImageRoutes(platform: 'openai' | 'gemini'): ModelConfig[] {
     ...model,
     routeKey: modelRouteKey(platform, model.id),
     platform,
+    family: 'banana' as const,
   }));
 }
 
-export const MODEL_REGISTRY: ModelConfig[] = [
-  {
-    routeKey: modelRouteKey('openai', 'gpt-image-2'),
-    id: 'gpt-image-2',
-    name: 'GPT Image 2',
+// GPT Image 2 / 2.5 全家共用一套尺寸表与编辑能力（图生图 + mask 局部重绘）。
+function gptImageRoute(id: string, name: string): ModelConfig {
+  return {
+    routeKey: modelRouteKey('openai', id),
+    id,
+    name,
     platform: 'openai',
+    family: 'gpt-image',
     defaultSize: 'auto',
     sizes: GPT_IMAGE_SIZES,
     supportsImg2Img: true,
     supportsInpaint: true,
-  },
+  };
+}
+
+export const MODEL_REGISTRY: ModelConfig[] = [
+  gptImageRoute('gpt-image-2', 'GPT Image 2'),
   // OpenAI-compatible relays (for example Azure) use platform=openai. Google
   // official accounts use platform=gemini. Adobe Image only advertises
   // gpt-image-2, so model-aware group discovery never offers it for Banana.
@@ -171,6 +194,7 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     id: 'seedream-5-0-pro',
     name: 'Seedream 5.0 Pro',
     platform: 'seedance',
+    family: 'seedream',
     defaultSize: '2048x2048',
     sizes: SEEDREAM_SIZES,
     // 官方能力表：Seedream 5.0 Pro 支持单/多图生图（参考图走 image 数组）。
@@ -180,6 +204,10 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     supportsImg2Img: true,
     supportsInpaint: false,
   },
+  // GPT Image 2.5：flare = 标准档，sunburst = Max 档；与 GPT Image 2 同在
+  // 按实际消耗计费的分组，尺寸表与编辑能力沿用 GPT Image 2。
+  gptImageRoute('gpt-image-2.5-flare', 'GPT Image 2.5'),
+  gptImageRoute('gpt-image-2.5-sunburst', 'GPT Image 2.5 Max'),
 ];
 
 export function getModelConfig(value: string, preferredPlatform?: string): ModelConfig | undefined {

@@ -1,7 +1,23 @@
 import type { ImageGroup } from '../api';
-import type { ModelConfig } from './modelConfig';
+import type { ModelConfig, ModelFamily } from './modelConfig';
 
 const ROUTE_VALUE_SEPARATOR = '|';
+
+// 分组通道（数据契约 §4：plugin_settings.studio.channel）。展示层只认这四个值，
+// 其余一律按 standard。
+export type ImageGroupChannel = 'standard' | 'official' | 'domestic' | 'overseas';
+
+const KNOWN_CHANNELS: ReadonlySet<string> = new Set<ImageGroupChannel>(['standard', 'official', 'domestic', 'overseas']);
+
+// 行标签限定词是封闭词表（R2）：图像只有「官方直连」带后缀，标准通道不带。
+// 视频的 国内 / 海外 由视频分组名走 localizeRouteLabel，不在这里。
+const OFFICIAL_QUALIFIER = '官方直连';
+
+// 每个供给的计费口径（R4）：分组配了固定张价 → 1K 档每张价；否则按实际消耗
+// 计费，展示分组有效倍率。二者互斥，前端不再有任何写死单价。
+export type ModelRoutePricing =
+  | { kind: 'fixed'; price: number; currency: string }
+  | { kind: 'rate'; rate: number };
 
 export interface ModelRouteOption {
   value: string;
@@ -9,6 +25,11 @@ export interface ModelRouteOption {
   description?: string;
   modelKey: string;
   groupId: number;
+  modelName: string;
+  modelId: string;
+  family: ModelFamily;
+  channel: ImageGroupChannel;
+  pricing: ModelRoutePricing;
 }
 
 export function modelRouteOptionValue(modelKey: string, groupId: number): string {
@@ -29,6 +50,8 @@ export function parseModelRouteOptionValue(value: string): { modelKey: string; g
 // 工作台不暴露上游渠道:分组名/备注里的渠道品牌词在展示层剔除或中性化。
 // 数据层(DB 组名)保持原样——控制台其他页面(密钥/定价)仍按原名展示。
 // minimax 同样剔除——产品名一律用「海螺/Hailuo」,与 Banana/Seedance 惯例一致。
+// 现在只用于分组 note 的 tooltip 与 GroupSelector / 视频分组名；模型行标签
+// 不再从分组名派生（R5：数据层与展示层分离）。
 const VENDOR_TOKEN_PATTERN = /\b(?:azure|adobe|byteplus|dreamina|minimax|dashscope)\b/gi;
 // 中文渠道词(腾讯/阿里系)没有 \b 词边界,单独剥。
 const VENDOR_CJK_PATTERN = /(?:腾讯云|腾讯|騰訊雲|騰訊|阿里云百炼|阿里雲百煉|阿里云|阿里雲|阿里巴巴|阿里|百炼|百煉)/g;
@@ -52,20 +75,48 @@ export function formatImageGroupLabel(group: ImageGroup): string {
   return parts.join(' · ');
 }
 
-// Keep route labels compact. Group notes can contain full model catalogs and
-// pricing prose; CustomSelect exposes that text as a tooltip instead of putting
-// it in every option. The generic effective rate is also not an image price
-// when a group uses per-resolution fixed pricing.
-export function formatModelRouteGroupLabel(group: ImageGroup): string {
-  const rawName = group.name.trim() || `Group ${group.id}`;
-  // 中转/转售渠道(Azure、Adobe 等)统一显示为中性「专线」,不泄露上游身份。
-  if (/azure|adobe/i.test(rawName)) return '专线';
-  if (/官方直[连聯]|official\s+direct|google\s+official/i.test(rawName)) return '官方直连';
+// imageGroupChannel 读分组通道。权威来源是后端透传的 channel 字段；缺省 standard。
+//
+// 过渡兜底（待运营补齐 channel 后删除）：core 的 groups.list 目前不透传
+// plugin_settings，生产分组还没有 channel 值，只能从分组名认「官方直连」。
+// 这是唯一允许解析分组名的地方，且只产出封闭词表里的值，不会把分组名带进标签。
+export function imageGroupChannel(group: ImageGroup): ImageGroupChannel {
+  const raw = (group.channel ?? '').trim().toLowerCase();
+  if (raw && KNOWN_CHANNELS.has(raw)) return raw as ImageGroupChannel;
+  if (/官方直[连聯]|official/i.test(group.name)) return 'official';
+  return 'standard';
+}
 
-  const name = imageGroupDisplayName(group);
-  return name
-    .replace(/\s*[（(]?\s*(?:支持)?生图(?:分组)?\s*[)）]?\s*$/u, '')
-    .trim() || name;
+export function modelRouteQualifier(channel: ImageGroupChannel): string {
+  return channel === 'official' ? OFFICIAL_QUALIFIER : '';
+}
+
+export function formatModelRouteLabel(model: ModelConfig, group: ImageGroup): string {
+  const qualifier = modelRouteQualifier(imageGroupChannel(group));
+  return qualifier ? `${model.name} · ${qualifier}` : model.name;
+}
+
+// imageGroupPricing 取供给的计费口径：固定张价优先取 1K 档（缺 1K 时退到更高档，
+// 保证「有固定价就显示固定价」），否则按实际消耗显示有效倍率。
+export function imageGroupPricing(group: ImageGroup): ModelRoutePricing {
+  const prices = group.fixed_image_prices;
+  if (prices) {
+    for (const tier of ['1k', '2k', '4k'] as const) {
+      const price = prices[tier];
+      if (typeof price === 'number' && Number.isFinite(price) && price >= 0) {
+        return { kind: 'fixed', price, currency: prices.currency?.trim() || 'CNY' };
+      }
+    }
+  }
+  return { kind: 'rate', rate: group.effective_rate };
+}
+
+// compareModelRoutePricing：同模型多供给「价低者在前」（R3）。固定张价与倍率不是
+// 同一量纲——固定价的分组排在按量计费之前；同量纲按数值升序。
+export function compareModelRoutePricing(a: ModelRoutePricing, b: ModelRoutePricing): number {
+  if (a.kind !== b.kind) return a.kind === 'fixed' ? -1 : 1;
+  const amount = (pricing: ModelRoutePricing) => (pricing.kind === 'fixed' ? pricing.price : pricing.rate);
+  return amount(a) - amount(b);
 }
 
 export function withImageGroupPrices(model: ModelConfig, group: ImageGroup | undefined): ModelConfig {
@@ -83,24 +134,76 @@ export function withImageGroupPrices(model: ModelConfig, group: ImageGroup | und
   return changed ? { ...model, sizes } : model;
 }
 
+function popularityOf(groups: ImageGroup[]): number | undefined {
+  let best: number | undefined;
+  for (const group of groups) {
+    const users = group.users_30d;
+    if (typeof users !== 'number' || !Number.isFinite(users)) continue;
+    best = best == null ? users : Math.max(best, users);
+  }
+  return best;
+}
+
+// buildModelRouteOptions 生成选择器候选：一个供给一行（R1，value = routeKey|groupId）。
+// - 标签 = 模型名 [· 官方直连]（R2），不解析分组名；
+// - 同模型（按显示名）多供给相邻、价低在前；同模型同限定词只留价低的一行（R3）；
+// - 模型间按近 30 天使用人数降序，缺数据的排在有数据的之后、按注册表顺序（R3）。
 export function buildModelRouteOptions(
   models: ModelConfig[],
   groupsForModel: (model: ModelConfig) => ImageGroup[],
 ): ModelRouteOption[] {
-  return models.flatMap(model => groupsForModel(model).map(group => {
-    const channel = formatModelRouteGroupLabel(group);
-    const label = routeLabelRepeatsModel(model.name, channel)
-      ? model.name
-      : `${model.name} · ${channel}`;
+  interface ModelBucket {
+    order: number;
+    popularity: number | undefined;
+    options: ModelRouteOption[];
+  }
+  const buckets = new Map<string, ModelBucket>();
 
-    return {
-      value: modelRouteOptionValue(model.routeKey, group.id),
-      label,
-      description: sanitizeVendorTokens(group.note?.trim() ?? '') || undefined,
-      modelKey: model.routeKey,
-      groupId: group.id,
-    };
-  }));
+  models.forEach((model, index) => {
+    const groups = groupsForModel(model);
+    if (groups.length === 0) return;
+    let bucket = buckets.get(model.name);
+    if (!bucket) {
+      bucket = { order: index, popularity: undefined, options: [] };
+      buckets.set(model.name, bucket);
+    }
+    const popularity = popularityOf(groups);
+    if (popularity != null) {
+      bucket.popularity = bucket.popularity == null ? popularity : Math.max(bucket.popularity, popularity);
+    }
+    for (const group of groups) {
+      bucket.options.push({
+        value: modelRouteOptionValue(model.routeKey, group.id),
+        label: formatModelRouteLabel(model, group),
+        description: sanitizeVendorTokens(group.note?.trim() ?? '') || undefined,
+        modelKey: model.routeKey,
+        groupId: group.id,
+        modelName: model.name,
+        modelId: model.id,
+        family: model.family,
+        channel: imageGroupChannel(group),
+        pricing: imageGroupPricing(group),
+      });
+    }
+  });
+
+  const ordered = Array.from(buckets.values()).sort((a, b) => {
+    const aHas = a.popularity != null;
+    const bHas = b.popularity != null;
+    if (aHas && bHas && a.popularity !== b.popularity) return (b.popularity as number) - (a.popularity as number);
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    return a.order - b.order;
+  });
+
+  return ordered.flatMap(bucket => {
+    const sorted = [...bucket.options].sort((a, b) => compareModelRoutePricing(a.pricing, b.pricing));
+    const seenLabels = new Set<string>();
+    return sorted.filter(option => {
+      if (seenLabels.has(option.label)) return false;
+      seenLabels.add(option.label);
+      return true;
+    });
+  });
 }
 
 function imageGroupDisplayName(group: ImageGroup): string {
@@ -108,11 +211,10 @@ function imageGroupDisplayName(group: ImageGroup): string {
 }
 
 // ── Route label localization ────────────────────────────────────────────────
-// Group/model display names come straight from backend data (formatModelRouteGroupLabel,
-// imageGroupDisplayName, video group names) and routinely carry Chinese tokens like
-// “官方直连/海外/国内”. Keep the data-layer helpers above pure and returning the raw
-// token — zh/zh-HK UIs must keep showing the original Chinese wording unchanged — and
-// only localize known tokens here, at the render layer, where the caller already has a
+// Route labels carry Chinese qualifier tokens (“官方直连”, and “海外/国内” for video
+// group names). Keep the data-layer helpers above pure and returning the raw token —
+// zh/zh-HK UIs must keep showing the original Chinese wording unchanged — and only
+// localize known tokens here, at the render layer, where the caller already has a
 // `t` function and the active UI language.
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -133,16 +235,6 @@ export function localizeRouteLabel(label: string, t: Translate, lang: string): s
   );
 }
 
-function routeLabelRepeatsModel(modelName: string, channel: string): boolean {
-  const normalize = (value: string) => value
-    .toLowerCase()
-    .replace(/(\d+)\.0(?=\D|$)/g, '$1')
-    .replace(/[^a-z0-9]+/g, '');
-
-  const normalizedModel = normalize(modelName);
-  return normalizedModel !== '' && normalizedModel === normalize(channel);
-}
-
-function trimRate(rate: number): string {
+export function trimRate(rate: number): string {
   return Number.isInteger(rate) ? String(rate) : rate.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }

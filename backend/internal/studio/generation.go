@@ -369,14 +369,21 @@ type generationInput struct {
 	URL  string `json:"url"`
 }
 
+// gptImageSupportedSizes 是 GPT Image 2 / 2.5 全家共用的尺寸表（与前端
+// modelConfig.ts 的 GPT_IMAGE_SIZES 一致）。
+var gptImageSupportedSizes = map[string]struct{}{
+	"auto": {}, "1024x1024": {}, "1536x1024": {}, "1024x1536": {},
+	"1536x864": {}, "864x1536": {}, "1536x1152": {}, "1152x1536": {},
+	"2048x2048": {}, "2048x1152": {}, "1152x2048": {}, "2048x1536": {},
+	"1536x2048": {}, "2000x1600": {}, "1600x2000": {}, "3840x2160": {},
+	"2160x3840": {}, "3360x1440": {}, "1440x3360": {},
+}
+
 var imageModelSupportedSizes = map[string]map[string]struct{}{
-	"gpt-image-2": {
-		"auto": {}, "1024x1024": {}, "1536x1024": {}, "1024x1536": {},
-		"1536x864": {}, "864x1536": {}, "1536x1152": {}, "1152x1536": {},
-		"2048x2048": {}, "2048x1152": {}, "1152x2048": {}, "2048x1536": {},
-		"1536x2048": {}, "2000x1600": {}, "1600x2000": {}, "3840x2160": {},
-		"2160x3840": {}, "3360x1440": {}, "1440x3360": {},
-	},
+	"gpt-image-2": gptImageSupportedSizes,
+	// GPT Image 2.5：flare = 标准档，sunburst = Max 档，尺寸表沿用 GPT Image 2。
+	"gpt-image-2.5-flare":    gptImageSupportedSizes,
+	"gpt-image-2.5-sunburst": gptImageSupportedSizes,
 	"gemini-2.5-flash-image": {
 		"1024x1024": {}, "1536x1024": {}, "1024x1536": {},
 	},

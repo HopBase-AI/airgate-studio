@@ -21,6 +21,49 @@ type imageGroup struct {
 	EffectiveRate    float64           `json:"effective_rate"`
 	Note             string            `json:"note,omitempty"`
 	FixedImagePrices *fixedImagePrices `json:"fixed_image_prices,omitempty"`
+	// Channel 是工作坊行标签的限定词来源（数据契约 plugin_settings.studio.channel：
+	// standard / official / domestic / overseas）。core 侧可以直接给 channel，也可以
+	// 透传 plugin_settings；两者都缺时为空，前端按 standard 处理。
+	Channel string `json:"channel,omitempty"`
+	// Users30d 是该模型在本分组近 30 天使用人数（热度排序）；core 未统计时缺省，
+	// 前端按注册表顺序兜底。
+	Users30d *int64 `json:"users_30d,omitempty"`
+}
+
+// imageGroupChannels 是展示层认可的封闭通道词表；其它值一律丢弃（前端按 standard）。
+var imageGroupChannels = map[string]struct{}{
+	"standard": {},
+	"official": {},
+	"domestic": {},
+	"overseas": {},
+}
+
+// UnmarshalJSON 在标准字段之外兼容 core 透传的 plugin_settings.studio.channel，
+// 并把 channel 归一到封闭词表；不会把 plugin_settings 其它内容带给前端。
+func (g *imageGroup) UnmarshalJSON(data []byte) error {
+	type plain imageGroup
+	var aux struct {
+		plain
+		PluginSettings map[string]map[string]string `json:"plugin_settings"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*g = imageGroup(aux.plain)
+	channel := g.Channel
+	if strings.TrimSpace(channel) == "" && aux.PluginSettings != nil {
+		channel = aux.PluginSettings["studio"]["channel"]
+	}
+	g.Channel = normalizeImageGroupChannel(channel)
+	return nil
+}
+
+func normalizeImageGroupChannel(channel string) string {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if _, ok := imageGroupChannels[channel]; ok {
+		return channel
+	}
+	return ""
 }
 
 type fixedImagePrices struct {
