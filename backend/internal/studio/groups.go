@@ -22,7 +22,7 @@ type imageGroup struct {
 	Note             string            `json:"note,omitempty"`
 	FixedImagePrices *fixedImagePrices `json:"fixed_image_prices,omitempty"`
 	// Channel 是工作坊行标签的限定词来源（数据契约 plugin_settings.studio.channel：
-	// standard / official / domestic / overseas）。core 侧可以直接给 channel，也可以
+	// standard / official / azure / domestic / overseas）。core 侧可以直接给 channel，也可以
 	// 透传 plugin_settings；两者都缺时为空，前端按 standard 处理。
 	Channel string `json:"channel,omitempty"`
 	// Users30d 是该模型在本分组近 30 天使用人数（热度排序）；core 未统计时缺省，
@@ -34,6 +34,7 @@ type imageGroup struct {
 var imageGroupChannels = map[string]struct{}{
 	"standard": {},
 	"official": {},
+	"azure":    {},
 	"domestic": {},
 	"overseas": {},
 }

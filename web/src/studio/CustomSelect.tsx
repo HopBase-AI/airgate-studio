@@ -17,6 +17,8 @@ export interface CustomSelectOption {
   description?: string;
   // 右侧附注（如价格列），等宽字体、不参与省略。
   meta?: string;
+  // 附注样式：success 渲染为绿色徽章（折数标签，与密钥页分组下拉一致）。
+  metaTone?: 'success';
 }
 interface CustomSelectProps {
   value: string;
@@ -130,6 +132,16 @@ const optionMetaStyle: CSSProperties = {
   color: cssVar('textSecondary'),
   fontFamily: cssVar('fontMono'),
   whiteSpace: 'nowrap',
+};
+
+// 折数徽章：与密钥页分组下拉的折扣标签同一视觉（success 浅底 + success 字色）。
+const optionMetaSuccessStyle: CSSProperties = {
+  padding: '1px 6px',
+  borderRadius: 6,
+  background: cssVar('successSubtle'),
+  color: cssVar('success'),
+  fontFamily: 'inherit',
+  fontWeight: 500,
 };
 
 const optionCompactStyle: CSSProperties = {
@@ -364,7 +376,11 @@ export function CustomSelect({
                 onClick={() => choose(opt.value)}
               >
                 <span style={optionLabelStyle}>{opt.label}</span>
-                {opt.meta ? <span style={optionMetaStyle}>{opt.meta}</span> : null}
+                {opt.meta ? (
+                  <span style={opt.metaTone === 'success' ? { ...optionMetaStyle, ...optionMetaSuccessStyle } : optionMetaStyle}>
+                    {opt.meta}
+                  </span>
+                ) : null}
               </button>
             );
           })}

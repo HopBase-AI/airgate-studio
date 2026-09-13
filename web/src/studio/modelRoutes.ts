@@ -3,18 +3,20 @@ import { isNewlyLaunchedModel, type ModelConfig, type ModelFamily } from './mode
 
 const ROUTE_VALUE_SEPARATOR = '|';
 
-// 分组通道（数据契约 §4：plugin_settings.studio.channel）。展示层只认这四个值，
+// 分组通道（数据契约 §4：plugin_settings.studio.channel）。展示层只认这五个值，
 // 其余一律按 standard。
-export type ImageGroupChannel = 'standard' | 'official' | 'domestic' | 'overseas';
+export type ImageGroupChannel = 'standard' | 'official' | 'azure' | 'domestic' | 'overseas';
 
-const KNOWN_CHANNELS: ReadonlySet<string> = new Set<ImageGroupChannel>(['standard', 'official', 'domestic', 'overseas']);
+const KNOWN_CHANNELS: ReadonlySet<string> = new Set<ImageGroupChannel>(['standard', 'official', 'azure', 'domestic', 'overseas']);
 
-// 行标签限定词是封闭词表（R2）：图像只有「官方直连」带后缀，标准通道不带。
+// 行标签限定词是封闭词表（R2）：图像只有「官方直连」与「Azure」带后缀，标准通道不带。
+// Azure 是云平台品牌名，五语同形，不进 localizeRouteLabel。
 // 视频的 国内 / 海外 由视频分组名走 localizeRouteLabel，不在这里。
 const OFFICIAL_QUALIFIER = '官方直连';
+const AZURE_QUALIFIER = 'Azure';
 
 // 每个供给的计费口径（R4）：分组配了固定张价 → 1K 档每张价；否则按实际消耗
-// 计费，展示分组有效倍率。二者互斥，前端不再有任何写死单价。
+// 计费，展示有效倍率折算的折数。二者互斥，前端不再有任何写死单价。
 export type ModelRoutePricing =
   | { kind: 'fixed'; price: number; currency: string }
   | { kind: 'rate'; rate: number };
@@ -94,7 +96,9 @@ export function imageGroupChannel(group: ImageGroup): ImageGroupChannel {
 }
 
 export function modelRouteQualifier(channel: ImageGroupChannel): string {
-  return channel === 'official' ? OFFICIAL_QUALIFIER : '';
+  if (channel === 'official') return OFFICIAL_QUALIFIER;
+  if (channel === 'azure') return AZURE_QUALIFIER;
+  return '';
 }
 
 export function formatModelRouteLabel(model: ModelConfig, group: ImageGroup): string {
