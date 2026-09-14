@@ -269,10 +269,10 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     supportsImg2Img: true,
     supportsInpaint: false,
   },
-  // GPT Image 2.5：flare = 标准档，sunburst = Max 档；与 GPT Image 2 同在
+  // gpt-image-2.5-flare / sunburst：显示名直接用模型 ID，不另起名字；与 GPT Image 2 同在
   // 按实际消耗计费的分组，尺寸表与编辑能力沿用 GPT Image 2。
-  gptImageRoute('gpt-image-2.5-flare', 'GPT Image 2.5', '2026-09-10'),
-  gptImageRoute('gpt-image-2.5-sunburst', 'GPT Image 2.5 Max', '2026-09-10'),
+  gptImageRoute('gpt-image-2.5-flare', 'gpt-image-2.5-flare', '2026-09-10'),
+  gptImageRoute('gpt-image-2.5-sunburst', 'gpt-image-2.5-sunburst', '2026-09-10'),
 ];
 
 export function getModelConfig(value: string, preferredPlatform?: string): ModelConfig | undefined {

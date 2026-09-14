@@ -381,7 +381,7 @@ var gptImageSupportedSizes = map[string]struct{}{
 
 var imageModelSupportedSizes = map[string]map[string]struct{}{
 	"gpt-image-2": gptImageSupportedSizes,
-	// GPT Image 2.5：flare = 标准档，sunburst = Max 档，尺寸表沿用 GPT Image 2。
+	// gpt-image-2.5-flare / sunburst：尺寸表沿用 GPT Image 2。
 	"gpt-image-2.5-flare":    gptImageSupportedSizes,
 	"gpt-image-2.5-sunburst": gptImageSupportedSizes,
 	"gemini-2.5-flash-image": {

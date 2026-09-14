@@ -7,6 +7,7 @@ import {
   availableModelFamilies,
   filterModelRouteOptions,
   formatModelRoutePricing,
+  isDiscountedModelRoutePricing,
   readFamilyFilter,
   writeFamilyFilter,
 } from './modelRouteFilter';
@@ -35,8 +36,8 @@ const OPTIONS: ModelRouteOption[] = [
   option({ modelName: 'Banana Pro', modelId: 'gemini-3-pro-image', family: 'banana', groupId: 18, pricing: { kind: 'fixed', price: 0.4, currency: 'CNY' } }),
   option({ modelName: 'Banana Pro', modelId: 'gemini-3-pro-image', family: 'banana', groupId: 34, channel: 'official', pricing: { kind: 'rate', rate: 4.76 } }),
   option({ modelName: 'Nano Banana', modelId: 'gemini-2.5-flash-image', family: 'banana', groupId: 18, pricing: { kind: 'fixed', price: 0.4, currency: 'CNY' } }),
-  option({ modelName: 'GPT Image 2.5', modelId: 'gpt-image-2.5-flare', family: 'gpt-image', groupId: 15 }),
-  option({ modelName: 'GPT Image 2.5 Max', modelId: 'gpt-image-2.5-sunburst', family: 'gpt-image', groupId: 15 }),
+  option({ modelName: 'gpt-image-2.5-flare', modelId: 'gpt-image-2.5-flare', family: 'gpt-image', groupId: 15 }),
+  option({ modelName: 'gpt-image-2.5-sunburst', modelId: 'gpt-image-2.5-sunburst', family: 'gpt-image', groupId: 15 }),
 ];
 
 class MemoryStorage {
@@ -59,7 +60,7 @@ describe('model route filtering (R6)', () => {
     expect(filterModelRouteOptions(OPTIONS, 'gpt-image-2.5', null).map(o => o.modelId))
       .toEqual(['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']);
     expect(filterModelRouteOptions(OPTIONS, 'gpt image', null).map(o => o.label))
-      .toEqual(['GPT Image 2', 'GPT Image 2.5', 'GPT Image 2.5 Max']);
+      .toEqual(['GPT Image 2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']);
     expect(filterModelRouteOptions(OPTIONS, '  seedream ', null).map(o => o.label))
       .toEqual(['Seedream 5.0 Pro']);
   });
@@ -97,20 +98,36 @@ describe('model route filtering (R6)', () => {
 });
 
 describe('model route price column (R4)', () => {
-  it('renders fixed prices as per-image and usage billing as a multiplier', () => {
+  it('renders fixed prices as per-image and usage billing as the discount off the official price', () => {
     const zh = modelSelectorStringsFor('zh-CN');
     expect(formatModelRoutePricing({ kind: 'fixed', price: 0.4, currency: 'CNY' }, zh)).toBe('¥0.4/张');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, zh)).toBe('按实际消耗 ×5.1');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 4.76 }, zh)).toBe('按实际消耗 ×4.76');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, zh)).toBe('约 7.5 折');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 4.76 }, zh)).toBe('约 7.0 折');
 
     const en = modelSelectorStringsFor('en-US');
     expect(formatModelRoutePricing({ kind: 'fixed', price: 0.4, currency: 'CNY' }, en)).toBe('¥0.4/image');
     expect(formatModelRoutePricing({ kind: 'fixed', price: 0.045, currency: 'USD' }, en)).toBe('$0.045/image');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5 }, en)).toBe('Pay per use ×5');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, en)).toBe('≈25% off');
 
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, modelSelectorStringsFor('zh-HK'))).toBe('按實際消耗 ×5.1');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, modelSelectorStringsFor('ja'))).toBe('従量課金 ×5.1');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, modelSelectorStringsFor('es'))).toBe('Según consumo ×5.1');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, modelSelectorStringsFor('zh-HK'))).toBe('約 7.5 折');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, modelSelectorStringsFor('ja'))).toBe('約25%オフ');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, modelSelectorStringsFor('es'))).toBe('≈25% de descuento');
+  });
+
+  it('never shows the raw multiplier: official price at or above 10 折, nothing for an invalid rate', () => {
+    const zh = modelSelectorStringsFor('zh');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 6.8 }, zh)).toBe('官方价');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 6.79 }, zh)).toBe('官方价');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 8.16 }, zh)).toBe('官方价 ×1.2');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.34 }, zh)).toBe('约 0.50 折');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0 }, zh)).toBe('');
+  });
+
+  it('styles only discounted usage billing as a discount badge', () => {
+    expect(isDiscountedModelRoutePricing({ kind: 'rate', rate: 5.1 })).toBe(true);
+    expect(isDiscountedModelRoutePricing({ kind: 'rate', rate: 6.8 })).toBe(false);
+    expect(isDiscountedModelRoutePricing({ kind: 'rate', rate: 0 })).toBe(false);
+    expect(isDiscountedModelRoutePricing({ kind: 'fixed', price: 0.4, currency: 'CNY' })).toBe(false);
   });
 });
 
@@ -147,7 +164,8 @@ describe('ModelRouteSelect rendering', () => {
     );
 
     expect(html).toContain('Banana Pro · Official');
-    expect(html).toContain('按实际消耗 ×4.76');
+    expect(html).toContain('约 7.0 折');
+    expect(html).not.toContain('4.76');
     expect(html).not.toContain('¥0.4');
   });
 });

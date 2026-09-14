@@ -6,40 +6,52 @@ import { useTranslation } from 'react-i18next';
 // i18n 资源文件（后续可迁回 core i18n 的 studio.* 键）。「官方直连」限定词沿用 core
 // 既有键 playground.studio_route_official（见 modelRoutes.localizeRouteLabel）。
 //
-// {price} 已含货币符号（¥ / $）；{rate} 是分组有效倍率。
+// {price} 已含货币符号（¥ / $）。折数标签与 core 密钥页分组下拉同一文案
+//（user_keys.group_quote_discount）：{zhe} 是折数（7.5），{off} 是优惠百分比（25）；
+// {multiple} 是高于官方价时相对官方价的倍数。
 
 export const MODEL_SELECTOR_STRINGS = {
   zh: {
     price_per_image: '{price}/张',
-    billed_by_usage: '按实际消耗 ×{rate}',
+    discount: '约 {zhe} 折',
+    official_price: '官方价',
+    above_official_price: '官方价 ×{multiple}',
     model_search_placeholder: '搜模型,如 banana / gpt-image-2.5 / seedream',
     family_all: '全部',
     no_model_match: '没有匹配的模型',
   },
   'zh-HK': {
     price_per_image: '{price}/張',
-    billed_by_usage: '按實際消耗 ×{rate}',
+    discount: '約 {zhe} 折',
+    official_price: '官方價',
+    above_official_price: '官方價 ×{multiple}',
     model_search_placeholder: '搜模型,如 banana / gpt-image-2.5 / seedream',
     family_all: '全部',
     no_model_match: '沒有匹配的模型',
   },
   en: {
     price_per_image: '{price}/image',
-    billed_by_usage: 'Pay per use ×{rate}',
+    discount: '≈{off}% off',
+    official_price: 'Official price',
+    above_official_price: 'Official price ×{multiple}',
     model_search_placeholder: 'Search models, e.g. banana / gpt-image-2.5 / seedream',
     family_all: 'All',
     no_model_match: 'No matching models',
   },
   es: {
     price_per_image: '{price}/imagen',
-    billed_by_usage: 'Según consumo ×{rate}',
+    discount: '≈{off}% de descuento',
+    official_price: 'Precio oficial',
+    above_official_price: 'Precio oficial ×{multiple}',
     model_search_placeholder: 'Buscar modelos, p. ej. banana / gpt-image-2.5 / seedream',
     family_all: 'Todos',
     no_model_match: 'No hay modelos que coincidan',
   },
   ja: {
     price_per_image: '{price}/枚',
-    billed_by_usage: '従量課金 ×{rate}',
+    discount: '約{off}%オフ',
+    official_price: '公式価格',
+    above_official_price: '公式価格 ×{multiple}',
     model_search_placeholder: 'モデルを検索(例: banana / gpt-image-2.5 / seedream)',
     family_all: 'すべて',
     no_model_match: '一致するモデルがありません',

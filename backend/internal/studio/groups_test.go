@@ -179,14 +179,18 @@ func TestImageGroupChannelPassthrough(t *testing.T) {
 		},
 		map[string]interface{}{"id": 18, "name": "Gemini 全系(含生图)", "platform": "openai", "rate_multiplier": 5.1, "effective_rate": 5.1, "channel": "vip"},
 		map[string]interface{}{"id": 15, "name": "GPT Image 全系", "platform": "openai", "rate_multiplier": 5.1, "effective_rate": 5.1},
+		map[string]interface{}{"id": 19, "name": "Gemini 全系", "platform": "openai", "rate_multiplier": 3.1, "effective_rate": 3.1, "channel": " Azure "},
 	}}
 
 	groups, err := hostListImageGroups(context.Background(), host, 7, "gemini", "gemini-3-pro-image")
 	if err != nil {
 		t.Fatalf("hostListImageGroups: %v", err)
 	}
-	if len(groups) != 4 {
+	if len(groups) != 5 {
 		t.Fatalf("groups = %+v", groups)
+	}
+	if groups[4].Channel != "azure" {
+		t.Fatalf("azure channel should normalise to azure, got %q", groups[4].Channel)
 	}
 	if groups[0].Channel != "official" {
 		t.Fatalf("top-level channel should normalise to official, got %q", groups[0].Channel)

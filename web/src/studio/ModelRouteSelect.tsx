@@ -8,6 +8,7 @@ import {
   availableModelFamilies,
   filterModelRouteOptions,
   formatModelRoutePricing,
+  isDiscountedModelRoutePricing,
   readFamilyFilter,
   writeFamilyFilter,
 } from './modelRouteFilter';
@@ -169,7 +170,8 @@ export function ModelRouteSelect({
     value: option.value,
     label: localizeRouteLabel(option.label, t, i18n.language),
     description: option.description,
-    meta: formatModelRoutePricing(option.pricing, strings),
+    meta: formatModelRoutePricing(option.pricing, strings) || undefined,
+    metaTone: isDiscountedModelRoutePricing(option.pricing) ? 'success' : undefined,
   }), [i18n.language, strings, t]);
 
   const visibleOptions = useMemo(

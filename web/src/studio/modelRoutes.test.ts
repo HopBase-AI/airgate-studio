@@ -165,6 +165,7 @@ describe('image group channel (R2 / R5)', () => {
     expect(imageGroupChannel(imageGroup({ name: 'Gemini 生图(Banana 系)', channel: 'official' }))).toBe('official');
     expect(imageGroupChannel(imageGroup({ name: 'Gemini 官方直连', channel: 'Standard' }))).toBe('standard');
     expect(imageGroupChannel(imageGroup({ name: 'Seedance 国内', channel: 'domestic' }))).toBe('domestic');
+    expect(imageGroupChannel(imageGroup({ name: 'Gemini 全系(含生图)', channel: 'Azure' }))).toBe('azure');
   });
 
   it('treats unknown or missing channels as standard', () => {
@@ -186,11 +187,14 @@ describe('image group channel (R2 / R5)', () => {
     expect(imageGroupChannel(imageGroup({ name: 'Google Official', platform: 'openai' }))).toBe('official');
   });
 
-  it('only ever appends the closed 官方直连 qualifier to the model name', () => {
+  it('only ever appends the closed 官方直连 / Azure qualifiers to the model name', () => {
     const banana = mustModel('gemini:gemini-3.1-flash-image');
     expect(formatModelRouteLabel(banana, GROUP_23)).toBe('Banana 2 · 官方直连');
     expect(formatModelRouteLabel(banana, GROUP_34)).toBe('Banana 2 · 官方直连');
     expect(formatModelRouteLabel(mustModel('openai:gemini-3.1-flash-image'), GROUP_18)).toBe('Banana 2');
+    expect(formatModelRouteLabel(mustModel('openai:gemini-2.5-flash-image'), { ...GROUP_18, channel: 'azure' })).toBe('Nano Banana · Azure');
+    // Azure 是品牌名，非中文界面也不翻译。
+    expect(localizeRouteLabel('Nano Banana · Azure', key => key, 'en')).toBe('Nano Banana · Azure');
     expect(formatModelRouteLabel(mustModel('openai:gpt-image-2'), GROUP_15)).toBe('GPT Image 2');
     expect(formatModelRouteLabel(mustModel('seedance:seedream-5-0-pro'), GROUP_21)).toBe('Seedream 5.0 Pro');
   });
@@ -282,7 +286,7 @@ describe('model route options on the production snapshot', () => {
   it('labels the GPT Image family by model name only, never by the group name', () => {
     const gpt = options.filter(option => option.family === 'gpt-image');
     // 2.5 两档在置顶窗口内，排在 GPT Image 2 之前。
-    expect(gpt.map(option => option.label)).toEqual(['GPT Image 2.5', 'GPT Image 2.5 Max', 'GPT Image 2']);
+    expect(gpt.map(option => option.label)).toEqual(['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'GPT Image 2']);
     expect(gpt.every(option => option.pricing.kind === 'rate' && option.pricing.rate === 5.1)).toBe(true);
   });
 
@@ -295,7 +299,7 @@ describe('model route options on the production snapshot', () => {
 
   it('pins the newly launched models above registry order while the window lasts', () => {
     const firstOfEachModel = Array.from(new Map(options.map(option => [option.modelName, option])).keys());
-    const pinned = ['GPT Image 2.5', 'GPT Image 2.5 Max'];
+    const pinned = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 
     expect(firstOfEachModel.slice(0, pinned.length)).toEqual(pinned);
     // 其余模型之间的相对顺序原样不动。
@@ -345,8 +349,8 @@ describe('model route popularity ordering (R3)', () => {
     const options = buildModelRouteOptions(MODEL_REGISTRY, groupsForModel, NOW);
 
     expect(options.map(option => option.label)).toEqual([
-      'GPT Image 2.5',        // users_30d = 0，靠 launchedAt 置顶
-      'GPT Image 2.5 Max',    // 新模型之间按注册表顺序
+      'gpt-image-2.5-flare',        // users_30d = 0，靠 launchedAt 置顶
+      'gpt-image-2.5-sunburst',    // 新模型之间按注册表顺序
       'Banana Pro',           // 300
       'Banana Pro · 官方直连',
       'GPT Image 2',          // 120
@@ -355,7 +359,7 @@ describe('model route popularity ordering (R3)', () => {
   });
 
   it('leaves the order among non-new models untouched and restores it after the window', () => {
-    const pinnedNames = ['GPT Image 2.5', 'GPT Image 2.5 Max'];
+    const pinnedNames = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
     const withPin = buildModelRouteOptions(MODEL_REGISTRY, groupsForModel, NOW).map(option => option.label);
     const expired = buildModelRouteOptions(MODEL_REGISTRY, groupsForModel, AFTER_PIN_WINDOW).map(option => option.label);
 
@@ -363,8 +367,8 @@ describe('model route popularity ordering (R3)', () => {
       'Banana Pro',
       'Banana Pro · 官方直连',
       'GPT Image 2',
-      'GPT Image 2.5',        // users_30d = 0：排在有用量的之后、无数据的之前
-      'GPT Image 2.5 Max',
+      'gpt-image-2.5-flare',        // users_30d = 0：排在有用量的之后、无数据的之前
+      'gpt-image-2.5-sunburst',
       'Seedream 5.0 Pro',
     ]);
     // 去掉被钉起来的两行，其余顺序两个时点完全一致。
