@@ -36,8 +36,8 @@ const OPTIONS: ModelRouteOption[] = [
   option({ modelName: 'Banana Pro', modelId: 'gemini-3-pro-image', family: 'banana', groupId: 18, pricing: { kind: 'fixed', price: 0.4, currency: 'CNY' } }),
   option({ modelName: 'Banana Pro', modelId: 'gemini-3-pro-image', family: 'banana', groupId: 34, channel: 'official', pricing: { kind: 'rate', rate: 4.76 } }),
   option({ modelName: 'Nano Banana', modelId: 'gemini-2.5-flash-image', family: 'banana', groupId: 18, pricing: { kind: 'fixed', price: 0.4, currency: 'CNY' } }),
-  option({ modelName: 'GPT Image 2.5 Flare', modelId: 'gpt-image-2.5-flare', family: 'gpt-image', groupId: 15 }),
-  option({ modelName: 'GPT Image 2.5 Sunburst', modelId: 'gpt-image-2.5-sunburst', family: 'gpt-image', groupId: 15 }),
+  option({ modelName: 'gpt-image-2.5-flare', modelId: 'gpt-image-2.5-flare', family: 'gpt-image', groupId: 15 }),
+  option({ modelName: 'gpt-image-2.5-sunburst', modelId: 'gpt-image-2.5-sunburst', family: 'gpt-image', groupId: 15 }),
 ];
 
 class MemoryStorage {
@@ -60,7 +60,7 @@ describe('model route filtering (R6)', () => {
     expect(filterModelRouteOptions(OPTIONS, 'gpt-image-2.5', null).map(o => o.modelId))
       .toEqual(['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']);
     expect(filterModelRouteOptions(OPTIONS, 'gpt image', null).map(o => o.label))
-      .toEqual(['GPT Image 2', 'GPT Image 2.5 Flare', 'GPT Image 2.5 Sunburst']);
+      .toEqual(['GPT Image 2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']);
     expect(filterModelRouteOptions(OPTIONS, '  seedream ', null).map(o => o.label))
       .toEqual(['Seedream 5.0 Pro']);
   });

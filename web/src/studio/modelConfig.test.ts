@@ -74,14 +74,14 @@ describe('model families (R6)', () => {
   });
 });
 
-describe('GPT Image 2.5 Flare', () => {
-  it('registers flare and sunburst under their official names with the GPT Image 2 contract', () => {
+describe('gpt-image-2.5-flare', () => {
+  it('registers flare and sunburst with their model IDs as display names and the GPT Image 2 contract', () => {
     const base = getModelConfig('openai:gpt-image-2');
     const flare = getModelConfig('openai:gpt-image-2.5-flare');
     const sunburst = getModelConfig('openai:gpt-image-2.5-sunburst');
     expect(base).toBeDefined();
-    expect(flare).toMatchObject({ id: 'gpt-image-2.5-flare', name: 'GPT Image 2.5 Flare', platform: 'openai', family: 'gpt-image' });
-    expect(sunburst).toMatchObject({ id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', platform: 'openai', family: 'gpt-image' });
+    expect(flare).toMatchObject({ id: 'gpt-image-2.5-flare', name: 'gpt-image-2.5-flare', platform: 'openai', family: 'gpt-image' });
+    expect(sunburst).toMatchObject({ id: 'gpt-image-2.5-sunburst', name: 'gpt-image-2.5-sunburst', platform: 'openai', family: 'gpt-image' });
     for (const model of [flare, sunburst]) {
       expect(model?.sizes).toEqual(base?.sizes);
       expect(model?.defaultSize).toBe(base?.defaultSize);
