@@ -1199,20 +1199,18 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               </button>
             </div>
           ))}
-          {!isVideo && (
-            <button
-              type="button"
-              style={c.thumbAddTile}
-              className="studio-gallery-action"
-              onClick={() => fileInputRef.current?.click()}
-              title={t('playground.studio_add_reference')}
-              aria-label={t('playground.studio_add_reference')}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M5 12h14" /><path d="M12 5v14" />
-              </svg>
-            </button>
-          )}
+          <button
+            type="button"
+            style={c.thumbAddTile}
+            className="studio-gallery-action"
+            onClick={() => fileInputRef.current?.click()}
+            title={t('playground.studio_add_reference')}
+            aria-label={t('playground.studio_add_reference')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M5 12h14" /><path d="M12 5v14" />
+            </svg>
+          </button>
           {allSources.length > 1 && (
             <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={clearAllSources}>
               {t('playground.studio_clear_all')}
@@ -1299,20 +1297,20 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               </svg>
             </button>
           </div>
-          {!isVideo && (
-            <button
-              type="button"
-              style={hasSource ? c.refBtnActive : c.refBtn}
-              className="studio-gallery-action"
-              onClick={() => fileInputRef.current?.click()}
-              title={t('playground.studio_add_reference')}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
-              </svg>
-              {hasSource ? <span style={{ fontSize: 11, fontWeight: 600 }}>{allSources.length}</span> : null}
-            </button>
-          )}
+          {/* 参考图入口图像、视频两种模式都要：视频的参考图随任务以 reference_image 提交 */}
+          <button
+            type="button"
+            style={hasSource ? c.refBtnActive : c.refBtn}
+            className="studio-gallery-action"
+            onClick={() => fileInputRef.current?.click()}
+            title={t('playground.studio_add_reference')}
+            aria-label={t('playground.studio_add_reference')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+            </svg>
+            {hasSource ? <span style={{ fontSize: 11, fontWeight: 600 }}>{allSources.length}</span> : null}
+          </button>
           {isVideo ? (
             <>
               <div style={c.modelSelect}>
