@@ -519,6 +519,14 @@ func buildTaskInput(req createGenerationTaskRequest) map[string]interface{} {
 			input["preserve_reference"] = true
 		}
 	}
+	// 视频模式的参考视频 / 音频按类型各落一个数组，执行插件据此组装上游请求。
+	// 不透传 inputs：部分执行插件把 inputs[].url 一律当图片读。
+	if videos := extractReferenceMedia(req.Inputs, referenceKindVideo); len(videos) > 0 {
+		input["videos"] = videos
+	}
+	if audios := extractReferenceMedia(req.Inputs, referenceKindAudio); len(audios) > 0 {
+		input["audios"] = audios
+	}
 	if req.Mask != nil && req.Mask.URL != "" {
 		input["mask"] = req.Mask.URL
 	}
@@ -604,6 +612,12 @@ func buildGenerationTaskResponse(task *hostTask) map[string]interface{} {
 		}
 		if images := stringSliceFromAny(task.Input["images"]); len(images) > 0 {
 			resp["input_images"] = images
+		}
+		if videos := stringSliceFromAny(task.Input["videos"]); len(videos) > 0 {
+			resp["input_videos"] = videos
+		}
+		if audios := stringSliceFromAny(task.Input["audios"]); len(audios) > 0 {
+			resp["input_audios"] = audios
 		}
 		if mask, ok := task.Input["mask"].(string); ok && mask != "" {
 			resp["input_mask"] = mask

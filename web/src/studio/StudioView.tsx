@@ -10,12 +10,98 @@ import { ModelRouteSelect } from './ModelRouteSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
 import { buildModelRouteOptions, imageGroupChannel, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue, sanitizeVendorTokens } from './modelRoutes';
 import { commitComposerSend, isComposerSubmitKey } from './composerSend';
-import { videoModelById, useVideoStrings, formatVideoCostEstimate } from './video/videoConfig';
+import {
+  videoModelById,
+  useVideoStrings,
+  formatVideoCostEstimate,
+  REFERENCE_AUDIO_ACCEPT,
+  REFERENCE_AUDIO_MAX_BYTES,
+  REFERENCE_VIDEO_ACCEPT,
+  REFERENCE_VIDEO_MAX_BYTES,
+  referenceTotalSeconds,
+  validateVideoReferences,
+  videoReferenceCapability,
+  videoReferenceIssueMessage,
+  type VideoReferenceMediaKind,
+} from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
 import { ProjectSidebar } from './ProjectSidebar';
 import { api, type InspirationCatalog, type InspirationItem } from '../api';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+// 视频模式的参考视频 / 音频：选中即上传成资产，发送时只带回的地址。
+interface ComposerReferenceMedia {
+  id: string;
+  kind: VideoReferenceMediaKind;
+  name: string;
+  file: File;
+  // 本地预览地址（objectURL）：/assets-runtime 不支持 Range，Safari 播不了远端视频。
+  previewUrl: string;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  status: 'uploading' | 'ready' | 'error';
+  progress: number;
+  url?: string;
+  error?: string;
+}
+
+type ReferenceMediaMetadata = Pick<ComposerReferenceMedia, 'durationSeconds' | 'width' | 'height'>;
+
+const REFERENCE_AUDIO_MIME_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/vnd.wave'];
+
+// referenceMediaKindForFile 按 MIME 或扩展名判断参考素材类型（部分系统给 .mov 报空 MIME）。
+function referenceMediaKindForFile(file: File): VideoReferenceMediaKind | null {
+  const type = file.type.toLowerCase();
+  const name = file.name.toLowerCase();
+  if (type === 'video/mp4' || type === 'video/quicktime' || name.endsWith('.mp4') || name.endsWith('.mov')) return 'video';
+  if (REFERENCE_AUDIO_MIME_TYPES.includes(type) || name.endsWith('.mp3') || name.endsWith('.wav')) return 'audio';
+  return null;
+}
+
+// readReferenceMediaMetadata 用媒体元素读时长与画面尺寸；读不到（编码不支持、超时）就留空，
+// 交给执行插件校验。
+function readReferenceMediaMetadata(url: string, kind: VideoReferenceMediaKind): Promise<ReferenceMediaMetadata> {
+  return new Promise(resolve => {
+    const element = document.createElement(kind === 'video' ? 'video' : 'audio');
+    let settled = false;
+    let timer = 0;
+    const finish = (meta: ReferenceMediaMetadata) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      element.removeAttribute('src');
+      element.load();
+      resolve(meta);
+    };
+    timer = window.setTimeout(() => finish({}), 10_000);
+    element.preload = 'metadata';
+    element.muted = true;
+    element.onloadedmetadata = () => {
+      const duration = Number.isFinite(element.duration) && element.duration > 0 ? element.duration : undefined;
+      if (element instanceof HTMLVideoElement) {
+        finish({ durationSeconds: duration, width: element.videoWidth || undefined, height: element.videoHeight || undefined });
+      } else {
+        finish({ durationSeconds: duration });
+      }
+    };
+    element.onerror = () => finish({});
+    element.src = url;
+  });
+}
+
+function formatMediaDuration(seconds?: number): string {
+  if (seconds === undefined || !Number.isFinite(seconds)) return '--:--';
+  const total = Math.round(seconds);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+let referenceMediaSeq = 0;
+function nextReferenceMediaId(): string {
+  referenceMediaSeq += 1;
+  return `ref-${Date.now().toString(36)}-${referenceMediaSeq}`;
+}
 
 function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -921,6 +1007,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     videoGroups, videoRouteReady,
     selectedVideoGroupId, setSelectedVideoGroupId,
     videoBudget,
+    setVideoReferenceSummary,
     referenceImages, setReferenceImages,
     editRequest, clearEditRequest,
   } = useStudio();
@@ -931,6 +1018,84 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const [count, setCount] = useState(1);
   const [sourceImages, setSourceImages] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+
+  const [referenceMedia, setReferenceMedia] = useState<ComposerReferenceMedia[]>([]);
+  // 被拒收的文件（格式 / 大小不对）给一句提示，别静默丢掉。
+  const [referenceNotice, setReferenceNotice] = useState<string | null>(null);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const uploadControllersRef = useRef(new Map<string, AbortController>());
+  const referenceMediaRef = useRef<ComposerReferenceMedia[]>([]);
+  const audioPreviewRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    referenceMediaRef.current = referenceMedia;
+  }, [referenceMedia]);
+
+  useEffect(() => {
+    const controllers = uploadControllersRef.current;
+    return () => {
+      controllers.forEach(controller => controller.abort());
+      referenceMediaRef.current.forEach(item => URL.revokeObjectURL(item.previewUrl));
+    };
+  }, []);
+
+  const patchReferenceMedia = useCallback((id: string, patch: Partial<ComposerReferenceMedia>) => {
+    setReferenceMedia(prev => prev.map(item => (item.id === id ? { ...item, ...patch } : item)));
+  }, []);
+
+  const uploadReferenceMedia = useCallback((item: Pick<ComposerReferenceMedia, 'id' | 'file' | 'kind'>) => {
+    uploadControllersRef.current.get(item.id)?.abort();
+    const controller = new AbortController();
+    uploadControllersRef.current.set(item.id, controller);
+    patchReferenceMedia(item.id, { status: 'uploading', progress: 0, error: undefined });
+    api.uploadReference(item.file, item.kind, {
+      signal: controller.signal,
+      onProgress: progress => patchReferenceMedia(item.id, { progress }),
+    })
+      .then(uploaded => patchReferenceMedia(item.id, { status: 'ready', progress: 1, url: uploaded.url }))
+      .catch(err => {
+        if (controller.signal.aborted) return;
+        patchReferenceMedia(item.id, { status: 'error', error: err instanceof Error ? err.message : String(err) });
+      })
+      .finally(() => {
+        if (uploadControllersRef.current.get(item.id) === controller) uploadControllersRef.current.delete(item.id);
+      });
+  }, [patchReferenceMedia]);
+
+  const addReferenceMedia = useCallback((file: File, kind: VideoReferenceMediaKind) => {
+    const maxBytes = kind === 'video' ? REFERENCE_VIDEO_MAX_BYTES : REFERENCE_AUDIO_MAX_BYTES;
+    if (file.size > maxBytes) {
+      const key = kind === 'video' ? 'ref_video_too_large' : 'ref_audio_too_large';
+      setReferenceNotice(vs(key).replaceAll('{max}', String(Math.round(maxBytes / 1024 / 1024))));
+      return;
+    }
+    setReferenceNotice(null);
+    const item: ComposerReferenceMedia = {
+      id: nextReferenceMediaId(),
+      kind,
+      name: file.name,
+      file,
+      previewUrl: URL.createObjectURL(file),
+      status: 'uploading',
+      progress: 0,
+    };
+    setReferenceMedia(prev => [...prev, item]);
+    void readReferenceMediaMetadata(item.previewUrl, kind).then(meta => patchReferenceMedia(item.id, meta));
+    uploadReferenceMedia(item);
+  }, [patchReferenceMedia, uploadReferenceMedia, vs]);
+
+  const removeReferenceMedia = useCallback((id: string) => {
+    uploadControllersRef.current.get(id)?.abort();
+    uploadControllersRef.current.delete(id);
+    const target = referenceMediaRef.current.find(item => item.id === id);
+    if (target) URL.revokeObjectURL(target.previewUrl);
+    setPlayingAudioId(current => (current === id ? null : current));
+    setReferenceMedia(prev => prev.filter(item => item.id !== id));
+  }, []);
+
+  const toggleAudioPreview = useCallback((item: ComposerReferenceMedia) => {
+    setPlayingAudioId(current => (current === item.id ? null : item.id));
+  }, []);
 
   // mask state (only for single image → inpaint)
   const [selection, setSelection] = useState<NormalizedRect | null>(null);
@@ -965,6 +1130,43 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const allSources = [...sourceImages, ...referenceImages];
   const hasSource = allSources.length > 0;
   const isSingleSource = allSources.length === 1;
+  // 参考视频 / 音频只在视频模式展示与发送；切回图像模式时保留，切回来还在。
+  const visibleReferenceMedia = isVideo ? referenceMedia : [];
+  const referenceCapability = videoReferenceCapability(videoModelId);
+  const referenceIssues = useMemo(
+    () => (isVideo ? validateVideoReferences(videoModelId, allSources.length, referenceMedia, videoDuration) : []),
+    [allSources.length, isVideo, referenceMedia, videoDuration, videoModelId],
+  );
+  const referencesUploading = visibleReferenceMedia.some(item => item.status === 'uploading');
+  const referencesNotReady = visibleReferenceMedia.some(item => item.status !== 'ready');
+  const referenceAccept = isVideo
+    ? ['image/*', referenceCapability.video ? REFERENCE_VIDEO_ACCEPT : '', referenceCapability.audio ? REFERENCE_AUDIO_ACCEPT : '']
+      .filter(Boolean)
+      .join(',')
+    : 'image/*';
+
+  useEffect(() => {
+    const videos = isVideo ? referenceMedia.filter(item => item.kind === 'video') : [];
+    setVideoReferenceSummary({
+      images: isVideo ? allSources.length : 0,
+      videos: videos.length,
+      audios: isVideo ? referenceMedia.filter(item => item.kind === 'audio').length : 0,
+      videoSeconds: referenceTotalSeconds(videos),
+    });
+  }, [allSources.length, isVideo, referenceMedia, setVideoReferenceSummary]);
+
+  // 参考音频试听：隐藏的 <audio> 跟着 playingAudioId 切换；切回图像模式时停。
+  const playingAudioUrl = visibleReferenceMedia.find(item => item.id === playingAudioId)?.previewUrl;
+  useEffect(() => {
+    const player = audioPreviewRef.current;
+    if (!player) return;
+    if (!playingAudioUrl) {
+      player.pause();
+      return;
+    }
+    void player.play().catch(() => setPlayingAudioId(null));
+  }, [playingAudioUrl]);
+
   const baseModelOptions = hasSource
     ? (selection ? INPAINT_MODEL_REGISTRY : IMG2IMG_MODEL_REGISTRY)
     : MODEL_REGISTRY;
@@ -983,7 +1185,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     ? modelRouteOptionValue(selectedModelKey, selectedGroupId)
     : '';
   const hasSelectableModel = modelRouteOptions.length > 0;
-  const canSend = prompt.trim().length > 0 && (isVideo ? videoRouteReady : (hasSelectableModel && imageRouteReady));
+  const canSend = prompt.trim().length > 0 && (isVideo
+    ? videoRouteReady && referenceIssues.length === 0 && !referencesNotReady
+    : (hasSelectableModel && imageRouteReady));
 
   useEffect(() => {
     if (!modelOptions.some(m => m.routeKey === selectedModelKey) && modelOptions.length > 0) {
@@ -1013,7 +1217,11 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
 
     return commitComposerSend(canSend, () => {
       if (isVideo) {
-        return generateVideo(trimmed, { sourceImages: hasSource ? allSources : undefined });
+        return generateVideo(trimmed, {
+          sourceImages: hasSource ? allSources : undefined,
+          sourceVideos: referenceMedia.flatMap(item => (item.kind === 'video' && item.url ? [item.url] : [])),
+          sourceAudios: referenceMedia.flatMap(item => (item.kind === 'audio' && item.url ? [item.url] : [])),
+        });
       }
 
       if (isSingleSource && selection) {
@@ -1047,13 +1255,19 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   };
 
   const handleFile = useCallback(async (file: File) => {
-    if (!file.type.startsWith('image/')) return;
+    if (!file.type.startsWith('image/')) {
+      if (!isVideo) return;
+      const kind = referenceMediaKindForFile(file);
+      if (kind) addReferenceMedia(file, kind);
+      else setReferenceNotice(vs(file.type.startsWith('audio/') ? 'ref_audio_format' : 'ref_video_format'));
+      return;
+    }
     try {
       const dataUrl = await readFileAsDataURL(file);
       setSourceImages(prev => [...prev, dataUrl]);
       setSelection(null);
     } catch { /* ignore */ }
-  }, []);
+  }, [addReferenceMedia, isVideo, vs]);
 
   const handleFileInput = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1123,11 +1337,39 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     setSourceImages([]);
     setReferenceImages([]);
     setSelection(null);
+    if (isVideo) {
+      referenceMedia.forEach(item => removeReferenceMedia(item.id));
+      setReferenceNotice(null);
+    }
   };
 
-  const modeHint = hasSource
-    ? (isSingleSource && selection ? t('playground.studio_mode_inpaint') : t('playground.studio_mode_img2img'))
-    : null;
+  // 切到只收部分类型的模型后，一键移除它不支持的素材（不自动删，切回原模型时素材还在）。
+  const removeUnsupportedReferences = () => {
+    if (referenceCapability.images === 0) {
+      setSourceImages([]);
+      setReferenceImages([]);
+      setSelection(null);
+    }
+    referenceMedia
+      .filter(item => (item.kind === 'video' ? !referenceCapability.video : !referenceCapability.audio))
+      .forEach(item => removeReferenceMedia(item.id));
+  };
+
+  // 视频模式的提示位放参考素材的问题（超限 / 上传中 / 拒收），图像模式仍是图生图 / 局部重绘。
+  const referenceHint = referenceIssues.length > 0
+    ? { text: videoReferenceIssueMessage(referenceIssues[0], vs), warn: true }
+    : referencesUploading
+      ? { text: vs('ref_pending_upload'), warn: false }
+      : referenceNotice
+        ? { text: referenceNotice, warn: true }
+        : null;
+  const modeHint = isVideo
+    ? referenceHint?.text ?? null
+    : hasSource
+      ? (isSingleSource && selection ? t('playground.studio_mode_inpaint') : t('playground.studio_mode_img2img'))
+      : null;
+  const referenceCount = allSources.length + visibleReferenceMedia.length;
+  const addReferenceLabel = isVideo ? vs('add_reference') : t('playground.studio_add_reference');
 
   return (
     <div
@@ -1138,7 +1380,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       onDrop={handleDrop}
     >
       {/* Source image thumbnails */}
-      {hasSource && (
+      {(referenceCount > 0 || (isVideo && referenceNotice)) && (
         <div style={c.sourceStrip}>
           {allSources.map((src, i) => (
             <div
@@ -1199,31 +1441,119 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               </button>
             </div>
           ))}
-          {!isVideo && (
-            <button
-              type="button"
-              style={c.thumbAddTile}
-              className="studio-gallery-action"
-              onClick={() => fileInputRef.current?.click()}
-              title={t('playground.studio_add_reference')}
-              aria-label={t('playground.studio_add_reference')}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M5 12h14" /><path d="M12 5v14" />
-              </svg>
-            </button>
-          )}
-          {allSources.length > 1 && (
+          {visibleReferenceMedia.map(item => {
+            const failed = item.status === 'error';
+            const statusText = item.status === 'uploading'
+              ? `${Math.round(item.progress * 100)}%`
+              : failed ? vs('reference_upload_failed') : null;
+            const label = `${vs(item.kind === 'video' ? 'reference_video' : 'reference_audio')} · ${item.name}`;
+            const tooltip = failed && item.error ? `${label}\n${item.error}` : label;
+            const removeButton = (
+              <button
+                type="button"
+                style={item.kind === 'video' ? c.thumbRemoveBtn : c.audioChipRemove}
+                className={item.kind === 'video' ? 'studio-source-thumb-remove' : 'studio-gallery-action'}
+                onClick={e => {
+                  e.stopPropagation();
+                  removeReferenceMedia(item.id);
+                }}
+                aria-label={vs('reference_remove')}
+                title={vs('reference_remove')}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            );
+            if (item.kind === 'video') {
+              return (
+                <div
+                  key={item.id}
+                  style={failed ? { ...c.thumbWrap, ...c.referenceErrorBorder } : c.thumbWrap}
+                  className="studio-source-thumb"
+                  title={tooltip}
+                >
+                  <button
+                    type="button"
+                    style={c.thumbOpenBtn}
+                    onClick={() => { if (failed) uploadReferenceMedia(item); }}
+                    aria-label={failed ? vs('reference_upload_failed') : label}
+                  >
+                    <video src={item.previewUrl} muted playsInline preload="metadata" style={c.thumbImg} />
+                    <span style={c.thumbDurationBadge}>{formatMediaDuration(item.durationSeconds)}</span>
+                    {statusText && <span style={c.thumbStatusOverlay}>{statusText}</span>}
+                  </button>
+                  {removeButton}
+                </div>
+              );
+            }
+            const playing = playingAudioId === item.id;
+            return (
+              <div
+                key={item.id}
+                style={failed ? { ...c.audioChip, ...c.referenceErrorBorder } : c.audioChip}
+                title={tooltip}
+              >
+                <button
+                  type="button"
+                  style={c.audioChipPlay}
+                  className="studio-gallery-action"
+                  onClick={() => (failed ? uploadReferenceMedia(item) : toggleAudioPreview(item))}
+                  aria-label={failed ? vs('reference_upload_failed') : vs(playing ? 'reference_pause' : 'reference_play')}
+                >
+                  {failed ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 3v6h-6" />
+                    </svg>
+                  ) : playing ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" />
+                    </svg>
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M8 5.5v13l11-6.5z" />
+                    </svg>
+                  )}
+                </button>
+                <span style={c.audioChipText}>
+                  <span style={c.audioChipName}>{item.name}</span>
+                  <span style={failed ? { ...c.audioChipMeta, color: cssVar('danger') } : c.audioChipMeta}>
+                    {statusText ?? formatMediaDuration(item.durationSeconds)}
+                  </span>
+                </span>
+                {removeButton}
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            style={c.thumbAddTile}
+            className="studio-gallery-action"
+            onClick={() => fileInputRef.current?.click()}
+            title={addReferenceLabel}
+            aria-label={addReferenceLabel}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M5 12h14" /><path d="M12 5v14" />
+            </svg>
+          </button>
+          {referenceCount > 1 && (
             <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={clearAllSources}>
               {t('playground.studio_clear_all')}
             </button>
           )}
-          {isSingleSource && selection && (
+          {isVideo && referenceIssues.some(issue => issue.code.endsWith('_unsupported')) && (
+            <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={removeUnsupportedReferences}>
+              {vs('ref_remove_unsupported')}
+            </button>
+          )}
+          {!isVideo && isSingleSource && selection && (
             <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={() => setSelection(null)}>
               {t('playground.studio_clear_selection')}
             </button>
           )}
-          {modeHint && <span style={c.modeHint}>{modeHint}</span>}
+          {modeHint && <span style={isVideo && referenceHint?.warn ? c.referenceWarnHint : c.modeHint}>{modeHint}</span>}
         </div>
       )}
       {editorIndex !== null && allSources[editorIndex] && (
@@ -1242,7 +1572,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           }}
         />
       )}
-      <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFileInput} />
+      <input ref={fileInputRef} type="file" accept={referenceAccept} multiple style={{ display: 'none' }} onChange={handleFileInput} />
+      <audio ref={audioPreviewRef} src={playingAudioUrl} onEnded={() => setPlayingAudioId(null)} style={{ display: 'none' }} />
 
       {/* Prompt textarea */}
       <div data-onboarding-target="studio-prompt" style={c.promptArea}>
@@ -1299,20 +1630,20 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               </svg>
             </button>
           </div>
-          {!isVideo && (
-            <button
-              type="button"
-              style={hasSource ? c.refBtnActive : c.refBtn}
-              className="studio-gallery-action"
-              onClick={() => fileInputRef.current?.click()}
-              title={t('playground.studio_add_reference')}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
-              </svg>
-              {hasSource ? <span style={{ fontSize: 11, fontWeight: 600 }}>{allSources.length}</span> : null}
-            </button>
-          )}
+          {/* 参考素材入口图像、视频两种模式都要：视频模式按所选模型额外收参考视频 / 音频 */}
+          <button
+            type="button"
+            style={referenceCount > 0 ? c.refBtnActive : c.refBtn}
+            className="studio-gallery-action"
+            onClick={() => fileInputRef.current?.click()}
+            title={addReferenceLabel}
+            aria-label={addReferenceLabel}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+            </svg>
+            {referenceCount > 0 ? <span style={{ fontSize: 11, fontWeight: 600 }}>{referenceCount}</span> : null}
+          </button>
           {isVideo ? (
             <>
               <div style={c.modelSelect}>
@@ -1543,6 +1874,105 @@ const c: Record<string, CSSProperties> = {
     color: cssVar('textTertiary'),
     cursor: 'pointer',
     padding: 0,
+  },
+  referenceErrorBorder: {
+    border: `1px solid ${cssVar('danger')}`,
+  },
+  // 参考视频缩略图右下角的时长角标
+  thumbDurationBadge: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    padding: '1px 4px',
+    borderRadius: 4,
+    background: 'rgba(20, 20, 20, 0.62)',
+    color: 'rgba(255, 255, 255, 0.92)',
+    fontSize: 9,
+    lineHeight: '12px',
+    fontFamily: cssVar('fontMono'),
+    pointerEvents: 'none',
+  },
+  // 上传进度 / 上传失败的蒙层
+  thumbStatusOverlay: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 2,
+    background: 'rgba(0, 0, 0, 0.45)',
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 600,
+    lineHeight: 1.2,
+    textAlign: 'center',
+    pointerEvents: 'none',
+  },
+  // 参考音频：与缩略图同高的小块（播放键 + 文件名 + 时长）
+  audioChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    height: 48,
+    maxWidth: 180,
+    padding: '0 4px',
+    flexShrink: 0,
+    borderRadius: 8,
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    background: cssVar('bgDeep'),
+  },
+  audioChipPlay: {
+    width: 28,
+    height: 28,
+    flexShrink: 0,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 999,
+    background: 'transparent',
+    color: cssVar('text'),
+    cursor: 'pointer',
+    padding: 0,
+  },
+  audioChipText: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    lineHeight: 1.25,
+  },
+  audioChipName: {
+    fontSize: 11,
+    color: cssVar('text'),
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  audioChipMeta: {
+    fontSize: 10,
+    color: cssVar('textTertiary'),
+    fontFamily: cssVar('fontMono'),
+  },
+  audioChipRemove: {
+    width: 20,
+    height: 20,
+    flexShrink: 0,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: 'none',
+    borderRadius: 999,
+    background: 'transparent',
+    color: cssVar('textTertiary'),
+    cursor: 'pointer',
+    padding: 0,
+  },
+  // 视频模式参考素材超限 / 拒收的提示：比模式提示醒目
+  referenceWarnHint: {
+    marginLeft: 'auto',
+    fontSize: 11,
+    lineHeight: 1.3,
+    color: cssVar('danger'),
   },
   // 工具栏里的「参考图」入口(图像模式);有图时描边加深并带张数
   refBtn: {

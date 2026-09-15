@@ -121,6 +121,9 @@ export function mergeGalleryItems(
       taskId: existing.taskId ?? item.taskId,
       assetId: existing.assetId ?? item.assetId,
       sourceUrl: existing.sourceUrl ?? item.sourceUrl,
+      referenceImages: existing.referenceImages ?? item.referenceImages,
+      referenceVideos: existing.referenceVideos ?? item.referenceVideos,
+      referenceAudios: existing.referenceAudios ?? item.referenceAudios,
       sourceVideoUrl: existing.sourceVideoUrl ?? item.sourceVideoUrl,
     };
   }
@@ -224,9 +227,38 @@ interface GenerateOptions {
 
 interface GenerateVideoOptions {
   sourceImages?: string[];
+  // 已上传成资产的参考视频 / 音频地址。
+  sourceVideos?: string[];
+  sourceAudios?: string[];
   route?: GenerationRouteSnapshot | null;
   projectId?: number;
   durationSeconds?: number;
+}
+
+// ComposerBar 上报的参考素材数量与参考视频合计秒数，预算预览据此估价
+// （参考图张数会切价格档，参考视频按输入时长计费）。
+export interface VideoReferenceSummary {
+  images: number;
+  videos: number;
+  audios: number;
+  videoSeconds: number;
+}
+
+const EMPTY_VIDEO_REFERENCE_SUMMARY: VideoReferenceSummary = { images: 0, videos: 0, audios: 0, videoSeconds: 0 };
+
+// buildVideoReferenceInputs 视频任务的参考素材按图 → 视频 → 音频排列，各类保持添加顺序
+// （部分模型的提示词按「图1 / 视频1 / 音频1」在类型内按序指代）。
+export function buildVideoReferenceInputs(
+  images: readonly string[],
+  videos: readonly string[],
+  audios: readonly string[],
+): Array<{ type: 'image' | 'video' | 'audio'; role: string; url: string }> | undefined {
+  const inputs = [
+    ...images.map(url => ({ type: 'image' as const, role: 'reference_image', url })),
+    ...videos.map(url => ({ type: 'video' as const, role: 'reference_video', url })),
+    ...audios.map(url => ({ type: 'audio' as const, role: 'reference_audio', url })),
+  ];
+  return inputs.length > 0 ? inputs : undefined;
 }
 
 export function canonicalVideoRoute(route: GenerationRouteSnapshot | null): GenerationRouteSnapshot | null {
@@ -526,6 +558,9 @@ function galleryItemsFromCompletedTask(
       sourceUrl: taskSourceUrl(task),
       sourceVideoUrl: taskSourceVideoUrl(task),
       lastFrameUrl: taskLastFrameUrl(task),
+      referenceImages: task.input_images?.length ? task.input_images : undefined,
+      referenceVideos: task.input_videos?.length ? task.input_videos : undefined,
+      referenceAudios: task.input_audios?.length ? task.input_audios : undefined,
     }];
   }
   return parseMarkdownImages(task.result_content || '').map((img, index) => ({
@@ -765,6 +800,8 @@ export interface StudioContextValue {
   setSelectedVideoGroupId: (id: number) => void;
   // 提交前的预算预览（拿不到估价/预算时为 null，展示层据此整块隐藏）。
   videoBudget: VideoBudgetPreview | null;
+  // ComposerBar 上报当前参考素材数量，预算预览据此估价。
+  setVideoReferenceSummary: (summary: VideoReferenceSummary) => void;
   generateVideo: (prompt: string, options?: GenerateVideoOptions) => boolean;
 
   // Gallery
@@ -856,6 +893,18 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     && selectedVideoGroupId != null
     && videoGroups.some(group => group.id === selectedVideoGroupId);
 
+  const [videoReferenceSummary, setVideoReferenceSummaryState] = useState<VideoReferenceSummary>(EMPTY_VIDEO_REFERENCE_SUMMARY);
+  const setVideoReferenceSummary = useCallback((next: VideoReferenceSummary) => {
+    setVideoReferenceSummaryState(current => (
+      current.images === next.images
+        && current.videos === next.videos
+        && current.audios === next.audios
+        && current.videoSeconds === next.videoSeconds
+        ? current
+        : next
+    ));
+  }, []);
+
   // ── 提交前预算预览 ─────────────────────────────────────────────────────────
   // 视频后付费：参数一定下来就先问一次后端「这条大概多少钱、余额够不够」，把
   // 「预计 ≈ $X」摆到发送键旁边。估价那跳在后端经 gateway.forward 打执行插件的
@@ -897,6 +946,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           watermark: videoWatermark,
           returnLastFrame: videoReturnLastFrame,
         }),
+        reference_images: videoReferenceSummary.images || undefined,
+        reference_videos: videoReferenceSummary.videos || undefined,
+        reference_audios: videoReferenceSummary.audios || undefined,
+        input_video_seconds: videoReferenceSummary.videoSeconds > 0
+          ? Math.ceil(videoReferenceSummary.videoSeconds)
+          : undefined,
       }, controller.signal)
         .then(budget => {
           if (cancelled) return;
@@ -933,6 +988,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     videoAudio,
     videoWatermark,
     videoReturnLastFrame,
+    videoReferenceSummary,
   ]);
 
   // 换档时收敛参数到所选版本的公开规格，并清空上一版本的分组选择。
@@ -2172,6 +2228,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const now = new Date().toISOString();
       const groupId = route.groupId;
       const sources = options?.sourceImages ?? [];
+      const referenceVideos = options?.sourceVideos ?? [];
+      const referenceAudios = options?.sourceAudios ?? [];
 
       const task: StudioGenerationTask = {
         id: taskId,
@@ -2187,6 +2245,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         size: route.size,
         durationSeconds: submissionSettings.duration,
         remoteTaskIds: [],
+        referenceImages: sources.length > 0 ? sources : undefined,
+        referenceVideos: referenceVideos.length > 0 ? referenceVideos : undefined,
+        referenceAudios: referenceAudios.length > 0 ? referenceAudios : undefined,
       };
       setTasks(prev => [task, ...prev]);
       activeCountRef.current += 1;
@@ -2248,9 +2309,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             group_id: groupId,
             project_id: targetProjectID > ALL_VIEW_ID ? targetProjectID : undefined,
             parameters,
-            inputs: sources.length > 0
-              ? sources.map(url => ({ type: 'image' as const, role: 'reference_image' as const, url }))
-              : undefined,
+            inputs: buildVideoReferenceInputs(sources, referenceVideos, referenceAudios),
           });
           if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
           if (await stopCreatedTaskIfDeleted(taskId, created.id)) return;
@@ -2289,6 +2348,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             sourceUrl: sources[0],
             sourceVideoUrl: taskSourceVideoUrl(completed),
             lastFrameUrl: taskLastFrameUrl(completed),
+            referenceImages: sources.length > 0 ? sources : undefined,
+            referenceVideos: referenceVideos.length > 0 ? referenceVideos : undefined,
+            referenceAudios: referenceAudios.length > 0 ? referenceAudios : undefined,
           };
           prependGalleryForTarget(targetProjectID, [item], taskId);
           updateTask({ status: 'completed', result: [item], remoteTaskIds: [created.id] });
@@ -2459,7 +2521,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       if (route && VIDEO_MODEL_REGISTRY.some(m => m.id === route.model)) setVideoModelId(route.model);
       generateVideo(item.prompt, {
         route,
-        sourceImages: item.sourceUrl ? [item.sourceUrl] : undefined,
+        sourceImages: item.referenceImages ?? (item.sourceUrl ? [item.sourceUrl] : undefined),
+        sourceVideos: item.referenceVideos,
+        sourceAudios: item.referenceAudios,
       });
       return;
     }
@@ -2689,6 +2753,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     selectModelRoute,
     referenceImages,
     setReferenceImages,
+    setVideoReferenceSummary,
     isGenerating,
     tasks,
     generate,

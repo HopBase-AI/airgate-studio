@@ -26,6 +26,8 @@ func registerRoutes(p *StudioPlugin, r sdk.RouteRegistrar) {
 	// 视频后付费的余额预览：估价（gateway.forward → 执行插件）与预算判定两跳都在这里做，
 	// 前端只问这一条，用于在发送键旁显示「预计 ≈ $X」。
 	r.Handle(http.MethodPost, "/budget", p.requireUser(p.handleBudget))
+	// 视频模式的参考视频 / 音频先上传成资产，建任务时只带地址（见 references.go）。
+	r.Handle(http.MethodPost, "/reference-uploads", p.requireUser(p.handleUploadReference))
 	r.Handle(http.MethodGet, "/inspirations", p.handleListInspirations)
 
 	// 项目 / 资产（需要 DB；用 requireProjectService 守护，未配置态返回 503）。
@@ -133,6 +135,10 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 			return
 		}
 	} else if err := validateImageModelSize(req.Model, req.Parameters); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := validateReferenceInputs(req.Kind, req.Model, req.Inputs); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -327,7 +333,7 @@ func (p *StudioPlugin) handleListImageGroups(w http.ResponseWriter, r *http.Requ
 }
 
 // budgetRequest 是 /budget 的入参：平台必填（决定按哪条路由的分组倍率折算）。
-// 带上 model / parameters / reference_images 时，先由服务端问执行插件估价，
+// 带上 model / parameters / 参考素材数量时，先由服务端问执行插件估价，
 // 再拿这个预估去问 core 的预算判定；只想看余额与在途预留就只传 platform。
 type budgetRequest struct {
 	Platform        string                 `json:"platform"`
@@ -335,6 +341,10 @@ type budgetRequest struct {
 	Model           string                 `json:"model,omitempty"`
 	Parameters      map[string]interface{} `json:"parameters,omitempty"`
 	ReferenceImages int                    `json:"reference_images,omitempty"`
+	ReferenceVideos int                    `json:"reference_videos,omitempty"`
+	ReferenceAudios int                    `json:"reference_audios,omitempty"`
+	// InputVideoSeconds 参考视频合计秒数（前端读自文件元数据），只用于预览估价。
+	InputVideoSeconds float64 `json:"input_video_seconds,omitempty"`
 }
 
 // handleBudget 一次问完两跳：gateway.forward → 执行插件 /v1/video/estimate 取官方成本，
@@ -352,7 +362,12 @@ func (p *StudioPlugin) handleBudget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := parseUserIDInt64(r)
-	estimated := p.estimateVideoOfficialCost(r, userID, req.GroupID, req.Platform, req.Model, req.Parameters, req.ReferenceImages)
+	estimated := p.estimateVideoOfficialCost(r, userID, req.GroupID, req.Platform, req.Model, req.Parameters, videoEstimateReferences{
+		Images:       req.ReferenceImages,
+		Videos:       req.ReferenceVideos,
+		Audios:       req.ReferenceAudios,
+		VideoSeconds: req.InputVideoSeconds,
+	})
 	payload, err := hostBudgetPayload(r.Context(), p.host, userID, req.Platform, req.GroupID, estimated)
 	if err != nil {
 		if p.logger != nil {
@@ -372,11 +387,11 @@ func (p *StudioPlugin) handleBudget(w http.ResponseWriter, r *http.Request) {
 
 // estimateVideoOfficialCost 问执行插件本条视频的官方成本预估；拿不到（老插件没有这条
 // 路由、模型未定价、转发失败）返回 0＝「没有预估」，调用方据此跳过预算闸门。
-func (p *StudioPlugin) estimateVideoOfficialCost(r *http.Request, userID, groupID int64, platform, model string, parameters map[string]interface{}, referenceImages int) float64 {
+func (p *StudioPlugin) estimateVideoOfficialCost(r *http.Request, userID, groupID int64, platform, model string, parameters map[string]interface{}, refs videoEstimateReferences) float64 {
 	if strings.TrimSpace(model) == "" {
 		return 0
 	}
-	body, err := buildVideoEstimateBody(model, parameters, referenceImages)
+	body, err := buildVideoEstimateBody(model, parameters, refs)
 	if err != nil {
 		return 0
 	}
@@ -399,7 +414,12 @@ const videoBudgetInsufficientMessage = "Insufficient balance. Top up before subm
 // 拿不到预估或预检本身故障时一律放行（true）——core 转发侧仍是权威闸门，
 // 预检失败不能变成「谁也发不出去」。
 func (p *StudioPlugin) videoBudgetRejection(r *http.Request, userID int64, req createGenerationTaskRequest) (string, bool) {
-	estimated := p.estimateVideoOfficialCost(r, userID, req.GroupID, req.Platform, req.Model, req.Parameters, len(extractImageInputs(req.Inputs)))
+	// 参考视频时长不采信客户端：VideoSeconds 留 0，执行插件按模型上限估，预留宁多勿少。
+	estimated := p.estimateVideoOfficialCost(r, userID, req.GroupID, req.Platform, req.Model, req.Parameters, videoEstimateReferences{
+		Images: len(extractImageInputs(req.Inputs)),
+		Videos: len(extractReferenceMedia(req.Inputs, referenceKindVideo)),
+		Audios: len(extractReferenceMedia(req.Inputs, referenceKindAudio)),
+	})
 	if estimated <= 0 {
 		return "", true
 	}

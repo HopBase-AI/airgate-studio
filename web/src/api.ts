@@ -97,6 +97,9 @@ export interface GenerationTask {
   size?: string;
   quality?: string;
   input_images?: string[];
+  // 视频模式的参考视频 / 音频（已上传的资产地址），重新生成时回放。
+  input_videos?: string[];
+  input_audios?: string[];
   input_mask?: string;
   result_content?: string;
   video_urls?: string[];
@@ -111,6 +114,14 @@ export interface GenerationTask {
   created_at: string;
   updated_at?: string;
   completed_at?: string;
+}
+
+export interface ReferenceUpload {
+  kind: 'video' | 'audio';
+  url: string;
+  object_key?: string;
+  content_type: string;
+  size_bytes: number;
 }
 
 export interface PlatformInfo {
@@ -244,8 +255,52 @@ export const api = {
     model?: string;
     parameters?: Record<string, unknown>;
     reference_images?: number;
+    reference_videos?: number;
+    reference_audios?: number;
+    // 参考视频合计秒数（读自文件元数据），参考视频按输入时长计费的模型据此估价。
+    input_video_seconds?: number;
   }, signal?: AbortSignal): Promise<BudgetInfo> {
     return request<BudgetInfo>('POST', '/budget', params, signal);
+  },
+
+  // 参考视频 / 音频先上传成资产，建任务时只带回的地址。用 XHR 是为了拿上传进度。
+  uploadReference(
+    file: Blob,
+    kind: 'video' | 'audio',
+    options?: { onProgress?: (fraction: number) => void; signal?: AbortSignal },
+  ): Promise<ReferenceUpload> {
+    return new Promise((resolve, reject) => {
+      if (options?.signal?.aborted) {
+        reject(new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${baseURL()}/reference-uploads?kind=${kind}`);
+      const token = getStoredToken();
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.upload.onprogress = event => {
+        if (event.lengthComputable && event.total > 0) options?.onProgress?.(event.loaded / event.total);
+      };
+      xhr.onload = () => {
+        let body: Partial<ReferenceUpload> & { error?: string | { message?: string }; message?: string; code?: string } = {};
+        try {
+          body = JSON.parse(xhr.responseText || '{}') as typeof body;
+        } catch {
+          // 非 JSON（如反代直接回的 413 页面）按状态码报错。
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && typeof body.url === 'string' && body.url) {
+          resolve(body as ReferenceUpload);
+          return;
+        }
+        const detail = typeof body.error === 'string' ? body.error : body.error?.message || body.message;
+        reject(new ApiRequestError(xhr.status, detail || `HTTP ${xhr.status}`, body.code));
+      };
+      xhr.onerror = () => reject(new ApiRequestError(0, 'Network error'));
+      xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'));
+      options?.signal?.addEventListener('abort', () => xhr.abort(), { once: true });
+      xhr.send(file);
+    });
   },
 
   getGenerationTask(taskId: number): Promise<GenerationTask> {
