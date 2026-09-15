@@ -129,7 +129,8 @@ describe('videoConfig', () => {
     // v2.6 720p 有声档官方未定价，必须锁无声避免 fail-closed 400。
     const klingV26 = videoModelById(VIDEO_MODEL_IDS.klingV26);
     expect(klingV26.supportsAudio).toBe(false);
-    expect(klingV26.durationOptions).toEqual([5, 6, 7, 8, 9, 10]);
+    // 可灵官方 2.6 时长只有 5 / 10 秒两档。
+    expect(klingV26.durationOptions).toEqual([5, 10]);
 
     for (const id of [VIDEO_MODEL_IDS.grokVideo15, VIDEO_MODEL_IDS.wan30, VIDEO_MODEL_IDS.klingV3]) {
       const defaults = videoDefaultsForModel(id);
@@ -209,16 +210,21 @@ describe('videoConfig', () => {
     })).toEqual(SEEDANCE25_VIDEO_DEFAULTS);
   });
 
-  it('从 SD2.5 切回每个 2.0 模型时移除 2.5 专有参数', () => {
+  it('从 SD2.5 切回每个 2.0 模型时只移除越界参数', () => {
     const sd25Settings = videoDefaultsForModel(VIDEO_MODEL_IDS.seedance25EP);
     const seedance20 = VIDEO_MODEL_REGISTRY.filter(item => item.platform === 'seedance'
       && item.id !== VIDEO_MODEL_IDS.seedance25EP && item.id !== VIDEO_MODEL_IDS.seedance25Domestic);
     for (const model of seedance20) {
       const normalized = normalizeVideoSettingsForModel(model.id, sd25Settings);
-      expect(normalized).toEqual(SEEDANCE20_VIDEO_DEFAULTS);
-      expect(VIDEO_DURATIONS).toContain(normalized.duration);
+      expect(model.durationOptions ?? VIDEO_DURATIONS).toContain(normalized.duration);
       expect(model.resolutions).toContain(normalized.resolution);
-      expect(VIDEO_RATIOS).toContain(normalized.ratio);
+      expect(model.ratioOptions ?? VIDEO_RATIOS).toContain(normalized.ratio);
+      if (model.id === VIDEO_MODEL_IDS.grokVideo15) {
+        expect(normalized).toEqual(SEEDANCE20_VIDEO_DEFAULTS);
+      } else {
+        // 2.0 与 2.5 同样支持 -1 智能时长与 adaptive（火山方舟官方参数表），切换时保留。
+        expect(normalized).toEqual(sd25Settings);
+      }
     }
   });
 
@@ -230,7 +236,7 @@ describe('videoConfig', () => {
     })).toEqual({
       duration: 4,
       resolution: '720p',
-      ratio: '16:9',
+      ratio: 'adaptive',
     });
   });
 
@@ -246,9 +252,9 @@ describe('videoConfig', () => {
     });
   });
 
-  it('保留 2.0 预设并为 SD2.5 提供独立完整矩阵', () => {
-    expect(VIDEO_DURATIONS).toEqual([4, 5, 10, 15]);
-    expect(VIDEO_RATIOS).toEqual(['16:9', '9:16', '1:1', '4:3']);
+  it('Seedance 2.0 与 2.5 各自按官方参数域提供完整矩阵', () => {
+    expect(VIDEO_DURATIONS).toEqual([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, -1]);
+    expect(VIDEO_RATIOS).toEqual(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive']);
     expect(SEEDANCE25_DURATIONS[0]).toBe(4);
     expect(SEEDANCE25_DURATIONS.at(-2)).toBe(30);
     expect(SEEDANCE25_DURATIONS.at(-1)).toBe(-1);

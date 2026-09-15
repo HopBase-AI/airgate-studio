@@ -30,7 +30,7 @@ describe('video reference capabilities', () => {
     expect(videoReferenceCapability(VIDEO_MODEL_IDS.minimaxH3).total).toBe(12);
     expect(videoReferenceCapability(VIDEO_MODEL_IDS.minimaxH3Max)).toEqual({ images: 2 });
     expect(videoReferenceCapability(VIDEO_MODEL_IDS.wan30).maxInputPlusOutputSeconds).toBe(30);
-    expect(videoReferenceCapability(VIDEO_MODEL_IDS.grokVideo15)).toEqual({ images: 7 });
+    expect(videoReferenceCapability(VIDEO_MODEL_IDS.grokVideo15)).toEqual({ images: 7, imageResolutions: ['480p', '720p'] });
     expect(videoReferenceCapability(VIDEO_MODEL_IDS.klingV26)).toEqual({ images: 4 });
     // 旧的 SD2.5 EP ID 与未登记 ID 走和 videoModelById 相同的回落。
     expect(videoReferenceCapability('dreamina-seedance-2-5-ep')).toBe(sd25);
