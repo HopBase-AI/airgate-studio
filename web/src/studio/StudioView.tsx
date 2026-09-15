@@ -97,6 +97,15 @@ function formatMediaDuration(seconds?: number): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
+// referenceIssueKind 提示码对应的素材类型：缩略图按类型描边，让用户一眼看出是哪类素材出了问题。
+// ref_too_many_files 是三类合计，不单独标。
+function referenceIssueKind(code: string): VideoReferenceMediaKind | 'image' | null {
+  if (code.includes('image')) return 'image';
+  if (code.includes('video') || code === 'ref_input_plus_output') return 'video';
+  if (code.includes('audio')) return 'audio';
+  return null;
+}
+
 let referenceMediaSeq = 0;
 function nextReferenceMediaId(): string {
   referenceMediaSeq += 1;
@@ -1355,19 +1364,22 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       .forEach(item => removeReferenceMedia(item.id));
   };
 
-  // 视频模式的提示位放参考素材的问题（超限 / 上传中 / 拒收），图像模式仍是图生图 / 局部重绘。
-  const referenceHint = referenceIssues.length > 0
-    ? { text: videoReferenceIssueMessage(referenceIssues[0], vs), warn: true }
-    : referencesUploading
-      ? { text: vs('ref_pending_upload'), warn: false }
-      : referenceNotice
-        ? { text: referenceNotice, warn: true }
-        : null;
-  const modeHint = isVideo
-    ? referenceHint?.text ?? null
-    : hasSource
-      ? (isSingleSource && selection ? t('playground.studio_mode_inpaint') : t('playground.studio_mode_img2img'))
-      : null;
+  // 视频模式参考素材的提示条（超限 / 拒收为警示，上传中为说明），缩略条下方单独一行。
+  const referenceHint = !isVideo
+    ? null
+    : referenceIssues.length > 0
+      ? { text: videoReferenceIssueMessage(referenceIssues[0], vs), warn: true }
+      : referencesUploading
+        ? { text: vs('ref_pending_upload'), warn: false }
+        : referenceNotice
+          ? { text: referenceNotice, warn: true }
+          : null;
+  const flaggedReferenceKinds = new Set(referenceIssues.map(issue => referenceIssueKind(issue.code)));
+  const hasUnsupportedReferences = referenceIssues.some(issue => issue.code.endsWith('_unsupported'));
+  // 图像模式的模式提示（图生图 / 局部重绘）仍在缩略条右侧。
+  const modeHint = !isVideo && hasSource
+    ? (isSingleSource && selection ? t('playground.studio_mode_inpaint') : t('playground.studio_mode_img2img'))
+    : null;
   const referenceCount = allSources.length + visibleReferenceMedia.length;
   const addReferenceLabel = isVideo ? vs('add_reference') : t('playground.studio_add_reference');
 
@@ -1380,12 +1392,12 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       onDrop={handleDrop}
     >
       {/* Source image thumbnails */}
-      {(referenceCount > 0 || (isVideo && referenceNotice)) && (
+      {referenceCount > 0 && (
         <div style={c.sourceStrip}>
           {allSources.map((src, i) => (
             <div
               key={i}
-              style={c.thumbWrap}
+              style={isVideo && flaggedReferenceKinds.has('image') ? { ...c.thumbWrap, ...c.referenceWarnBorder } : c.thumbWrap}
               className="studio-source-thumb"
             >
               <button
@@ -1470,7 +1482,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               return (
                 <div
                   key={item.id}
-                  style={failed ? { ...c.thumbWrap, ...c.referenceErrorBorder } : c.thumbWrap}
+                  style={failed
+                    ? { ...c.thumbWrap, ...c.referenceErrorBorder }
+                    : flaggedReferenceKinds.has('video') ? { ...c.thumbWrap, ...c.referenceWarnBorder } : c.thumbWrap}
                   className="studio-source-thumb"
                   title={tooltip}
                 >
@@ -1492,7 +1506,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
             return (
               <div
                 key={item.id}
-                style={failed ? { ...c.audioChip, ...c.referenceErrorBorder } : c.audioChip}
+                style={failed
+                  ? { ...c.audioChip, ...c.referenceErrorBorder }
+                  : flaggedReferenceKinds.has('audio') ? { ...c.audioChip, ...c.referenceWarnBorder } : c.audioChip}
                 title={tooltip}
               >
                 <button
@@ -1543,17 +1559,34 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               {t('playground.studio_clear_all')}
             </button>
           )}
-          {isVideo && referenceIssues.some(issue => issue.code.endsWith('_unsupported')) && (
-            <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={removeUnsupportedReferences}>
-              {vs('ref_remove_unsupported')}
-            </button>
-          )}
           {!isVideo && isSingleSource && selection && (
             <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={() => setSelection(null)}>
               {t('playground.studio_clear_selection')}
             </button>
           )}
-          {modeHint && <span style={isVideo && referenceHint?.warn ? c.referenceWarnHint : c.modeHint}>{modeHint}</span>}
+          {modeHint && <span style={c.modeHint}>{modeHint}</span>}
+        </div>
+      )}
+      {referenceHint && (
+        <div
+          role={referenceHint.warn ? 'alert' : 'status'}
+          style={referenceHint.warn ? c.referenceNotice : { ...c.referenceNotice, ...c.referenceNoticeInfo }}
+        >
+          {referenceHint.warn ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={c.referenceNoticeIcon}>
+              <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ ...c.referenceNoticeIcon, color: cssVar('textTertiary') }}>
+              <path d="M12 19V5" /><path d="m5 12 7-7 7 7" />
+            </svg>
+          )}
+          <span style={c.referenceNoticeText}>{referenceHint.text}</span>
+          {hasUnsupportedReferences && (
+            <button type="button" style={c.referenceNoticeAction} className="studio-gallery-action" onClick={removeUnsupportedReferences}>
+              {vs('ref_remove_unsupported')}
+            </button>
+          )}
         </div>
       )}
       {editorIndex !== null && allSources[editorIndex] && (
@@ -1967,12 +2000,51 @@ const c: Record<string, CSSProperties> = {
     cursor: 'pointer',
     padding: 0,
   },
-  // 视频模式参考素材超限 / 拒收的提示：比模式提示醒目
-  referenceWarnHint: {
-    marginLeft: 'auto',
+  // 触发提示的那类素材描警示边（红边只留给上传失败）
+  referenceWarnBorder: {
+    border: `1px solid ${cssVar('warning')}`,
+    boxShadow: `0 0 0 1px ${cssVar('warningSubtle')}`,
+  },
+  // 视频模式参考素材提示条：设计规范的「左侧 2px 色条纸面卡」，超限 / 拒收用警示色
+  referenceNotice: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    margin: '6px 12px 0',
+    padding: '7px 10px',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderLeft: `2px solid ${cssVar('warning')}`,
+    borderRadius: 6,
+    background: cssVar('bgDeep'),
+    color: cssVar('text'),
+    fontSize: 12,
+    lineHeight: 1.4,
+  },
+  // 上传中等说明性提示：中性色条
+  referenceNoticeInfo: {
+    borderLeft: `2px solid ${cssVar('textTertiary')}`,
+    color: cssVar('textSecondary'),
+  },
+  referenceNoticeIcon: {
+    flexShrink: 0,
+    color: cssVar('warning'),
+  },
+  referenceNoticeText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  referenceNoticeAction: {
+    flexShrink: 0,
+    padding: '3px 8px',
+    border: `1px solid ${cssVar('borderSubtle')}`,
+    borderRadius: 5,
+    background: 'transparent',
+    color: cssVar('text'),
+    cursor: 'pointer',
+    font: 'inherit',
     fontSize: 11,
-    lineHeight: 1.3,
-    color: cssVar('danger'),
+    fontWeight: 500,
+    whiteSpace: 'nowrap',
   },
   // 工具栏里的「参考图」入口(图像模式);有图时描边加深并带张数
   refBtn: {
