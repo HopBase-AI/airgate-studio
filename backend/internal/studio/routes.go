@@ -142,6 +142,12 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if isVideo {
+		if err := validateReferenceResolution(req.Model, req.Parameters, req.Inputs); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	userID, _ := strconv.ParseInt(r.Header.Get("X-Airgate-User-Id"), 10, 64)
 
 	// 先校验该平台确实有当前用户可用的分组；显式传 group_id 时再校验该分组。

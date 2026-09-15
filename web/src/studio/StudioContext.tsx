@@ -932,7 +932,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       duration: videoDuration,
       resolution: route.size,
       ratio: videoRatio,
-    });
+    }, videoReferenceSummary.images + videoReferenceSummary.videos + videoReferenceSummary.audios > 0);
     let cancelled = false;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), VIDEO_BUDGET_DEBOUNCE_MS + VIDEO_BUDGET_TIMEOUT_MS);
@@ -2199,7 +2199,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             duration: options?.durationSeconds ?? videoDuration,
             resolution: canonicalRoute.size,
             ratio: videoRatio,
-          })
+          }, Boolean(options?.sourceImages?.length || options?.sourceVideos?.length || options?.sourceAudios?.length))
         : null;
       const route = canonicalRoute && submissionSettings
         ? { ...canonicalRoute, size: submissionSettings.resolution }

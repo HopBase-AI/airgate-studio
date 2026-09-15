@@ -62,12 +62,14 @@ export interface VideoModelConfig {
   supportsReturnLastFrame?: boolean;
   supportsWatermark?: boolean;
   supportsRatio?: boolean;
+  // 带参考素材时的画幅选项（缺省同 ratioOptions）：MiniMax H3 参考生视频官方允许 adaptive。
+  referenceRatioOptions?: readonly string[];
 }
 
-// Seedance 2.0's existing Studio presets. Keep these as the fallback for
-// models without an explicit per-model option list.
-export const VIDEO_DURATIONS = [4, 5, 10, 15] as const;
-export const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3'] as const;
+// Seedance 2.0 的官方参数域（火山方舟「创建视频生成任务」：duration 为 [4,15] 整数或 -1
+// 智能时长，ratio 七档含 adaptive），也是未单独声明选项的模型的回落。
+export const VIDEO_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, -1] as const;
+export const VIDEO_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'] as const;
 
 // Seedance 2.5 EP's ordinary generation contract. -1 asks the upstream to
 // choose the duration automatically.
@@ -82,21 +84,27 @@ export const SEEDANCE25_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', '
 export const MINIMAX_H3_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 export const MINIMAX_H3MAX_DURATIONS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 export const MINIMAX_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'] as const;
+// H3 参考生视频（带参考素材）官方允许且默认 adaptive；文生仍不可 adaptive。
+export const MINIMAX_H3_REFERENCE_RATIOS = [...MINIMAX_RATIOS, 'adaptive'] as const;
 
 // grok（platform=seedance 按秒计费档）：1~15 秒整数、无 -1；画幅白名单多
 // 3:2/2:3、无 21:9/adaptive（插件把 ratio 映射为 aspect_ratio）。
 export const GROK_DURATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 export const GROK_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'] as const;
 
-// 万相 3.0：2~30 秒 + -1 自动；快乐马 1.1：3~15 秒。
-export const WAN30_DURATIONS = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, -1] as const;
+// 万相 3.0：官方 [2,30] 整数秒 + -1 智能时长；快乐马 1.1：3~15 秒。
+export const WAN30_DURATIONS = [
+  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+  17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, -1,
+] as const;
 export const WAN30_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'] as const;
 export const HAPPYHORSE_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 export const HAPPYHORSE_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '4:5', '5:4', '9:21', '21:9'] as const;
 
-// 可灵：分辨率合法集合由插件价格表 fail-closed，这里对齐已定价的桶。
+// 可灵：分辨率合法集合由插件价格表 fail-closed，这里对齐已定价的桶（2K / 4K 为腾讯通道超分）。
+// 时长按可灵官方：3.0 为 3~15 秒整数，2.6 只有 5 / 10 秒两档。
 export const KLING_V3_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
-export const KLING_V26_DURATIONS = [5, 6, 7, 8, 9, 10] as const;
+export const KLING_V26_DURATIONS = [5, 10] as const;
 export const KLING_RATIOS = ['16:9', '9:16', '1:1'] as const;
 
 export interface VideoGenerationSettings {
@@ -207,6 +215,7 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
     resolutions: ['768P', '2K'],
     durationOptions: MINIMAX_H3_DURATIONS,
     ratioOptions: MINIMAX_RATIOS,
+    referenceRatioOptions: MINIMAX_H3_REFERENCE_RATIOS,
     supportsAudio: false,
     supportsReturnLastFrame: false,
   },
@@ -346,16 +355,23 @@ function matchResolution(resolutions: readonly string[], value: string): string 
   return resolutions.find(r => r.toLowerCase() === normalized);
 }
 
+// videoRatioOptionsFor 该模型当前可选的画幅：带参考素材且模型声明了参考画幅时用它。
+export function videoRatioOptionsFor(model: VideoModelConfig, hasReferences: boolean): readonly string[] {
+  if (hasReferences && model.referenceRatioOptions) return model.referenceRatioOptions;
+  return model.ratioOptions ?? VIDEO_RATIOS;
+}
+
 // Historical retry routes can target a different model than the composer.
 // Preserve compatible values and replace out-of-contract values before send.
 export function normalizeVideoSubmissionSettingsForModel(
   id: string,
   settings: VideoGenerationSettings,
+  hasReferences = false,
 ): VideoGenerationSettings {
   const model = videoModelById(id);
   const defaults = videoDefaultsForModel(model.id);
   const durations: readonly number[] = model.durationOptions ?? VIDEO_DURATIONS;
-  const ratios: readonly string[] = model.ratioOptions ?? VIDEO_RATIOS;
+  const ratios = videoRatioOptionsFor(model, hasReferences);
   return {
     duration: durations.includes(settings.duration) ? settings.duration : defaults.duration,
     resolution: matchResolution(model.resolutions, settings.resolution) ?? defaults.resolution,
@@ -420,6 +436,8 @@ export interface VideoReferenceCapability {
   audioRequiresVisual?: boolean;
   // 参考视频合计时长 + 生成时长上限（万相 3.0）。
   maxInputPlusOutputSeconds?: number;
+  // 带参考图时允许的分辨率（小写），缺省不限。
+  imageResolutions?: readonly string[];
 }
 
 // 上传链路的单文件上限：视频经 assets.store 进 core 受 64MB gRPC 约束，比各家官方上限都小。
@@ -461,8 +479,9 @@ export const VIDEO_REFERENCE_CAPABILITIES: Record<string, VideoReferenceCapabili
   },
   // H3-Max：首帧 + 尾帧两张图。
   [VIDEO_MODEL_IDS.minimaxH3Max]: { images: 2 },
-  // grok 只收参考图；xAI 未公开张数上限，按 7 张保守。
-  [VIDEO_MODEL_IDS.grokVideo15]: { images: 7 },
+  // grok 只收参考图；xAI 未公开张数上限，按 7 张保守。带参考图即参考生视频，官方最高 720p
+  // （「Reference-to-video is capped at 720p」）。
+  [VIDEO_MODEL_IDS.grokVideo15]: { images: 7, imageResolutions: ['480p', '720p'] },
   [VIDEO_MODEL_IDS.wan30]: {
     images: 10,
     video: { max: 5, minSeconds: 1, maxSeconds: 15, maxTotalSeconds: 15, dimensions: { minSide: 240, maxSide: 4096, maxAspect: 8 } },
@@ -502,7 +521,8 @@ export type VideoReferenceIssue =
   | { code: 'ref_video_total'; max: number }
   | { code: 'ref_audio_total'; max: number }
   | { code: 'ref_video_dimensions'; min: number; max: number; ratio: number }
-  | { code: 'ref_input_plus_output'; max: number };
+  | { code: 'ref_input_plus_output'; max: number }
+  | { code: 'ref_image_resolution'; max: string };
 
 // 元数据时长常带小数（14.98 / 15.02），按 0.05 秒容差比较。
 const REFERENCE_DURATION_TOLERANCE = 0.05;
@@ -531,12 +551,14 @@ function referenceDimensionsOutOfRange(item: VideoReferenceMediaMeta, dims: Vide
 }
 
 // validateVideoReferences 发送前按所选模型检查参考素材，空数组才允许发送。
-// outputDurationSeconds ≤ 0（-1 自动时长）时跳过「参考视频 + 生成时长」上限。
+// outputDurationSeconds ≤ 0（-1 自动时长）时跳过「参考视频 + 生成时长」上限；
+// resolution 缺省时跳过「带参考图的分辨率上限」。
 export function validateVideoReferences(
   modelId: string,
   imageCount: number,
   media: readonly VideoReferenceMediaMeta[],
   outputDurationSeconds: number,
+  resolution?: string,
 ): VideoReferenceIssue[] {
   const cap = videoReferenceCapability(modelId);
   const issues: VideoReferenceIssue[] = [];
@@ -545,6 +567,11 @@ export function validateVideoReferences(
 
   if (imageCount > 0 && cap.images === 0) issues.push({ code: 'ref_images_unsupported' });
   else if (imageCount > cap.images) issues.push({ code: 'ref_too_many_images', max: cap.images });
+  const imageResolutions = cap.imageResolutions;
+  if (imageCount > 0 && imageResolutions && resolution
+    && !imageResolutions.includes(resolution.trim().toLowerCase())) {
+    issues.push({ code: 'ref_image_resolution', max: imageResolutions[imageResolutions.length - 1] });
+  }
 
   if (videos.length > 0) {
     const limits = cap.video;
@@ -691,6 +718,7 @@ export const VIDEO_STRINGS = {
     ref_audio_format: '参考音频仅支持 MP3、WAV',
     ref_pending_upload: '参考素材还在上传，完成后再发送',
     ref_remove_unsupported: '移除不支持的素材',
+    ref_image_resolution: '带参考图时分辨率最高 {max}',
   },
   en: {
     media_image: 'Image',
@@ -772,6 +800,7 @@ export const VIDEO_STRINGS = {
     ref_audio_format: 'Reference audio must be MP3 or WAV',
     ref_pending_upload: 'Reference files are still uploading — send when they finish',
     ref_remove_unsupported: 'Remove unsupported files',
+    ref_image_resolution: 'With reference images the resolution is limited to {max}',
   },
   ja: {
     media_image: '画像',
@@ -853,6 +882,7 @@ export const VIDEO_STRINGS = {
     ref_audio_format: '参考音声は MP3 / WAV のみ対応しています',
     ref_pending_upload: '参考ファイルをアップロード中です。完了後に送信してください',
     ref_remove_unsupported: '非対応のファイルを削除',
+    ref_image_resolution: '参考画像を使う場合、解像度は {max} までです',
   },
   'zh-HK': {
     media_image: '圖像',
@@ -934,6 +964,7 @@ export const VIDEO_STRINGS = {
     ref_audio_format: '參考音訊只支援 MP3、WAV',
     ref_pending_upload: '參考素材仍在上載，完成後再發送',
     ref_remove_unsupported: '移除不支援的素材',
+    ref_image_resolution: '附參考圖時解像度最高 {max}',
   },
   es: {
     media_image: 'Imagen',
@@ -1015,6 +1046,7 @@ export const VIDEO_STRINGS = {
     ref_audio_format: 'Los audios de referencia deben ser MP3 o WAV',
     ref_pending_upload: 'Los archivos de referencia aún se están subiendo; envía cuando terminen',
     ref_remove_unsupported: 'Quitar archivos no compatibles',
+    ref_image_resolution: 'Con imágenes de referencia, la resolución máxima es {max}',
   },
 } as const;
 

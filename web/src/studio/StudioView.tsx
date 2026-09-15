@@ -22,6 +22,7 @@ import {
   validateVideoReferences,
   videoReferenceCapability,
   videoReferenceIssueMessage,
+  videoRatioOptionsFor,
   type VideoReferenceMediaKind,
 } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
@@ -1143,9 +1144,16 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   const visibleReferenceMedia = isVideo ? referenceMedia : [];
   const referenceCapability = videoReferenceCapability(videoModelId);
   const referenceIssues = useMemo(
-    () => (isVideo ? validateVideoReferences(videoModelId, allSources.length, referenceMedia, videoDuration) : []),
-    [allSources.length, isVideo, referenceMedia, videoDuration, videoModelId],
+    () => (isVideo ? validateVideoReferences(videoModelId, allSources.length, referenceMedia, videoDuration, videoResolution) : []),
+    [allSources.length, isVideo, referenceMedia, videoDuration, videoModelId, videoResolution],
   );
+  // 参数弹层的选项随参考素材按官方规则收窄 / 放宽：grok 带参考图最高 720p，H3 带参考素材可选 adaptive。
+  const videoModelConfig = videoModelById(videoModelId);
+  const imageResolutionCap = hasSource ? referenceCapability.imageResolutions : undefined;
+  const videoResolutionOptions = imageResolutionCap
+    ? videoModelConfig.resolutions.filter(resolution => imageResolutionCap.includes(resolution.toLowerCase()))
+    : videoModelConfig.resolutions;
+  const videoRatioOptions = videoRatioOptionsFor(videoModelConfig, allSources.length + visibleReferenceMedia.length > 0);
   const referencesUploading = visibleReferenceMedia.some(item => item.status === 'uploading');
   const referencesNotReady = visibleReferenceMedia.some(item => item.status !== 'ready');
   const referenceAccept = isVideo
@@ -1701,9 +1709,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                 setWatermark={setVideoWatermark}
                 returnLastFrame={videoReturnLastFrame}
                 setReturnLastFrame={setVideoReturnLastFrame}
-                resolutions={videoModelById(videoModelId).resolutions}
+                resolutions={videoResolutionOptions}
                 durationOptions={videoModelById(videoModelId).durationOptions}
-                ratioOptions={videoModelById(videoModelId).ratioOptions}
+                ratioOptions={videoRatioOptions}
                 showAudio={videoModelById(videoModelId).supportsAudio !== false}
                 showReturnLastFrame={videoModelById(videoModelId).supportsReturnLastFrame !== false}
                 showWatermark={videoModelById(videoModelId).supportsWatermark !== false}

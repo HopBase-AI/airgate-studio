@@ -130,7 +130,8 @@ func videoModelResolutions(model string) map[string]struct{} {
 	return map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}, "4k": {}}
 }
 
-var seedance25VideoRatios = map[string]struct{}{
+// seedanceVideoRatios Seedance 2.0 / 2.5 官方共用的七档画幅。
+var seedanceVideoRatios = map[string]struct{}{
 	"16:9": {}, "4:3": {}, "1:1": {}, "3:4": {},
 	"9:16": {}, "21:9": {}, "adaptive": {},
 }
@@ -196,7 +197,9 @@ var fleetVideoSpecs = map[string]struct {
 	minDuration int
 	maxDuration int
 	allowAuto   bool
-	ratios      map[string]struct{}
+	// durations 非空时时长只能取其中的离散值（可灵 2.6 官方只有 5 / 10 秒）。
+	durations map[int]struct{}
+	ratios    map[string]struct{}
 }{
 	// grok（platform=seedance 按秒计费档）：分辨率必填 480p/720p/1080p、
 	// 时长 1~15 整数（无 -1 自动）、画幅白名单多 3:2/2:3、无 21:9/adaptive。
@@ -234,7 +237,8 @@ var fleetVideoSpecs = map[string]struct {
 	"kling-v2-6": {
 		resolutions: map[string]struct{}{"720p": {}, "1080p": {}, "2k": {}, "4k": {}},
 		minDuration: 5, maxDuration: 10,
-		ratios: map[string]struct{}{"16:9": {}, "9:16": {}, "1:1": {}},
+		durations: map[int]struct{}{5: {}, 10: {}},
+		ratios:    map[string]struct{}{"16:9": {}, "9:16": {}, "1:1": {}},
 	},
 }
 
@@ -258,6 +262,8 @@ func validateFleetVideoParams(model string, params map[string]interface{}) error
 			// -1 = 自动时长
 		} else if d < spec.minDuration || d > spec.maxDuration {
 			return fmt.Errorf("model %s requires a duration between %d and %d seconds", model, spec.minDuration, spec.maxDuration)
+		} else if _, allowed := spec.durations[d]; spec.durations != nil && !allowed {
+			return fmt.Errorf("model %s does not support a %d-second duration", model, d)
 		}
 	}
 	if spec.ratios != nil {
@@ -300,12 +306,10 @@ func validateVideoModelParams(model string, params map[string]interface{}) error
 			return fmt.Errorf("model %s requires a duration between 4 and %d seconds, or -1 to pick automatically", model, maxDuration)
 		}
 	}
-	if isSeedance25VideoModel(model) {
-		if ratio, ok := params["ratio"].(string); ok && strings.TrimSpace(ratio) != "" {
-			normalized := strings.ToLower(strings.TrimSpace(ratio))
-			if _, allowed := seedance25VideoRatios[normalized]; !allowed {
-				return fmt.Errorf("model %s does not support aspect ratio %s", model, ratio)
-			}
+	if ratio, ok := params["ratio"].(string); ok && strings.TrimSpace(ratio) != "" {
+		normalized := strings.ToLower(strings.TrimSpace(ratio))
+		if _, allowed := seedanceVideoRatios[normalized]; !allowed {
+			return fmt.Errorf("model %s does not support aspect ratio %s", model, ratio)
 		}
 	}
 	return nil
