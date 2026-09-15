@@ -1743,15 +1743,15 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
               {onOpenInspiration && (
                 <button
                   type="button"
-                  style={{ ...c.imgUploadBtn, width: 'auto', gap: 4, padding: '0 9px' }}
+                  style={{ ...c.imgUploadBtn, ...c.inspirationBtn }}
                   className="studio-gallery-action"
                   onClick={onOpenInspiration}
                   title={t('playground.studio_inspiration_gallery')}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                     <path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z" />
                   </svg>
-                  <span className="studio-inspiration-label" style={{ fontSize: 11, fontWeight: 500 }}>{t('playground.studio_inspiration_gallery')}</span>
+                  <span className="studio-inspiration-label" style={c.inspirationLabel}>{t('playground.studio_inspiration_gallery')}</span>
                 </button>
               )}
               <div style={c.countSelect} title={t('playground.studio_quantity')}>
@@ -2238,16 +2238,37 @@ const c: Record<string, CSSProperties> = {
     flexShrink: 0,
     transition: 'all 0.18s',
   },
-  // 不撑开（grow=0）：按基准宽度取宽，空间不足时可收缩到 minWidth，
-  // 避免独占整行造成大片空白。基准放到能容下「Seedance 2.0 标准」不截断。
+  // 工具栏换行判断按 flex-basis 算、收缩发生在换行之后：基准若写成理想宽度，长文案语言
+  // （西语「Galería de inspiración」）下还没收缩就把末尾的 ×N 挤到第二行（2026-09-15）。
+  // 所以基准取最小宽度参与换行判断，有富余再撑到上限；上限即原基准（能容下
+  // 「Seedance 2.0 标准」不截断），宽度够时观感不变，也不会独占整行。
   modelSelect: {
-    flex: '0 1 190px',
+    flex: '1 1 132px',
     minWidth: 132,
-    maxWidth: 210,
+    maxWidth: 190,
   },
   sizePicker: {
-    flex: '0 1 128px',
+    flex: '1 1 104px',
     minWidth: 104,
+    maxWidth: 128,
+  },
+  // 灵感画廊：同一思路，放不下时文字省略、最窄只剩图标（title 保留完整文案）。
+  inspirationBtn: {
+    width: 'auto',
+    flex: '1 1 32px',
+    minWidth: 32,
+    maxWidth: 'max-content',
+    gap: 4,
+    padding: '0 9px',
+    overflow: 'hidden',
+  },
+  inspirationLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: 11,
+    fontWeight: 500,
   },
   // 生成数量：紧凑下拉（×N），替代原 4 连按钮,省一行空间
   countSelect: {
