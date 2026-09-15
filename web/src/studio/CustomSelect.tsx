@@ -38,6 +38,13 @@ interface CustomSelectProps {
   onOpenChange?: (open: boolean) => void;
 }
 
+// selectOptionsSignature 选项内容签名（按 value 序列）。调用方常在每次渲染新建内容相同的
+// options 数组；以它而不是数组身份判断「列表变了」，否则父组件每次重渲染（工作坊轮询任务
+// 进度、刷新预估）都会把高亮与滚动拉回选中项——滚到底部会自动回弹到顶部（2026-09-15）。
+export function selectOptionsSignature(options: readonly CustomSelectOption[]): string {
+  return JSON.stringify(options.map(option => option.value));
+}
+
 const triggerStyle: CSSProperties = {
   width: '100%',
   padding: '9px 14px',
@@ -283,12 +290,15 @@ export function CustomSelect({
     };
   }, [calcPos, open, setOpen]);
 
-  // 键盘高亮跟随可见列表：列表变化（筛选）时回到当前选中项，选中项被过滤掉则不高亮。
+  // 键盘高亮跟随可见列表：列表内容变化（筛选）时回到当前选中项，选中项被过滤掉则不高亮。
+  // 依赖内容签名与选中下标（都是原始值）：父组件重渲染但列表没变时不重置，滚动位置才保得住。
+  const optionsSignature = selectOptionsSignature(uniqueOptions);
+  const selectedIndex = uniqueOptions.findIndex(o => o.value === value);
   useEffect(() => {
     if (!open) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 与列表同步的派生状态
-    setHighlighted(uniqueOptions.findIndex(o => o.value === value));
-  }, [open, uniqueOptions, value]);
+    setHighlighted(selectedIndex);
+  }, [open, optionsSignature, selectedIndex]);
 
   useEffect(() => {
     if (!open || highlighted < 0) return;
