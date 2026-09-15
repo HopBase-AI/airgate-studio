@@ -325,6 +325,9 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
         route: retryRoute,
         projectId: task.projectId,
         durationSeconds: task.durationSeconds,
+        sourceImages: task.referenceImages,
+        sourceVideos: task.referenceVideos,
+        sourceAudios: task.referenceAudios,
       })) {
         void deleteTask(task.id).catch(() => {});
       }

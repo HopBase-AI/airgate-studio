@@ -26,6 +26,7 @@ const (
 	hostMethodUsersGet       = "users.get"
 	hostMethodGatewayForward = "gateway.forward"
 	hostMethodAssetsGetBytes = "assets.get_bytes"
+	hostMethodAssetsStore    = "assets.store"
 	hostMethodBillingBudget  = "billing.budget"
 )
 
@@ -325,19 +326,38 @@ const videoEstimatePath = "/v1/video/estimate"
 // 不看内容：用占位符保留张数，免得把几 MB 的 data URL 再多传一遍。
 const estimateReferencePlaceholder = "reference-image"
 
+// videoEstimateReferences 估价只看参考素材数量：参考图张数会切价格档，参考视频计输入秒。
+type videoEstimateReferences struct {
+	Images int
+	Videos int
+	Audios int
+	// VideoSeconds 参考视频合计秒数；只有前端预览带（读自文件元数据），0 表示按模型上限估。
+	VideoSeconds float64
+}
+
 // buildVideoEstimateBody 拼预估请求体。插件侧宽松解析：parameters 平铺或嵌套都认，
-// 参考图从 images 数组取长度。
-func buildVideoEstimateBody(model string, parameters map[string]interface{}, referenceImages int) ([]byte, error) {
+// 参考图从 images 数组取长度；参考视频 / 音频走 reference_videos / reference_audios 段数，
+// 参考视频合计秒数走 input_video_seconds。
+func buildVideoEstimateBody(model string, parameters map[string]interface{}, refs videoEstimateReferences) ([]byte, error) {
 	payload := map[string]interface{}{"model": strings.TrimSpace(model)}
 	if len(parameters) > 0 {
 		payload["parameters"] = parameters
 	}
-	if referenceImages > 0 {
-		images := make([]string, 0, referenceImages)
-		for i := 0; i < referenceImages; i++ {
+	if refs.Images > 0 {
+		images := make([]string, 0, refs.Images)
+		for i := 0; i < refs.Images; i++ {
 			images = append(images, estimateReferencePlaceholder)
 		}
 		payload["images"] = images
+	}
+	if refs.Videos > 0 {
+		payload["reference_videos"] = refs.Videos
+		if refs.VideoSeconds > 0 {
+			payload["input_video_seconds"] = refs.VideoSeconds
+		}
+	}
+	if refs.Audios > 0 {
+		payload["reference_audios"] = refs.Audios
 	}
 	return json.Marshal(payload)
 }
@@ -472,6 +492,34 @@ func headerPayload(headers http.Header) map[string]interface{} {
 		out[key] = append([]string(nil), values...)
 	}
 	return out
+}
+
+type storedReferenceAsset struct {
+	PublicURL string
+	ObjectKey string
+}
+
+// hostStoreReferenceAsset 把参考视频 / 音频字节经 assets.store 落成 task-input 资产。
+// 扩展名由调用方按文件头给出，core 据此回 Content-Type，上游拉取时才认得格式。
+func hostStoreReferenceAsset(ctx context.Context, host sdk.Host, userID int64, contentType, ext string, data []byte) (*storedReferenceAsset, error) {
+	resp, err := hostInvoke(ctx, host, hostMethodAssetsStore, map[string]interface{}{
+		"user_id":        userID,
+		"purpose":        referenceAssetPurpose,
+		"content_type":   contentType,
+		"file_extension": ext,
+		"data":           data,
+	})
+	if err != nil {
+		return nil, err
+	}
+	stored := &storedReferenceAsset{
+		PublicURL: stringFromAny(firstValue(resp, "public_url")),
+		ObjectKey: stringFromAny(firstValue(resp, "object_key")),
+	}
+	if strings.TrimSpace(stored.PublicURL) == "" {
+		return nil, fmt.Errorf("assets.store returned no public_url")
+	}
+	return stored, nil
 }
 
 // hostGetAssetDataURL 通过 assets.get_bytes 取回对象字节，拼成 data URL（供 vision 模型消费）。

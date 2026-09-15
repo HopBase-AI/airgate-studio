@@ -389,6 +389,223 @@ export function videoGroupsForModel(
   return groups.filter(group => !domesticGroupIds.has(group.id));
 }
 
+// ── 参考素材（视频模式）──────────────────────────────────────────────────────
+// 每个模型能收的参考图 / 参考视频 / 参考音频条数与时长，与工作坊后端
+// backend/internal/studio/references.go、各执行插件的请求校验同一口径
+// （官方文档核对于 2026-09-15）。帧率浏览器读不到，交给执行插件探测。
+
+export type VideoReferenceMediaKind = 'video' | 'audio';
+
+export interface VideoReferenceMediaLimits {
+  max: number;
+  minSeconds: number;
+  maxSeconds: number;
+  maxTotalSeconds: number;
+}
+
+export interface VideoReferenceDimensionLimits {
+  minSide: number;
+  maxSide: number;
+  // 长边 ÷ 短边上限。
+  maxAspect: number;
+}
+
+export interface VideoReferenceCapability {
+  images: number;
+  video?: VideoReferenceMediaLimits & { dimensions: VideoReferenceDimensionLimits };
+  audio?: VideoReferenceMediaLimits;
+  // 三类合计上限；缺省不限。
+  total?: number;
+  // 参考音频必须至少搭配一张参考图或一段参考视频。
+  audioRequiresVisual?: boolean;
+  // 参考视频合计时长 + 生成时长上限（万相 3.0）。
+  maxInputPlusOutputSeconds?: number;
+}
+
+// 上传链路的单文件上限：视频经 assets.store 进 core 受 64MB gRPC 约束，比各家官方上限都小。
+export const REFERENCE_VIDEO_MAX_BYTES = 45 * 1024 * 1024;
+export const REFERENCE_AUDIO_MAX_BYTES = 15 * 1024 * 1024;
+export const REFERENCE_VIDEO_ACCEPT = 'video/mp4,video/quicktime,.mp4,.mov';
+export const REFERENCE_AUDIO_ACCEPT = 'audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/wave,.mp3,.wav';
+
+const SEEDANCE_VIDEO_DIMENSIONS: VideoReferenceDimensionLimits = { minSide: 300, maxSide: 6000, maxAspect: 2.5 };
+
+const SEEDANCE25_REFERENCES: VideoReferenceCapability = {
+  images: 30,
+  video: { max: 10, minSeconds: 2, maxSeconds: 30, maxTotalSeconds: 30, dimensions: SEEDANCE_VIDEO_DIMENSIONS },
+  audio: { max: 10, minSeconds: 2, maxSeconds: 30, maxTotalSeconds: 30 },
+};
+
+const SEEDANCE20_REFERENCES: VideoReferenceCapability = {
+  images: 9,
+  video: { max: 3, minSeconds: 2, maxSeconds: 15, maxTotalSeconds: 15, dimensions: SEEDANCE_VIDEO_DIMENSIONS },
+  audio: { max: 3, minSeconds: 2, maxSeconds: 15, maxTotalSeconds: 15 },
+  audioRequiresVisual: true,
+};
+
+export const VIDEO_REFERENCE_CAPABILITIES: Record<string, VideoReferenceCapability> = {
+  [VIDEO_MODEL_IDS.seedance25]: SEEDANCE25_REFERENCES,
+  [VIDEO_MODEL_IDS.seedance25Domestic]: SEEDANCE25_REFERENCES,
+  [VIDEO_MODEL_IDS.standardOverseas]: SEEDANCE20_REFERENCES,
+  [VIDEO_MODEL_IDS.standardDomestic]: SEEDANCE20_REFERENCES,
+  [VIDEO_MODEL_IDS.fastOverseas]: SEEDANCE20_REFERENCES,
+  [VIDEO_MODEL_IDS.fastDomestic]: SEEDANCE20_REFERENCES,
+  [VIDEO_MODEL_IDS.miniOverseas]: SEEDANCE20_REFERENCES,
+  [VIDEO_MODEL_IDS.miniDomestic]: SEEDANCE20_REFERENCES,
+  [VIDEO_MODEL_IDS.minimaxH3]: {
+    images: 9,
+    video: { max: 3, minSeconds: 2, maxSeconds: 15, maxTotalSeconds: 15, dimensions: { minSide: 256, maxSide: 5760, maxAspect: 2.5 } },
+    audio: { max: 3, minSeconds: 2, maxSeconds: 15, maxTotalSeconds: 15 },
+    total: 12,
+    audioRequiresVisual: true,
+  },
+  // H3-Max：首帧 + 尾帧两张图。
+  [VIDEO_MODEL_IDS.minimaxH3Max]: { images: 2 },
+  // grok 只收参考图；xAI 未公开张数上限，按 7 张保守。
+  [VIDEO_MODEL_IDS.grokVideo15]: { images: 7 },
+  [VIDEO_MODEL_IDS.wan30]: {
+    images: 10,
+    video: { max: 5, minSeconds: 1, maxSeconds: 15, maxTotalSeconds: 15, dimensions: { minSide: 240, maxSide: 4096, maxAspect: 8 } },
+    audio: { max: 5, minSeconds: 1, maxSeconds: 15, maxTotalSeconds: 15 },
+    maxInputPlusOutputSeconds: 30,
+  },
+  [VIDEO_MODEL_IDS.happyhorseT2V]: { images: 0 },
+  // 快乐马图生：恰好一张首帧。
+  [VIDEO_MODEL_IDS.happyhorseI2V]: { images: 1 },
+  [VIDEO_MODEL_IDS.klingV3]: { images: 6 },
+  [VIDEO_MODEL_IDS.klingV26]: { images: 4 },
+};
+
+export function videoReferenceCapability(id: string): VideoReferenceCapability {
+  return VIDEO_REFERENCE_CAPABILITIES[videoModelById(id).id];
+}
+
+export interface VideoReferenceMediaMeta {
+  kind: VideoReferenceMediaKind;
+  // 读不到元数据（如浏览器解不开 HEVC 编码的 mov）时缺省，交给执行插件校验。
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+}
+
+export type VideoReferenceIssue =
+  | { code: 'ref_images_unsupported' }
+  | { code: 'ref_too_many_images'; max: number }
+  | { code: 'ref_videos_unsupported' }
+  | { code: 'ref_too_many_videos'; max: number }
+  | { code: 'ref_audios_unsupported' }
+  | { code: 'ref_too_many_audios'; max: number }
+  | { code: 'ref_too_many_files'; max: number }
+  | { code: 'ref_audio_requires_visual' }
+  | { code: 'ref_video_duration'; min: number; max: number }
+  | { code: 'ref_audio_duration'; min: number; max: number }
+  | { code: 'ref_video_total'; max: number }
+  | { code: 'ref_audio_total'; max: number }
+  | { code: 'ref_video_dimensions'; min: number; max: number; ratio: number }
+  | { code: 'ref_input_plus_output'; max: number };
+
+// 元数据时长常带小数（14.98 / 15.02），按 0.05 秒容差比较。
+const REFERENCE_DURATION_TOLERANCE = 0.05;
+
+function knownSeconds(item: VideoReferenceMediaMeta): number | undefined {
+  const seconds = item.durationSeconds;
+  return seconds !== undefined && Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+}
+
+function referenceDurationOutOfRange(item: VideoReferenceMediaMeta, limits: VideoReferenceMediaLimits): boolean {
+  const seconds = knownSeconds(item);
+  if (seconds === undefined) return false;
+  return seconds < limits.minSeconds - REFERENCE_DURATION_TOLERANCE
+    || seconds > limits.maxSeconds + REFERENCE_DURATION_TOLERANCE;
+}
+
+export function referenceTotalSeconds(items: readonly VideoReferenceMediaMeta[]): number {
+  return items.reduce((sum, item) => sum + (knownSeconds(item) ?? 0), 0);
+}
+
+function referenceDimensionsOutOfRange(item: VideoReferenceMediaMeta, dims: VideoReferenceDimensionLimits): boolean {
+  if (!item.width || !item.height) return false;
+  const shortSide = Math.min(item.width, item.height);
+  const longSide = Math.max(item.width, item.height);
+  return shortSide < dims.minSide || longSide > dims.maxSide || longSide / shortSide > dims.maxAspect + 1e-6;
+}
+
+// validateVideoReferences 发送前按所选模型检查参考素材，空数组才允许发送。
+// outputDurationSeconds ≤ 0（-1 自动时长）时跳过「参考视频 + 生成时长」上限。
+export function validateVideoReferences(
+  modelId: string,
+  imageCount: number,
+  media: readonly VideoReferenceMediaMeta[],
+  outputDurationSeconds: number,
+): VideoReferenceIssue[] {
+  const cap = videoReferenceCapability(modelId);
+  const issues: VideoReferenceIssue[] = [];
+  const videos = media.filter(item => item.kind === 'video');
+  const audios = media.filter(item => item.kind === 'audio');
+
+  if (imageCount > 0 && cap.images === 0) issues.push({ code: 'ref_images_unsupported' });
+  else if (imageCount > cap.images) issues.push({ code: 'ref_too_many_images', max: cap.images });
+
+  if (videos.length > 0) {
+    const limits = cap.video;
+    if (!limits) {
+      issues.push({ code: 'ref_videos_unsupported' });
+    } else {
+      if (videos.length > limits.max) issues.push({ code: 'ref_too_many_videos', max: limits.max });
+      if (videos.some(item => referenceDurationOutOfRange(item, limits))) {
+        issues.push({ code: 'ref_video_duration', min: limits.minSeconds, max: limits.maxSeconds });
+      }
+      const total = referenceTotalSeconds(videos);
+      if (total > limits.maxTotalSeconds + REFERENCE_DURATION_TOLERANCE) {
+        issues.push({ code: 'ref_video_total', max: limits.maxTotalSeconds });
+      }
+      if (videos.some(item => referenceDimensionsOutOfRange(item, limits.dimensions))) {
+        issues.push({
+          code: 'ref_video_dimensions',
+          min: limits.dimensions.minSide,
+          max: limits.dimensions.maxSide,
+          ratio: limits.dimensions.maxAspect,
+        });
+      }
+      if (cap.maxInputPlusOutputSeconds && outputDurationSeconds > 0
+        && total + outputDurationSeconds > cap.maxInputPlusOutputSeconds + REFERENCE_DURATION_TOLERANCE) {
+        issues.push({ code: 'ref_input_plus_output', max: cap.maxInputPlusOutputSeconds });
+      }
+    }
+  }
+
+  if (audios.length > 0) {
+    const limits = cap.audio;
+    if (!limits) {
+      issues.push({ code: 'ref_audios_unsupported' });
+    } else {
+      if (audios.length > limits.max) issues.push({ code: 'ref_too_many_audios', max: limits.max });
+      if (audios.some(item => referenceDurationOutOfRange(item, limits))) {
+        issues.push({ code: 'ref_audio_duration', min: limits.minSeconds, max: limits.maxSeconds });
+      }
+      if (referenceTotalSeconds(audios) > limits.maxTotalSeconds + REFERENCE_DURATION_TOLERANCE) {
+        issues.push({ code: 'ref_audio_total', max: limits.maxTotalSeconds });
+      }
+    }
+  }
+
+  const totalFiles = imageCount + videos.length + audios.length;
+  if (cap.total && totalFiles > cap.total) issues.push({ code: 'ref_too_many_files', max: cap.total });
+  if (cap.audioRequiresVisual && audios.length > 0 && imageCount === 0 && videos.length === 0) {
+    issues.push({ code: 'ref_audio_requires_visual' });
+  }
+  return issues;
+}
+
+// videoReferenceIssueMessage 把问题码填成当前语言的提示（{max}/{min}/{ratio} 占位）。
+export function videoReferenceIssueMessage(issue: VideoReferenceIssue, vs: (key: VideoStringKey) => string): string {
+  let text = vs(issue.code);
+  for (const [key, value] of Object.entries(issue)) {
+    if (key !== 'code') text = text.replaceAll(`{${key}}`, String(value));
+  }
+  return text;
+}
+
 // ── 本地多语言 ───────────────────────────────────────────────────────────────
 // 视频模块的文案自带四语字典（不动 core 的 i18n 资源文件，避免与其他
 // 会话的 WIP 提交纠缠；后续可迁回 core i18n）。
@@ -431,7 +648,7 @@ export const VIDEO_STRINGS = {
     fail_insufficient_balance: '余额不足，任务未提交。可先充值，或等在途的视频跑完释放预留额度后重试',
     watermark: '水印',
     return_last_frame: '返回末帧',
-    video_placeholder: '描述你想生成的视频画面，可附参考图…',
+    video_placeholder: '描述你想生成的视频画面，可附参考图、视频或音频…',
     generating: '视频生成中（约 2-10 分钟）…',
     no_result: '生成完成但没有可用的视频输出',
     no_group: '当前没有可用的视频生成分组，请联系管理员配置',
@@ -446,6 +663,34 @@ export const VIDEO_STRINGS = {
     expired_title: '视频链接已过期',
     expired_hint: '上游链接仅 24 小时有效，可重新生成获取新视频',
     load_failed: '视频加载失败，链接可能已失效',
+    add_reference: '添加参考图、视频或音频',
+    reference_video: '参考视频',
+    reference_audio: '参考音频',
+    reference_uploading: '上传中…',
+    reference_upload_failed: '上传失败，点击重试',
+    reference_remove: '移除',
+    reference_play: '播放',
+    reference_pause: '暂停',
+    ref_images_unsupported: '当前模型不支持参考图',
+    ref_too_many_images: '当前模型最多 {max} 张参考图',
+    ref_videos_unsupported: '当前模型不支持参考视频',
+    ref_too_many_videos: '当前模型最多 {max} 段参考视频',
+    ref_audios_unsupported: '当前模型不支持参考音频',
+    ref_too_many_audios: '当前模型最多 {max} 段参考音频',
+    ref_too_many_files: '参考素材合计最多 {max} 个',
+    ref_audio_requires_visual: '参考音频需至少搭配 1 张参考图或 1 段参考视频',
+    ref_video_duration: '每段参考视频需在 {min}–{max} 秒之间',
+    ref_audio_duration: '每段参考音频需在 {min}–{max} 秒之间',
+    ref_video_total: '参考视频合计不能超过 {max} 秒',
+    ref_audio_total: '参考音频合计不能超过 {max} 秒',
+    ref_video_dimensions: '参考视频边长需在 {min}–{max} 像素，长宽比不超过 {ratio}:1',
+    ref_input_plus_output: '参考视频时长加生成时长不能超过 {max} 秒',
+    ref_video_too_large: '参考视频不能超过 {max} MB',
+    ref_audio_too_large: '参考音频不能超过 {max} MB',
+    ref_video_format: '参考视频仅支持 MP4、MOV',
+    ref_audio_format: '参考音频仅支持 MP3、WAV',
+    ref_pending_upload: '参考素材还在上传，完成后再发送',
+    ref_remove_unsupported: '移除不支持的素材',
   },
   en: {
     media_image: 'Image',
@@ -484,7 +729,7 @@ export const VIDEO_STRINGS = {
     fail_insufficient_balance: 'Not enough balance — the task was not submitted. Top up, or wait for the in-flight videos to finish and free up their reserved amount.',
     watermark: 'Watermark',
     return_last_frame: 'Return last frame',
-    video_placeholder: 'Describe the video you want to create; reference images optional…',
+    video_placeholder: 'Describe the video you want to create; reference images, videos, or audio optional…',
     generating: 'Generating video (about 2-10 min)…',
     no_result: 'Task completed but returned no video output',
     no_group: 'No video generation group available. Please contact the administrator.',
@@ -499,6 +744,34 @@ export const VIDEO_STRINGS = {
     expired_title: 'Video link expired',
     expired_hint: 'Upstream links last 24 hours — regenerate to get a fresh one.',
     load_failed: 'Video failed to load — the link may have expired.',
+    add_reference: 'Add reference image, video, or audio',
+    reference_video: 'Reference video',
+    reference_audio: 'Reference audio',
+    reference_uploading: 'Uploading…',
+    reference_upload_failed: 'Upload failed — click to retry',
+    reference_remove: 'Remove',
+    reference_play: 'Play',
+    reference_pause: 'Pause',
+    ref_images_unsupported: 'This model does not accept reference images',
+    ref_too_many_images: 'This model accepts up to {max} reference images',
+    ref_videos_unsupported: 'This model does not accept reference videos',
+    ref_too_many_videos: 'This model accepts up to {max} reference videos',
+    ref_audios_unsupported: 'This model does not accept reference audio',
+    ref_too_many_audios: 'This model accepts up to {max} reference audio clips',
+    ref_too_many_files: 'Up to {max} reference files in total',
+    ref_audio_requires_visual: 'Reference audio needs at least one reference image or video',
+    ref_video_duration: 'Each reference video must be {min}–{max} s long',
+    ref_audio_duration: 'Each reference audio clip must be {min}–{max} s long',
+    ref_video_total: 'Reference videos can total at most {max} s',
+    ref_audio_total: 'Reference audio can total at most {max} s',
+    ref_video_dimensions: 'Reference video sides must be {min}–{max} px, with an aspect ratio up to {ratio}:1',
+    ref_input_plus_output: 'Reference video length plus output length must not exceed {max} s',
+    ref_video_too_large: 'Reference videos must be {max} MB or smaller',
+    ref_audio_too_large: 'Reference audio must be {max} MB or smaller',
+    ref_video_format: 'Reference videos must be MP4 or MOV',
+    ref_audio_format: 'Reference audio must be MP3 or WAV',
+    ref_pending_upload: 'Reference files are still uploading — send when they finish',
+    ref_remove_unsupported: 'Remove unsupported files',
   },
   ja: {
     media_image: '画像',
@@ -537,7 +810,7 @@ export const VIDEO_STRINGS = {
     fail_insufficient_balance: '残高が不足しているため、タスクは送信されませんでした。チャージするか、進行中の動画の完了で予約分が解放されるのをお待ちください',
     watermark: 'ウォーターマーク',
     return_last_frame: '最終フレームを返す',
-    video_placeholder: '生成したい動画を説明してください。参考画像も添付できます…',
+    video_placeholder: '生成したい動画を説明してください。参考画像・動画・音声も添付できます…',
     generating: '動画を生成中（約 2〜10 分）…',
     no_result: 'タスクは完了しましたが動画出力がありません',
     no_group: '利用可能な動画生成グループがありません。管理者にお問い合わせください。',
@@ -552,6 +825,34 @@ export const VIDEO_STRINGS = {
     expired_title: '動画リンクの期限が切れました',
     expired_hint: 'リンクの有効期間は 24 時間です。再生成で新しい動画を取得できます。',
     load_failed: '動画を読み込めません。リンクが失効している可能性があります。',
+    add_reference: '参考画像・動画・音声を追加',
+    reference_video: '参考動画',
+    reference_audio: '参考音声',
+    reference_uploading: 'アップロード中…',
+    reference_upload_failed: 'アップロードに失敗しました。クリックして再試行',
+    reference_remove: '削除',
+    reference_play: '再生',
+    reference_pause: '一時停止',
+    ref_images_unsupported: 'このモデルは参考画像に対応していません',
+    ref_too_many_images: 'このモデルの参考画像は最大 {max} 枚です',
+    ref_videos_unsupported: 'このモデルは参考動画に対応していません',
+    ref_too_many_videos: 'このモデルの参考動画は最大 {max} 本です',
+    ref_audios_unsupported: 'このモデルは参考音声に対応していません',
+    ref_too_many_audios: 'このモデルの参考音声は最大 {max} 本です',
+    ref_too_many_files: '参考ファイルは合計 {max} 個までです',
+    ref_audio_requires_visual: '参考音声には参考画像または参考動画を 1 つ以上組み合わせてください',
+    ref_video_duration: '参考動画は 1 本あたり {min}〜{max} 秒にしてください',
+    ref_audio_duration: '参考音声は 1 本あたり {min}〜{max} 秒にしてください',
+    ref_video_total: '参考動画の合計は {max} 秒以内にしてください',
+    ref_audio_total: '参考音声の合計は {max} 秒以内にしてください',
+    ref_video_dimensions: '参考動画の辺の長さは {min}〜{max} px、縦横比は {ratio}:1 以内にしてください',
+    ref_input_plus_output: '参考動画の長さと生成する長さの合計は {max} 秒以内にしてください',
+    ref_video_too_large: '参考動画は {max} MB 以下にしてください',
+    ref_audio_too_large: '参考音声は {max} MB 以下にしてください',
+    ref_video_format: '参考動画は MP4 / MOV のみ対応しています',
+    ref_audio_format: '参考音声は MP3 / WAV のみ対応しています',
+    ref_pending_upload: '参考ファイルをアップロード中です。完了後に送信してください',
+    ref_remove_unsupported: '非対応のファイルを削除',
   },
   'zh-HK': {
     media_image: '圖像',
@@ -590,7 +891,7 @@ export const VIDEO_STRINGS = {
     fail_insufficient_balance: '餘額不足，任務未送出。可先儲值，或等在途的影片跑完釋放預留額度後重試',
     watermark: '浮水印',
     return_last_frame: '返回末幀',
-    video_placeholder: '描述你想生成的影片畫面，可附參考圖…',
+    video_placeholder: '描述你想生成的影片畫面，可附參考圖、影片或音訊…',
     generating: '影片生成中（約 2-10 分鐘）…',
     no_result: '生成完成但沒有可用的影片輸出',
     no_group: '目前沒有可用的影片生成分組，請聯絡管理員配置',
@@ -605,6 +906,34 @@ export const VIDEO_STRINGS = {
     expired_title: '影片連結已過期',
     expired_hint: '上游連結僅 24 小時有效，可重新生成獲取新影片',
     load_failed: '影片載入失敗，連結可能已失效',
+    add_reference: '加入參考圖、影片或音訊',
+    reference_video: '參考影片',
+    reference_audio: '參考音訊',
+    reference_uploading: '上載中…',
+    reference_upload_failed: '上載失敗，按此重試',
+    reference_remove: '移除',
+    reference_play: '播放',
+    reference_pause: '暫停',
+    ref_images_unsupported: '目前模型不支援參考圖',
+    ref_too_many_images: '目前模型最多 {max} 張參考圖',
+    ref_videos_unsupported: '目前模型不支援參考影片',
+    ref_too_many_videos: '目前模型最多 {max} 段參考影片',
+    ref_audios_unsupported: '目前模型不支援參考音訊',
+    ref_too_many_audios: '目前模型最多 {max} 段參考音訊',
+    ref_too_many_files: '參考素材合共最多 {max} 個',
+    ref_audio_requires_visual: '參考音訊須至少搭配 1 張參考圖或 1 段參考影片',
+    ref_video_duration: '每段參考影片須介乎 {min} 至 {max} 秒',
+    ref_audio_duration: '每段參考音訊須介乎 {min} 至 {max} 秒',
+    ref_video_total: '參考影片合共不可超過 {max} 秒',
+    ref_audio_total: '參考音訊合共不可超過 {max} 秒',
+    ref_video_dimensions: '參考影片邊長須介乎 {min} 至 {max} 像素，長寬比不超過 {ratio}:1',
+    ref_input_plus_output: '參考影片時長加生成時長不可超過 {max} 秒',
+    ref_video_too_large: '參考影片不可超過 {max} MB',
+    ref_audio_too_large: '參考音訊不可超過 {max} MB',
+    ref_video_format: '參考影片只支援 MP4、MOV',
+    ref_audio_format: '參考音訊只支援 MP3、WAV',
+    ref_pending_upload: '參考素材仍在上載，完成後再發送',
+    ref_remove_unsupported: '移除不支援的素材',
   },
   es: {
     media_image: 'Imagen',
@@ -643,7 +972,7 @@ export const VIDEO_STRINGS = {
     fail_insufficient_balance: 'Saldo insuficiente: la tarea no se envió. Recarga o espera a que terminen los videos en curso para liberar el importe reservado.',
     watermark: 'Marca de agua',
     return_last_frame: 'Devolver el último fotograma',
-    video_placeholder: 'Describa el video que desea crear; puede adjuntar imágenes de referencia…',
+    video_placeholder: 'Describa el video que desea crear; puede adjuntar imágenes, videos o audio de referencia…',
     generating: 'Generando video (aprox. 2-10 min)…',
     no_result: 'La tarea se completó pero no devolvió ningún video',
     no_group: 'No hay ningún grupo de generación de video disponible. Contacte al administrador.',
@@ -658,6 +987,34 @@ export const VIDEO_STRINGS = {
     expired_title: 'El enlace del video ha caducado',
     expired_hint: 'Los enlaces upstream solo son válidos por 24 horas; puede regenerar el video para obtener uno nuevo.',
     load_failed: 'No se pudo cargar el video; el enlace podría haber caducado.',
+    add_reference: 'Añadir imagen, video o audio de referencia',
+    reference_video: 'Video de referencia',
+    reference_audio: 'Audio de referencia',
+    reference_uploading: 'Subiendo…',
+    reference_upload_failed: 'Error al subir; haz clic para reintentar',
+    reference_remove: 'Quitar',
+    reference_play: 'Reproducir',
+    reference_pause: 'Pausar',
+    ref_images_unsupported: 'Este modelo no admite imágenes de referencia',
+    ref_too_many_images: 'Este modelo admite hasta {max} imágenes de referencia',
+    ref_videos_unsupported: 'Este modelo no admite videos de referencia',
+    ref_too_many_videos: 'Este modelo admite hasta {max} videos de referencia',
+    ref_audios_unsupported: 'Este modelo no admite audio de referencia',
+    ref_too_many_audios: 'Este modelo admite hasta {max} audios de referencia',
+    ref_too_many_files: 'Puedes usar hasta {max} archivos de referencia en total',
+    ref_audio_requires_visual: 'El audio de referencia necesita al menos una imagen o un video de referencia',
+    ref_video_duration: 'Cada video de referencia debe durar entre {min} y {max} s',
+    ref_audio_duration: 'Cada audio de referencia debe durar entre {min} y {max} s',
+    ref_video_total: 'Los videos de referencia no pueden sumar más de {max} s',
+    ref_audio_total: 'Los audios de referencia no pueden sumar más de {max} s',
+    ref_video_dimensions: 'Los lados del video de referencia deben medir entre {min} y {max} px, con una relación de aspecto de hasta {ratio}:1',
+    ref_input_plus_output: 'La duración de los videos de referencia más la del video generado no puede superar {max} s',
+    ref_video_too_large: 'El video de referencia no puede superar {max} MB',
+    ref_audio_too_large: 'El audio de referencia no puede superar {max} MB',
+    ref_video_format: 'Los videos de referencia deben ser MP4 o MOV',
+    ref_audio_format: 'Los audios de referencia deben ser MP3 o WAV',
+    ref_pending_upload: 'Los archivos de referencia aún se están subiendo; envía cuando terminen',
+    ref_remove_unsupported: 'Quitar archivos no compatibles',
   },
 } as const;
 

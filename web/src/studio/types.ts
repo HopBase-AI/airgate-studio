@@ -34,6 +34,10 @@ export interface GalleryItem {
   // 用于「官方源链接」溯源按钮。
   sourceVideoUrl?: string;
   lastFrameUrl?: string;
+  // 视频任务的全部参考素材地址，「重新生成」原样回放（sourceUrl 只能带一张图）。
+  referenceImages?: string[];
+  referenceVideos?: string[];
+  referenceAudios?: string[];
 }
 
 // BatchSubtask —— 批量生成里的单个子任务状态。批量任务把 N 张图聚成一个
@@ -73,4 +77,8 @@ export interface StudioGenerationTask {
   // 避免用户切换项目/模型后重试时上下文错乱）。
   subtasks?: BatchSubtask[];
   batchSources?: string[];
+  // 视频任务的参考素材地址，失败卡片「重试」沿用。
+  referenceImages?: string[];
+  referenceVideos?: string[];
+  referenceAudios?: string[];
 }
