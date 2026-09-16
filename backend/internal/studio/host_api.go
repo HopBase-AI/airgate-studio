@@ -462,6 +462,8 @@ type hostForwardRequest struct {
 type hostForwardResponse struct {
 	StatusCode int
 	Body       []byte
+	// UsageID core 计费落账后回带的 usage_logs 行号（只有产生计费的同步转发才有，如语音合成）。
+	UsageID int64
 }
 
 // hostForward 通过 host gateway.forward 同步调用上游 LLM（非流式）。
@@ -483,6 +485,7 @@ func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*h
 	return &hostForwardResponse{
 		StatusCode: intFromAny(firstValue(resp, "status_code", "status")),
 		Body:       bytesFromPayload(firstValue(resp, "body")),
+		UsageID:    int64(intFromAny(firstValue(resp, "usage_id"))),
 	}, nil
 }
 

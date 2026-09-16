@@ -155,7 +155,7 @@ func validateVideoGenerationAccess(ctx context.Context, host sdk.Host, userID, g
 		return fmt.Errorf("failed to query available groups: %w", err)
 	}
 	if len(groups) == 0 {
-		return fmt.Errorf("No video generation group is available. Create a %s group in the console and bind a usable account first.", displayPlatformName(platform))
+		return fmt.Errorf("No video generation group is available. Create a %s group in the console and bind a usable account first.", displayPlatformName(platform)) //nolint:staticcheck // 用户可见整句文案，保留首字母大写与句号
 	}
 	if groupID <= 0 {
 		return fmt.Errorf("select an available video generation group")
@@ -176,7 +176,7 @@ func validateGenerationAccess(ctx context.Context, host sdk.Host, userID, groupI
 		return fmt.Errorf("failed to query available groups: %w", err)
 	}
 	if len(groups) == 0 {
-		return fmt.Errorf("No %s image group is available. Create a group in the console and bind a usable account first.", displayPlatformName(platform))
+		return fmt.Errorf("No %s image group is available. Create a group in the console and bind a usable account first.", displayPlatformName(platform)) //nolint:staticcheck // 用户可见整句文案，保留首字母大写与句号
 	}
 	if groupID <= 0 {
 		return fmt.Errorf("select an available image generation group")

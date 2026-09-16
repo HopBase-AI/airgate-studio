@@ -98,6 +98,17 @@ const FAILURE_HINTS: Record<string, FailureHint> = {
   too_many_videos: { key: 'fail_reference_too_many', raw: true },
   too_many_audios: { key: 'fail_reference_too_many', raw: true },
   reference_asset_not_ready: { key: 'fail_reference_not_ready' },
+  // ── 语音合成（studio 后端 speech.go：提交前校验码 + 上游映射码）──
+  speech_text_required: { key: 'fail_prompt_required' },
+  speech_text_too_long: { key: 'fail_speech_text_too_long' },
+  speech_unsupported_model: { key: 'fail_model_not_in_catalog' },
+  speech_invalid_speed: { key: 'fail_bad_request', raw: true },
+  speech_invalid_parameter: { key: 'fail_bad_request', raw: true },
+  speech_group_missing: { key: 'fail_group_missing' },
+  speech_voice_not_found: { key: 'fail_speech_voice_not_found', raw: true },
+  speech_no_audio: { key: 'fail_speech_no_audio' },
+  speech_store_failed: { key: 'fail_store_failed' },
+  project_not_found: { key: 'fail_bad_request', raw: true },
 };
 
 function lookup(code: string | undefined): FailureHint | undefined {

@@ -8,8 +8,12 @@ export async function downloadImage(url: string, alt: string) {
     const contentType = resp.headers.get('content-type') || '';
     const ext = contentType.includes('video')
       ? '.mp4'
-      : url.includes('.png') ? '.png' : url.includes('.webp') ? '.webp' : url.includes('.mp4') ? '.mp4' : '.jpg';
-    a.download = (alt || (ext === '.mp4' ? 'video' : 'image')) + ext;
+      : contentType.includes('audio')
+        ? (contentType.includes('wav') ? '.wav' : contentType.includes('flac') ? '.flac' : '.mp3')
+        : url.includes('.png') ? '.png' : url.includes('.webp') ? '.webp' : url.includes('.mp4') ? '.mp4' : url.includes('.mp3') ? '.mp3' : '.jpg';
+    const fallbackName = ext === '.mp4' ? 'video' : (ext === '.mp3' || ext === '.wav' || ext === '.flac') ? 'audio' : 'image';
+    // 语音的「alt」是整段文本，文件名截短以免超出系统限制。
+    a.download = (alt ? alt.slice(0, 80) : fallbackName) + ext;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

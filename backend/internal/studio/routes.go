@@ -29,6 +29,10 @@ func registerRoutes(p *StudioPlugin, r sdk.RouteRegistrar) {
 	// 视频模式的参考视频 / 音频先上传成资产，建任务时只带地址（见 references.go）。
 	r.Handle(http.MethodPost, "/reference-uploads", p.requireUser(p.handleUploadReference))
 	r.Handle(http.MethodGet, "/inspirations", p.handleListInspirations)
+	// 语音合成是同步转发（不建 host task）：POST 出音频并落资产；GET 跨项目列语音资产
+	// 供「全部作品」视图合并（见 speech.go）。
+	r.Handle(http.MethodPost, "/speech", p.requireUser(p.handleSpeech))
+	r.Handle(http.MethodGet, "/speech", p.requireProjectService(p.handleListSpeechAssets))
 
 	// 项目 / 资产（需要 DB；用 requireProjectService 守护，未配置态返回 503）。
 	// 路由匹配为「先精确、再最长 `/` 前缀」，故 /projects/{id} 与 /projects/{id}/assets
@@ -324,7 +328,7 @@ func publicBaseFromRequest(r *http.Request) string {
 
 // handleListImageGroups 返回当前用户在指定平台下可选的生成计费分组，
 // 已按有效倍率最便宜优先排序（与不指定分组时的自动选组顺序一致）。
-// ?media=video 时不要求图片能力（视频平台分组）。
+// ?media=video|audio 时不要求图片能力（视频平台分组 / 语音合成分组）。
 func (p *StudioPlugin) handleListImageGroups(w http.ResponseWriter, r *http.Request) {
 	platform := r.URL.Query().Get("platform")
 	if strings.TrimSpace(platform) == "" {
@@ -333,7 +337,8 @@ func (p *StudioPlugin) handleListImageGroups(w http.ResponseWriter, r *http.Requ
 	}
 	userID := parseUserIDInt64(r)
 	model := r.URL.Query().Get("model")
-	needsImage := r.URL.Query().Get("media") != "video"
+	media := r.URL.Query().Get("media")
+	needsImage := media != "video" && media != "audio"
 	groups, err := hostListEligibleGroups(r.Context(), p.host, userID, platform, model, needsImage)
 	if err != nil {
 		p.logger.Error("list_image_groups_failed", "error", err)

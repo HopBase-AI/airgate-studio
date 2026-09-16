@@ -203,6 +203,37 @@ export interface ProjectAsset {
   size: string;
   // 视频官方上游直链(24h 有效);老记录/图片为空串。
   source_video_url?: string;
+  // 介质：语音合成为 audio；存量图片 / 视频记录缺省，按 mode 推断。
+  kind?: string;
+  // 语音资产专属：音色、上游回报的计费字符数、时长（毫秒）。
+  voice_id?: string;
+  usage_characters?: number;
+  audio_length_ms?: number;
+  created_at: string;
+}
+
+// SpeechResult POST /speech 的应答：音频已由后端落成持久资产（url），并在项目里记了
+// 一条 kind=audio 的记录（asset；项目存储未配置时缺省）。计费字符数以上游回报为准。
+export interface SpeechResult {
+  asset?: ProjectAsset;
+  project_id: number;
+  url: string;
+  content_type: string;
+  format: string;
+  platform: string;
+  model: string;
+  group_id: number;
+  route_key: string;
+  voice_id: string;
+  speed: number;
+  emotion?: string;
+  language_boost?: string;
+  text: string;
+  text_chars: number;
+  usage_characters: number;
+  audio_length_ms: number;
+  audio_size_bytes: number;
+  usage_id?: number;
   created_at: string;
 }
 
@@ -333,9 +364,34 @@ export const api = {
     return request<{ models: ModelInfo[] }>('GET', `/models${suffix}`).then(r => r.models || []);
   },
 
+  // 语音合成：同步等音频（文本越长越久，上游建议 3,000 字以上走流式，工作坊 v1 只做同步）。
+  synthesizeSpeech(params: {
+    text: string;
+    model: string;
+    voice_id?: string;
+    speed?: number;
+    emotion?: string;
+    format?: string;
+    language_boost?: string;
+    group_id: number;
+    project_id?: number;
+  }, signal?: AbortSignal): Promise<SpeechResult> {
+    return request<SpeechResult>('POST', '/speech', params, signal);
+  },
+
+  // 跨项目分页列语音资产（「全部作品」视图合并用：语音没有 host task 可回放）。
+  listSpeechAssets(params?: { limit?: number; offset?: number }): Promise<{ assets: ProjectAsset[]; total: number }> {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs}` : '';
+    return request<{ assets: ProjectAsset[]; total: number }>('GET', `/speech${suffix}`)
+      .then(r => ({ assets: r.assets || [], total: r.total || 0 }));
+  },
+
   // 当前用户在指定平台下可选的生成计费分组（最便宜优先）。
-  // media='video' 时不要求图片能力（视频平台分组，如 seedance）。
-  listImageGroups(platform: string, model?: string, media?: 'image' | 'video', signal?: AbortSignal): Promise<ImageGroup[]> {
+  // media='video' | 'audio' 时不要求图片能力（视频平台分组，如 seedance；语音合成分组）。
+  listImageGroups(platform: string, model?: string, media?: 'image' | 'video' | 'audio', signal?: AbortSignal): Promise<ImageGroup[]> {
     const qs = new URLSearchParams({ platform });
     if (model) qs.set('model', model);
     if (media) qs.set('media', media);

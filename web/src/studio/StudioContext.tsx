@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ApiRequestError } from '../api';
-import type { GenerationTask, ImageGroup, Project, ProjectAsset } from '../api';
+import type { GenerationTask, ImageGroup, Project, ProjectAsset, SpeechResult } from '../api';
 import type { GalleryItem, StudioGenerationTask, BatchSubtask, GenerationRouteSnapshot, ImageMode, MediaType, StudioMode } from './types';
 import { getModelConfig, getDefaultModel, MODEL_REGISTRY, modelRouteKey, type ModelConfig } from './modelConfig';
 import { withImageGroupPrices } from './modelRoutes';
@@ -31,6 +31,20 @@ import {
   type VideoGenerationSettings,
 } from './video/videoConfig';
 import { recordRemoteTaskSample } from './etaStats';
+import {
+  SPEECH_FORMAT,
+  SPEECH_MAX_CHARS,
+  SPEECH_MODEL_REGISTRY,
+  SPEECH_PLATFORM,
+  clampSpeechSpeed,
+  countCodePoints,
+  isSpeechModelId,
+  speechGroupsForModel,
+  speechLanguageBoostFor,
+  useSpeechStrings,
+  type SpeechGroupsByModel,
+  type SpeechModelConfig,
+} from './speech/speechConfig';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -235,6 +249,15 @@ interface GenerateVideoOptions {
   durationSeconds?: number;
 }
 
+// GenerateSpeechOptions 语音合成：route 缺省用当前选择（null 显式失败关闭），音色 / 语速
+// 缺省用当前面板值；失败卡「重试」与画廊「重新生成」带原值回放。
+interface GenerateSpeechOptions {
+  route?: GenerationRouteSnapshot | null;
+  projectId?: number;
+  voiceId?: string;
+  speed?: number;
+}
+
 // ComposerBar 上报的参考素材数量与参考视频合计秒数，预算预览据此估价
 // （参考图张数会切价格档，参考视频按输入时长计费）。
 export interface VideoReferenceSummary {
@@ -302,10 +325,16 @@ function studioTaskRoute(task: StudioGenerationTask): GenerationRouteSnapshot | 
 }
 
 // projectAssetToGallery 把后端持久化的项目资产记录映射成画廊条目。
-// mediaType 从已落库的 mode 推导('video' 自视频上线起就在写),不需要给
-// studio_assets 加列;若未来同一媒体类型出现多种 mode(如 img2vid/vid2vid
+// mediaType 优先看后端的 kind（语音资产写 audio），存量记录从已落库的 mode 推导
+// ('video' 自视频上线起就在写)；若未来同一媒体类型出现多种 mode(如 img2vid/vid2vid
 // 细分),再迁移为独立 media_type 列。
+function projectAssetMediaType(a: Pick<ProjectAsset, 'kind' | 'mode'>): MediaType {
+  if (a.kind === 'audio' || a.mode === 'speech') return 'audio';
+  return a.mode === 'video' ? 'video' : 'image';
+}
+
 function projectAssetToGallery(a: ProjectAsset): GalleryItem {
+  const mediaType = projectAssetMediaType(a);
   return {
     id: `a-${a.id}`,
     taskId: a.task_id || undefined,
@@ -317,12 +346,53 @@ function projectAssetToGallery(a: ProjectAsset): GalleryItem {
     groupId: a.group_id || undefined,
     routeKey: a.route_key || undefined,
     mode: (a.mode as StudioMode) || 'text2img',
-    mediaType: a.mode === 'video' ? 'video' : 'image',
+    mediaType,
     size: a.size || undefined,
     createdAt: a.created_at,
     assetId: a.id,
+    projectId: a.project_id || undefined,
     sourceVideoUrl: a.source_video_url || undefined,
+    voiceId: mediaType === 'audio' ? a.voice_id || undefined : undefined,
+    usageCharacters: mediaType === 'audio' ? a.usage_characters || undefined : undefined,
+    audioLengthMs: mediaType === 'audio' ? a.audio_length_ms || undefined : undefined,
   };
+}
+
+// speechResultToGallery 把 POST /speech 的应答映射成画廊条目。后端已把音频落成持久资产并
+// 记进项目（asset），前端不再走 addProjectAsset；项目存储未配置时 asset 缺省，条目只存在于
+// 本次会话。
+export function speechResultToGallery(result: SpeechResult, text: string): GalleryItem {
+  return {
+    id: result.asset ? `a-${result.asset.id}` : `s-${uid()}`,
+    assetId: result.asset?.id,
+    projectId: result.project_id > 0 ? result.project_id : undefined,
+    url: result.url,
+    alt: text,
+    prompt: text,
+    platform: result.platform || SPEECH_PLATFORM,
+    model: result.model,
+    groupId: result.group_id || undefined,
+    routeKey: result.route_key || modelRouteKey(SPEECH_PLATFORM, result.model),
+    mode: 'speech',
+    mediaType: 'audio',
+    size: result.format || SPEECH_FORMAT,
+    createdAt: result.created_at || new Date().toISOString(),
+    voiceId: result.voice_id || undefined,
+    speed: result.speed,
+    usageCharacters: result.usage_characters || undefined,
+    audioLengthMs: result.audio_length_ms || undefined,
+  };
+}
+
+// compareGalleryItemsNewestFirst 画廊展示序：按创建时间倒序。图片 / 视频（host task）与语音
+// （studio_assets）来自两条分页流，各自有序、合并后需要统一排；解析不了的时间沉底。
+export function compareGalleryItemsNewestFirst(a: Pick<GalleryItem, 'createdAt'>, b: Pick<GalleryItem, 'createdAt'>): number {
+  const at = Date.parse(a.createdAt);
+  const bt = Date.parse(b.createdAt);
+  const av = Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
+  const bv = Number.isFinite(bt) ? bt : Number.NEGATIVE_INFINITY;
+  if (av === bv) return 0;
+  return av > bv ? -1 : 1;
 }
 
 function taskRemoteIds(task: StudioGenerationTask | undefined): number[] {
@@ -725,6 +795,20 @@ async function fetchVideoGroupsByModel(signal: AbortSignal): Promise<VideoGroups
   return groupsByModel;
 }
 
+// fetchSpeechGroupsByModel 语音模型的分组发现：每个模型问一次（media=audio 不要求图片
+// 能力），单个模型失败只影响该模型（无分组=不展示），两者都无分组时整个语音模式不出现。
+async function fetchSpeechGroupsByModel(signal: AbortSignal): Promise<SpeechGroupsByModel> {
+  const results = await Promise.allSettled(SPEECH_MODEL_REGISTRY.map(async model => (
+    await api.listImageGroups(model.platform, model.id, 'audio', signal)
+  )));
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+  const groupsByModel: SpeechGroupsByModel = {};
+  results.forEach((res, i) => {
+    if (res.status === 'fulfilled') groupsByModel[SPEECH_MODEL_REGISTRY[i].id] = res.value;
+  });
+  return groupsByModel;
+}
+
 async function pollGenerationTask(
   taskId: number,
   signal: AbortSignal,
@@ -855,6 +939,24 @@ export interface StudioContextValue {
   // ComposerBar 上报当前参考素材数量，预算预览据此估价。
   setVideoReferenceSummary: (summary: VideoReferenceSummary) => void;
   generateVideo: (prompt: string, options?: GenerateVideoOptions) => boolean;
+
+  // Speech synthesis（MiniMax Speech 2.8；同步转发，不走 task 系统）
+  // speechAvailable=false 时语音模式入口整个不出现（用户可达不了 speech-2.8-*）。
+  speechAvailable: boolean;
+  availableSpeechModels: SpeechModelConfig[];
+  speechModelId: string;
+  setSpeechModelId: (id: string) => void;
+  // 空串 = 自动（按文本语言选默认音色）。
+  speechVoiceId: string;
+  setSpeechVoiceId: (id: string) => void;
+  speechSpeed: number;
+  setSpeechSpeed: (speed: number) => void;
+  speechGroups: ImageGroup[];
+  speechGroupsLoaded: boolean;
+  speechRouteReady: boolean;
+  selectedSpeechGroupId: number | null;
+  setSelectedSpeechGroupId: (id: number) => void;
+  generateSpeech: (text: string, options?: GenerateSpeechOptions) => boolean;
 
   // Gallery
   gallery: GalleryItem[];
@@ -1104,6 +1206,81 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     ));
   }, [videoGroups, videoGroupsLoaded]);
 
+  // ── Speech（MiniMax Speech 2.8）参数域 ────────────────────────────────────
+  // 分组发现在进入工作坊时就做（只有两个模型、两次请求）：语音模式的入口按钮要靠它决定
+  // 显示与否，不能等切到语音模式再问。
+  const sp = useSpeechStrings();
+  const [speechModelId, setSpeechModelIdRaw] = useState<string>(SPEECH_MODEL_REGISTRY[0].id);
+  const [speechVoiceId, setSpeechVoiceId] = useState('');
+  const [speechSpeed, setSpeechSpeedRaw] = useState(1);
+  const setSpeechSpeed = useCallback((speed: number) => setSpeechSpeedRaw(clampSpeechSpeed(speed)), []);
+  const [speechGroupsByModel, setSpeechGroupsByModel] = useState<SpeechGroupsByModel>({});
+  const [speechGroupsLoaded, setSpeechGroupsLoaded] = useState(false);
+  const [selectedSpeechGroupId, setSelectedSpeechGroupId] = useState<number | null>(null);
+  const speechGroups = useMemo(
+    () => speechGroupsForModel(speechModelId, speechGroupsByModel),
+    [speechGroupsByModel, speechModelId],
+  );
+  const availableSpeechModels = useMemo(
+    () => (speechGroupsLoaded
+      ? SPEECH_MODEL_REGISTRY.filter(model => speechGroupsForModel(model.id, speechGroupsByModel).length > 0)
+      : []),
+    [speechGroupsByModel, speechGroupsLoaded],
+  );
+  const speechAvailable = availableSpeechModels.length > 0;
+  const speechRouteReady = speechGroupsLoaded
+    && selectedSpeechGroupId != null
+    && speechGroups.some(group => group.id === selectedSpeechGroupId);
+
+  const setSpeechModelId = useCallback((id: string) => {
+    if (!isSpeechModelId(id)) return;
+    setSpeechModelIdRaw(id);
+    setSelectedSpeechGroupId(null);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), IMAGE_GROUP_DISCOVERY_TIMEOUT_MS);
+    void fetchSpeechGroupsByModel(controller.signal)
+      .then(next => {
+        if (cancelled) return;
+        setSpeechGroupsByModel(next);
+        setSpeechGroupsLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSpeechGroupsByModel({});
+        setSpeechGroupsLoaded(true);
+      })
+      .finally(() => window.clearTimeout(timeout));
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, []);
+
+  // 默认模型对当前用户不可用时落到第一个可用的；语音整体不可达时把已选中的语音模式退回图像。
+  useEffect(() => {
+    if (!speechGroupsLoaded || speechGroups.length > 0) return;
+    const fallback = availableSpeechModels[0];
+    if (fallback && fallback.id !== speechModelId) setSpeechModelId(fallback.id);
+  }, [availableSpeechModels, setSpeechModelId, speechGroups.length, speechGroupsLoaded, speechModelId]);
+
+  useEffect(() => {
+    if (mediaType === 'audio' && speechGroupsLoaded && !speechAvailable) setMediaType('image');
+  }, [mediaType, speechAvailable, speechGroupsLoaded]);
+
+  useEffect(() => {
+    if (!speechGroupsLoaded) return;
+    setSelectedSpeechGroupId(prev => (
+      prev != null && speechGroups.some(group => group.id === prev)
+        ? prev
+        : (speechGroups[0]?.id ?? null)
+    ));
+  }, [speechGroups, speechGroupsLoaded]);
+
   // Model selection (hardcoded registry)
   const [selectedModelKey, setSelectedModelKeyRaw] = useState(() => getInitialModel().routeKey);
   const selectedModelKeyRef = useRef(selectedModelKey);
@@ -1131,6 +1308,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [generatedAssetRetentionDays, setGeneratedAssetRetentionDays] = useState<number | null>(null);
   const galleryOffsetRef = useRef(0);
+  // 「全部作品」视图里语音资产是独立的分页流（studio_assets，不是 host tasks）。
+  const speechOffsetRef = useRef(0);
+  const speechHasMoreRef = useRef(false);
   const loadingMoreRef = useRef(false);
   const galleryViewEpochRef = useRef(0);
   const galleryRequestIDRef = useRef(0);
@@ -1447,9 +1627,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       // 历史图(completed)与「进行中/失败卡恢复」(recent)是两件独立的事,却共用一次
       // 拉取。用 allSettled 让二者解耦:任一请求瞬时抖动都不再把成功那半的结果一起丢掉
       // (旧代码 Promise.all 只要一条失败,catch 吞掉后历史整片空白且不重试)。
-      const [completedRes, recentRes] = await Promise.allSettled([
+      speechOffsetRef.current = 0;
+      speechHasMoreRef.current = false;
+      const [completedRes, recentRes, speechRes] = await Promise.allSettled([
         api.listGenerationTasks({ limit: PAGE_SIZE, offset: 0, status: 'completed' }),
         api.listGenerationTasks({ limit: PAGE_SIZE, offset: 0 }),
+        // 语音资产没有 host task：单独拉第一页并进「全部作品」；后端未配置项目存储时
+        // 这条会 503，按「没有语音作品」处理，不影响图片 / 视频。
+        api.listSpeechAssets({ limit: PAGE_SIZE, offset: 0 }),
       ]);
       if (
         signal.aborted ||
@@ -1458,6 +1643,18 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       ) return;
 
       const deletedTaskRecords = deletedTaskRecordsRef.current;
+
+      if (speechRes.status === 'fulfilled') {
+        const { assets, total } = speechRes.value;
+        const speechItems = filterDeletedGalleryItems(
+          assets.map(projectAssetToGallery),
+          deletedTaskRecords,
+          deletedProjectAssetIDsRef.current,
+        );
+        setGallery(prev => mergeGalleryItems(prev, speechItems, 'append'));
+        speechOffsetRef.current = assets.length;
+        speechHasMoreRef.current = assets.length < total;
+      }
 
       // 历史图:completed 请求成功就渲染,与 recent 成败无关。
       if (completedRes.status === 'fulfilled') {
@@ -1481,7 +1678,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           void persistProjectAssets(targetProjectID, taskItems, `r-${completedTask.id}`);
         }
         galleryOffsetRef.current = completedTasks.length;
-        setHasMore(completedTasks.length < completedTotal);
+        setHasMore(completedTasks.length < completedTotal || speechHasMoreRef.current);
         setLoadMoreError(false);
       } else {
         setLoadMoreError(true);
@@ -1657,18 +1854,40 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         galleryOffsetRef.current += assets.length;
         setHasMore(galleryOffsetRef.current < total);
       } else {
-        // 全部视图：分页读 host tasks（含老用户历史图）
-        const { tasks: moreTasks, total } = await api.listGenerationTasks({
-          limit: PAGE_SIZE,
-          offset: galleryOffsetRef.current,
-          status: 'completed',
-        });
+        // 全部视图：分页读 host tasks（含老用户历史图）；语音资产是另一条分页流，同步翻页。
+        const [moreTasksRes, moreSpeechRes] = await Promise.allSettled([
+          api.listGenerationTasks({
+            limit: PAGE_SIZE,
+            offset: galleryOffsetRef.current,
+            status: 'completed',
+          }),
+          speechHasMoreRef.current
+            ? api.listSpeechAssets({ limit: PAGE_SIZE, offset: speechOffsetRef.current })
+            : Promise.resolve<{ assets: ProjectAsset[]; total: number }>({ assets: [], total: 0 }),
+        ]);
         if (!isExpectedGalleryView(
           expectedViewEpoch,
           expectedProjectID,
           galleryViewEpochRef.current,
           activeProjectIdRef.current,
         )) return;
+        let speechMore = false;
+        if (moreSpeechRes.status === 'fulfilled') {
+          const { assets: speechAssets, total: speechTotal } = moreSpeechRes.value;
+          if (speechAssets.length > 0) {
+            const speechItems = filterDeletedGalleryItems(
+              speechAssets.map(projectAssetToGallery),
+              deletedTaskRecordsRef.current,
+              deletedProjectAssetIDsRef.current,
+            );
+            setGallery(prev => mergeGalleryItems(prev, speechItems, 'append'));
+          }
+          speechOffsetRef.current += speechAssets.length;
+          speechMore = speechHasMoreRef.current && speechAssets.length > 0 && speechOffsetRef.current < speechTotal;
+        }
+        speechHasMoreRef.current = speechMore;
+        if (moreTasksRes.status === 'rejected') throw moreTasksRes.reason;
+        const { tasks: moreTasks, total } = moreTasksRes.value;
         const visibleMoreTasks = filterDeletedRemoteTasks(moreTasks, deletedTaskRecordsRef.current);
         const newItems = tasksToGallery(visibleMoreTasks);
         setGallery(prev => mergeGalleryItems(prev, newItems, 'append'));
@@ -1683,7 +1902,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           void persistProjectAssets(targetProjectID, taskItems, `r-${completedTask.id}`);
         }
         galleryOffsetRef.current += moreTasks.length;
-        setHasMore(galleryOffsetRef.current < total);
+        setHasMore(galleryOffsetRef.current < total || speechMore);
       }
     } catch {
       if (isExpectedGalleryView(
@@ -2459,6 +2678,157 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     ],
   );
 
+  // generateSpeech 语音合成：同步转发（POST /speech 等音频回来），不走 task 系统。
+  // 成功即已由后端落成持久资产并记进项目（activeProjectId=0 时后端落默认项目），
+  // 前端只把结果卡挂进画廊；失败按 error_code 走五语提示（failureHints）。
+  const generateSpeech = useCallback(
+    (text: string, options?: GenerateSpeechOptions) => {
+      const trimmed = text.trim();
+      if (!trimmed) return false;
+      const targetProjectID = options?.projectId ?? activeProjectIdRef.current;
+      const selectedRoute = buildGenerationRouteSnapshot(
+        modelRouteKey(SPEECH_PLATFORM, speechModelId),
+        SPEECH_PLATFORM,
+        speechModelId,
+        selectedSpeechGroupId ?? undefined,
+        SPEECH_FORMAT,
+      );
+      const route = options?.route === undefined ? selectedRoute : options.route;
+      const voiceId = (options?.voiceId ?? speechVoiceId).trim();
+      const speed = clampSpeechSpeed(options?.speed ?? speechSpeed);
+      const model = route?.model ?? speechModelId;
+
+      const failLocalTask = (message: string, errorCode?: string) => {
+        setTasks(prev => [{
+          id: uid(),
+          projectId: targetProjectID,
+          prompt: trimmed,
+          mode: 'speech',
+          status: 'failed',
+          error: message,
+          errorCode,
+          createdAt: new Date().toISOString(),
+          platform: SPEECH_PLATFORM,
+          model,
+          groupId: route?.groupId,
+          routeKey: route?.routeKey,
+          size: SPEECH_FORMAT,
+          voiceId: voiceId || undefined,
+          speed,
+          remoteTaskIds: [],
+        }, ...prev]);
+      };
+
+      if (!route || route.platform !== SPEECH_PLATFORM || !isSpeechModelId(route.model)) {
+        failLocalTask(sp('no_group'), 'speech_group_missing');
+        return false;
+      }
+      // 上限与后端一致（10,000 码点）：超限不发请求、不占一条任务。
+      if (countCodePoints(trimmed) > SPEECH_MAX_CHARS) {
+        failLocalTask(sp('too_long'), 'speech_text_too_long');
+        return false;
+      }
+
+      const taskId = uid();
+      const task: StudioGenerationTask = {
+        id: taskId,
+        projectId: targetProjectID,
+        prompt: trimmed,
+        mode: 'speech',
+        status: 'processing',
+        createdAt: new Date().toISOString(),
+        platform: route.platform,
+        model: route.model,
+        groupId: route.groupId,
+        routeKey: route.routeKey,
+        size: SPEECH_FORMAT,
+        voiceId: voiceId || undefined,
+        speed,
+        remoteTaskIds: [],
+      };
+      setTasks(prev => [task, ...prev]);
+      activeCountRef.current += 1;
+      setIsGenerating(true);
+
+      const updateTask = (patch: Partial<StudioGenerationTask>) => {
+        if (deletedLocalTaskIDsRef.current.has(taskId)) return;
+        setTasks(prev => prev.map(item => (item.id === taskId ? mergeTaskPatch(item, patch, []) : item)));
+      };
+
+      const runTask = async () => {
+        try {
+          let eligibleGroups = speechGroupsForModel(route.model, speechGroupsByModel);
+          if (!speechGroupsLoaded || !eligibleGroups.some(group => group.id === route.groupId)) {
+            const discoveryController = new AbortController();
+            const timeout = window.setTimeout(() => discoveryController.abort(), IMAGE_GROUP_DISCOVERY_TIMEOUT_MS);
+            try {
+              const discovered = await fetchSpeechGroupsByModel(discoveryController.signal);
+              setSpeechGroupsByModel(discovered);
+              setSpeechGroupsLoaded(true);
+              eligibleGroups = speechGroupsForModel(route.model, discovered);
+            } catch {
+              updateTask({ status: 'failed', error: sp('no_group'), errorCode: 'speech_group_missing' });
+              return;
+            } finally {
+              window.clearTimeout(timeout);
+            }
+          }
+          if (!eligibleGroups.some(group => group.id === route.groupId)) {
+            updateTask({ status: 'failed', error: sp('no_group'), errorCode: 'speech_group_missing' });
+            return;
+          }
+          const result = await api.synthesizeSpeech({
+            text: trimmed,
+            model: route.model,
+            voice_id: voiceId || undefined,
+            speed,
+            format: SPEECH_FORMAT,
+            language_boost: voiceId ? speechLanguageBoostFor(voiceId) : undefined,
+            group_id: route.groupId,
+            project_id: targetProjectID > ALL_VIEW_ID ? targetProjectID : undefined,
+          });
+          if (deletedLocalTaskIDsRef.current.has(taskId)) {
+            // 用户在合成期间删掉了这张卡：后端已落库的记录一并删掉，别在下次刷新时冒出来。
+            if (result.asset && result.project_id > 0) {
+              deletedProjectAssetIDsRef.current.add(result.asset.id);
+              void api.deleteProjectAsset(result.project_id, result.asset.id).catch(() => {});
+            }
+            return;
+          }
+          const item = speechResultToGallery(result, trimmed);
+          const persistedProjectID = result.project_id > 0 ? result.project_id : targetProjectID;
+          prependGalleryForTarget(persistedProjectID, [item], taskId);
+          updateTask({ status: 'completed', result: [item], projectId: persistedProjectID });
+        } catch (err) {
+          updateTask({
+            status: 'failed',
+            error: errorMessageFromUnknown(err, pollErrorMessages.failed),
+            errorCode: errorCodeFromUnknown(err),
+          });
+        } finally {
+          activeCountRef.current -= 1;
+          if (activeCountRef.current <= 0) {
+            activeCountRef.current = 0;
+            setIsGenerating(false);
+          }
+        }
+      };
+      void runTask();
+      return true;
+    },
+    [
+      speechModelId,
+      speechVoiceId,
+      speechSpeed,
+      speechGroupsByModel,
+      speechGroupsLoaded,
+      selectedSpeechGroupId,
+      pollErrorMessages,
+      prependGalleryForTarget,
+      sp,
+    ],
+  );
+
   // ── Gallery helpers ───────────────────────────────────────────────────────
 
   const deleteTask = useCallback(async (uiId: string): Promise<void> => {
@@ -2516,8 +2886,16 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const expectedViewEpoch = galleryViewEpochRef.current;
     const expectedProjectID = activeProjectIdRef.current;
     // 项目视图条目：删 studio_assets 记录（不动底层 host task / 资产对象，可能被「全部」视图共享）。
-    if (item.assetId && activeProjectIdRef.current >= 1) {
-      const projectId = activeProjectIdRef.current;
+    // 语音资产没有 host task，在「全部」视图里也只能按记录自带的项目删。
+    const isAudio = item.mediaType === 'audio';
+    const assetProjectId = isAudio ? (item.projectId ?? 0) : activeProjectIdRef.current;
+    if (isAudio && (!item.assetId || assetProjectId < 1)) {
+      // 会话内未持久化的语音（项目存储未配置）：只从画面移除。
+      setGallery(prev => prev.filter(g => g.id !== id));
+      return;
+    }
+    if (item.assetId && assetProjectId >= 1) {
+      const projectId = assetProjectId;
       const hadAssetTombstone = deletedProjectAssetIDsRef.current.has(item.assetId);
       deletedProjectAssetIDsRef.current.add(item.assetId);
       setGallery(prev => prev.filter(g => g.id !== id));
@@ -2566,8 +2944,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [deleteTask, gallery, markRemoteTaskIDsDeleted, restoreRemoteTaskDeletion, tasks]);
 
   const applyAsReference = useCallback((item: GalleryItem) => {
-    // 视频不能作图像参考。
-    if (item.mediaType === 'video') return;
+    // 视频 / 音频不能作图像参考。
+    if (item.mediaType === 'video' || item.mediaType === 'audio') return;
     // Dedupe-append rather than replace so multiple gallery items accumulate.
     setReferenceImages(prev => prev.includes(item.url) ? prev : [...prev, item.url]);
     setImageMode('img2img');
@@ -2575,6 +2953,16 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const regenerate = useCallback((item: GalleryItem) => {
     const route = galleryItemRoute(item);
+    if (item.mediaType === 'audio' || item.mode === 'speech') {
+      setMediaType('audio');
+      if (route && isSpeechModelId(route.model)) setSpeechModelId(route.model);
+      generateSpeech(item.prompt, {
+        route,
+        voiceId: item.voiceId,
+        speed: item.speed,
+      });
+      return;
+    }
     if (item.mediaType === 'video' || item.mode === 'video') {
       setMediaType('video');
       if (route && VIDEO_MODEL_REGISTRY.some(m => m.id === route.model)) setVideoModelId(route.model);
@@ -2600,11 +2988,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       route,
       sourceImage,
     });
-  }, [generate, generateVideo, selectModelRoute, setVideoModelId, setSelectedModelKey, setImageMode, setImageSize]);
+  }, [generate, generateSpeech, generateVideo, selectModelRoute, setSpeechModelId, setVideoModelId, setSelectedModelKey, setImageMode, setImageSize]);
 
   // variations —— 「变体」：同 prompt 出 4 张（gpt-image-2 无固定 seed，自然各异），复用批量路径。
   const variations = useCallback((item: GalleryItem) => {
-    if (item.mediaType === 'video' || item.mode === 'video') {
+    if (item.mediaType === 'video' || item.mode === 'video' || item.mediaType === 'audio' || item.mode === 'speech') {
       regenerate(item);
       return;
     }
@@ -2795,6 +3183,20 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setSelectedVideoGroupId,
     videoBudget,
     generateVideo,
+    speechAvailable,
+    availableSpeechModels,
+    speechModelId,
+    setSpeechModelId,
+    speechVoiceId,
+    setSpeechVoiceId,
+    speechSpeed,
+    setSpeechSpeed,
+    speechGroups,
+    speechGroupsLoaded,
+    speechRouteReady,
+    selectedSpeechGroupId,
+    setSelectedSpeechGroupId,
+    generateSpeech,
     currentModel,
     selectedModelKey,
     setSelectedModelKey,
