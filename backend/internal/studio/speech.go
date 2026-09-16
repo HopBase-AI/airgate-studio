@@ -73,9 +73,7 @@ const (
 	// OpenAI 入口的缺省一致（2026-09-16 对上游实测可用）。
 	speechDefaultVoiceID    = "English_expressive_narrator"
 	speechDefaultVoiceIDHan = "Chinese (Mandarin)_News_Anchor"
-	// cantoneseVoicePrefix / cantoneseLanguageBoost 粤语音色必须带 language_boost，
-	// 否则上游按普通话处理。
-	cantoneseVoicePrefix   = "Cantonese_"
+	// cantoneseLanguageBoost 粤语音色必须带 language_boost，否则上游按普通话处理。
 	cantoneseLanguageBoost = "Chinese,Yue"
 
 	maxSpeechVoiceIDLen       = 128
@@ -187,6 +185,53 @@ func speechBillableCharacters(text string) int64 {
 	return count
 }
 
+// speechVoiceLanguageBoosts 音色 ID 的语言前缀（第一个下划线之前的那段）→ 官方
+// language_boost 取值。官方系统音色列表里共 24 个语言前缀，除两个中文变体外前缀名与
+// language_boost 枚举值同形：
+//
+//	普通话音色前缀是 "Chinese (Mandarin)_"，枚举值却是 "Chinese"；
+//	粤语前缀 "Cantonese_" 对应 "Chinese,Yue"。
+//
+// 取值必须落在官方枚举内（见 speech_test.go 的 officialLanguageBoostEnum 守卫）——
+// 传枚举外的字符串上游直接 2013 invalid params，宁可不补也不能臆造。
+var speechVoiceLanguageBoosts = map[string]string{
+	"Chinese (Mandarin)": "Chinese",
+	"Cantonese":          cantoneseLanguageBoost,
+	"English":            "English",
+	"Japanese":           "Japanese",
+	"Korean":             "Korean",
+	"Spanish":            "Spanish",
+	"Portuguese":         "Portuguese",
+	"French":             "French",
+	"Indonesian":         "Indonesian",
+	"German":             "German",
+	"Russian":            "Russian",
+	"Italian":            "Italian",
+	"Dutch":              "Dutch",
+	"Vietnamese":         "Vietnamese",
+	"Arabic":             "Arabic",
+	"Turkish":            "Turkish",
+	"Ukrainian":          "Ukrainian",
+	"Thai":               "Thai",
+	"Polish":             "Polish",
+	"Romanian":           "Romanian",
+	"Greek":              "Greek",
+	"Czech":              "Czech",
+	"Finnish":            "Finnish",
+	"Hindi":              "Hindi",
+}
+
+// speechLanguageBoostFor 按音色 ID 前缀推导 language_boost；认不出前缀就返回空串
+// （官方列表里 "Arrogant_Miss" / "Robot_Armor" 这类无语言前缀的音色即走这条路），
+// 让上游自己识别语种，不乱补。
+func speechLanguageBoostFor(voiceID string) string {
+	prefix, _, ok := strings.Cut(voiceID, "_")
+	if !ok {
+		return ""
+	}
+	return speechVoiceLanguageBoosts[prefix]
+}
+
 // speechDefaultVoiceFor 按文本内容挑默认音色：含汉字用普通话音色，否则英文音色。
 func speechDefaultVoiceFor(text string) string {
 	for _, r := range text {
@@ -255,7 +300,8 @@ func planSpeech(req speechRequest) (speechPlan, error) {
 	plan.ContentType = spec.contentType
 	plan.FileExt = spec.ext
 
-	voice := strings.TrimSpace(req.VoiceID)
+	requestedVoice := strings.TrimSpace(req.VoiceID)
+	voice := requestedVoice
 	if voice == "" {
 		voice = speechDefaultVoiceFor(plan.Text)
 	}
@@ -265,8 +311,15 @@ func planSpeech(req speechRequest) (speechPlan, error) {
 	plan.VoiceID = voice
 
 	boost := strings.TrimSpace(req.LanguageBoost)
-	if boost == "" && strings.HasPrefix(voice, cantoneseVoicePrefix) {
-		boost = cantoneseLanguageBoost
+	if boost == "" {
+		// language_boost 官方语义是「文本是哪门语言」的提示。界面已经讲明音色只决定
+		// 口音、不做翻译，挑了某语言的母语音色就意味着文本也是那门语言——据此自动补，
+		// 否则上游语种判定会飘、发音不准（粤语一直如此，这里推广到全部语言前缀）。
+		//
+		// 只对**显式选定**的音色推导：voice_id 留空走的是「按文本语言自动选音色」，
+		// 那只是含汉字→普通话、否则英文的粗猜（日文假名文本就会落到英文音色），
+		// 拿这个猜测去钉死语种反而会压掉上游本来更准的自动识别。
+		boost = speechLanguageBoostFor(requestedVoice)
 	}
 	if utf8.RuneCountInString(boost) > maxSpeechLanguageBoostLen || hasControlRune(boost) {
 		return plan, speechInvalid(errCodeSpeechInvalidParameter, "language_boost must be at most %d printable characters", maxSpeechLanguageBoostLen)

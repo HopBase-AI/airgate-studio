@@ -100,6 +100,16 @@ describe('speech strings', () => {
     }
   });
 
+  // 语言 chip 只是按配音员母语筛选；缺了这行说明，用户会以为切语言=翻译文本
+  // （2026-09-16：选了 Spanish_CaptivatingStoryteller 念中文文案，以为功能坏了）。
+  it('ships a non-empty disambiguation hint for the voice language filter in all five languages', () => {
+    for (const lang of ['zh', 'en', 'ja', 'zh-HK', 'es'] as const) {
+      expect(SPEECH_STRINGS[lang].voice_lang_filter.trim().length).toBeGreaterThan(0);
+      // 说明要真的解释清楚，一两个词糊弄不过去。
+      expect(SPEECH_STRINGS[lang].voice_lang_hint.trim().length).toBeGreaterThan(20);
+    }
+  });
+
   it('never mentions supply-side vocabulary in user-facing copy', () => {
     for (const lang of ['zh', 'en', 'ja', 'zh-HK', 'es'] as const) {
       for (const value of Object.values(SPEECH_STRINGS[lang])) {
