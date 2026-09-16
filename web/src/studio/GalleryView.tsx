@@ -8,24 +8,25 @@ import { downloadImage } from '../utils';
 import { getExpiryNotice, isVideoExpired, VIDEO_URL_TTL_MS } from './expiry';
 import { estimateEtaSeconds, etaDisplayState, formatElapsedCompact, formatEtaLabel } from './etaStats';
 import { useVideoStrings } from './video/videoConfig';
-import { videoFailureHintKey, videoFailureShowsRawMessage } from './video/failureHints';
+import { failureHintKey, failureShowsRawMessage } from './video/failureHints';
 
 type NearViewportListener = (near: boolean) => void;
 
 const nearViewportListeners = new Map<Element, NearViewportListener>();
 let nearViewportObserver: IntersectionObserver | null = null;
 
-// TaskFailureText 失败卡的错误文案：视频任务优先按执行器分类码给可执行提示
-// （如「关闭生成音频后重试」），上游原文退居 tooltip；图片或未知码则原样显示。
-// 余额不足是例外：服务端原文里的「可用 / 在途预留 / 本条预估」三个金额要跟着提示
-// 一起摆在卡片上（见 videoFailureShowsRawMessage），tooltip 在触屏上等于没有。
+// TaskFailureText 失败卡的错误文案：图片与视频任务一律优先按执行器分类码给当前界面
+// 语言的可执行提示（如「关闭生成音频后重试」），插件写的英文原文退居 tooltip；
+// 映射不到的码才原样显示原文。参数类失败与余额不足是例外：服务端原文里的具体参数、
+// 上限或「可用 / 在途预留 / 本条预估」三个金额要跟着提示一起摆在卡片上
+// （见 failureShowsRawMessage），tooltip 在触屏上等于没有。
 function TaskFailureText({ task }: { task: StudioGenerationTask }) {
   const vs = useVideoStrings();
-  const hintKey = task.mode === 'video' ? videoFailureHintKey(task.errorCode) : undefined;
+  const hintKey = failureHintKey(task.errorCode);
   const text = hintKey ? vs(hintKey) : (task.error ?? '');
   const rawMessage = task.error?.trim() ?? '';
   const showsRaw = hintKey != null && rawMessage !== '' && rawMessage !== text
-    && videoFailureShowsRawMessage(task.errorCode);
+    && failureShowsRawMessage(task.errorCode);
   return (
     <>
       <div style={taskCardStyles.errorText} title={hintKey ? task.error : undefined}>
