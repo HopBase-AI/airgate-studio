@@ -394,6 +394,30 @@ function generationTaskError(task: GenerationTask, fallback = 'Image generation 
   return stringsTrim(task.error_message) || fallback;
 }
 
+// GenerationTaskFailure 远端任务失败终态：把执行器写的 error_code 随异常一起带出轮询循环，
+// 否则 catch 里只剩英文原文，失败卡就没法按界面语言给提示（2026-09-16 图片任务的实际断点）。
+class GenerationTaskFailure extends Error {
+  code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = 'GenerationTaskFailure';
+    this.code = code;
+  }
+}
+
+function generationTaskFailure(task: GenerationTask, fallback: string): GenerationTaskFailure {
+  return new GenerationTaskFailure(generationTaskError(task, fallback), stringsTrim(task.error_code) || undefined);
+}
+
+// errorCodeFromUnknown 从异常里取失败分类码：远端任务失败带 error_code；创建请求被
+// 服务端拒绝（ApiRequestError）带响应体的 code，402 余额预检没给 code 时按余额不足处理。
+function errorCodeFromUnknown(err: unknown): string | undefined {
+  if (err instanceof GenerationTaskFailure) return err.code;
+  if (err instanceof ApiRequestError) return err.code || (err.status === 402 ? 'insufficient_balance' : undefined);
+  return undefined;
+}
+
 function failedTaskPatchFromRemote(task: GenerationTask, fallback = 'Task failed'): Partial<StudioGenerationTask> {
   return {
     status: 'failed',
@@ -696,13 +720,13 @@ async function pollGenerationTask(
       onPoll?.(task);
       if (task.status === 'completed') return task;
       if (isRemoteTaskFailed(task.status)) {
-        throw new Error(generationTaskError(task, errorMessages.failed));
+        throw generationTaskFailure(task, errorMessages.failed);
       }
       if (hasTerminalRemoteError(task)) {
-        throw new Error(generationTaskError(task, errorMessages.failed));
+        throw generationTaskFailure(task, errorMessages.failed);
       }
       if (!isRemoteTaskActive(task.status)) {
-        throw new Error(generationTaskError(task, errorMessages.stopped(task.status)));
+        throw generationTaskFailure(task, errorMessages.stopped(task.status));
       }
     }
     const backoff = networkErrors > 0 ? Math.min(POLL_INTERVAL_MS * 2, 6000) : POLL_INTERVAL_MS;
@@ -721,13 +745,13 @@ async function waitForGenerationTask(
   onPoll?.(task);
   if (task.status === 'completed') return task;
   if (isRemoteTaskFailed(task.status)) {
-    throw new Error(generationTaskError(task, errorMessages.failed));
+    throw generationTaskFailure(task, errorMessages.failed);
   }
   if (hasTerminalRemoteError(task)) {
-    throw new Error(generationTaskError(task, errorMessages.failed));
+    throw generationTaskFailure(task, errorMessages.failed);
   }
   if (!isRemoteTaskActive(task.status)) {
-    throw new Error(generationTaskError(task, errorMessages.stopped(task.status)));
+    throw generationTaskFailure(task, errorMessages.stopped(task.status));
   }
   return pollGenerationTask(task.id, signal, maxAttempts, onPoll, errorMessages);
 }
@@ -1555,7 +1579,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             setTasks(prev =>
               prev.map(gt =>
                 gt.id === taskUiId
-                  ? mergeTaskPatch(gt, { status: 'failed', error: msg }, [t.id])
+                  ? mergeTaskPatch(gt, { status: 'failed', error: msg, errorCode: errorCodeFromUnknown(err) }, [t.id])
                   : gt,
               ),
             );
@@ -1799,7 +1823,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               : gt));
           } else {
             setTasks(prev => prev.map(gt => gt.id === uiTask.id
-              ? mergeTaskPatch(gt, { status: 'failed', error: generationTaskError(remote, pollErrorMessages.stopped(remote.status)) }, [remote.id])
+              ? mergeTaskPatch(gt, { status: 'failed', error: generationTaskError(remote, pollErrorMessages.stopped(remote.status)), errorCode: stringsTrim(remote.error_code) || undefined }, [remote.id])
               : gt));
           }
         } catch (err) {
@@ -2144,7 +2168,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             updateTask({ status: 'failed', error: t('playground.studio_error_generation_cancelled') });
           } else {
             const msg = errorMessageFromUnknown(err, t('playground.studio_error_generation_failed'));
-            updateTask({ status: 'failed', error: msg });
+            updateTask({ status: 'failed', error: msg, errorCode: errorCodeFromUnknown(err) });
           }
         } finally {
           if (abortRef.current === controller) abortRef.current = null;
@@ -2367,7 +2391,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               errorCode: err.code || 'insufficient_balance',
             });
           } else {
-            updateTask({ status: 'failed', error: errorMessageFromUnknown(err, pollErrorMessages.failed) });
+            updateTask({
+              status: 'failed',
+              error: errorMessageFromUnknown(err, pollErrorMessages.failed),
+              errorCode: errorCodeFromUnknown(err),
+            });
           }
         } finally {
           activeCountRef.current -= 1;
