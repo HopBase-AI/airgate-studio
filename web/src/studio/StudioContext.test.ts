@@ -4,10 +4,12 @@ import type { GalleryItem } from './types';
 import {
   canonicalVideoRoute,
   filterDeletedGalleryItems,
+  imageEditSources,
   isExpectedGalleryView,
   isGalleryTargetVisible,
   mergeGalleryItems,
   remoteTaskProjectID,
+  remoteTaskReferences,
 } from './StudioContext';
 import { LEGACY_SEEDANCE25_MODEL_ID, VIDEO_MODEL_IDS } from './video/videoConfig';
 
@@ -115,5 +117,50 @@ describe('historical video route compatibility', () => {
       groupId: 42,
       size: '720p',
     });
+  });
+});
+
+// 2026-09-16 生产 #58490：失败卡「重试」只带 mode: 'img2img' 不带图，参考图又是作图框本地
+// 上传（不在 context 的 referenceImages 里），结果 operation=edit 却没 images。这里钉死
+// 参考图的取源顺序与「edit / inpaint 没图 = 空数组」（generate 据此在提交前拦下）。
+describe('imageEditSources', () => {
+  const gallery = ['https://example.test/gallery.png'];
+
+  it('returns nothing for modes that do not take a reference image', () => {
+    expect(imageEditSources('text2img', gallery, { sourceImage: 'data:image/png;base64,x' })).toEqual([]);
+    expect(imageEditSources('batch', gallery, { sourceImages: gallery })).toEqual([]);
+  });
+
+  it('prefers caller-passed sources over the single source and the gallery references', () => {
+    const passed = ['/assets-runtime/task-input/1/a.png', '/assets-runtime/task-input/1/b.png'];
+    expect(imageEditSources('img2img', gallery, { sourceImages: passed, sourceImage: 'ignored' })).toEqual(passed);
+    expect(imageEditSources('inpaint', gallery, { sourceImage: 'data:image/png;base64,y' })).toEqual(['data:image/png;base64,y']);
+    expect(imageEditSources('img2img', gallery)).toEqual(gallery);
+  });
+
+  it('is empty when a retry carries only the mode and no reference is left anywhere', () => {
+    expect(imageEditSources('img2img', [], { sourceImages: [] })).toEqual([]);
+    expect(imageEditSources('inpaint', [], undefined)).toEqual([]);
+  });
+});
+
+// 刷新后失败卡是从服务端恢复的，重试要带的参考素材只剩服务端的 input_*；没有的键必须不出现，
+// 否则恢复结果 spread 到同源本地任务时会把本地记的参考图抹成 undefined。
+describe('remoteTaskReferences', () => {
+  it('carries the server-side reference media back onto the recovered task', () => {
+    expect(remoteTaskReferences({
+      input_images: ['/assets-runtime/task-input/7035/a.png'],
+      input_videos: ['/assets-runtime/task-input/7035/b.mp4'],
+      input_audios: ['/assets-runtime/task-input/7035/c.mp3'],
+    } as GenerationTask)).toEqual({
+      referenceImages: ['/assets-runtime/task-input/7035/a.png'],
+      referenceVideos: ['/assets-runtime/task-input/7035/b.mp4'],
+      referenceAudios: ['/assets-runtime/task-input/7035/c.mp3'],
+    });
+  });
+
+  it('omits every key the server did not record instead of spreading undefined', () => {
+    expect(remoteTaskReferences({ input_images: [] as string[] } as GenerationTask)).toEqual({});
+    expect(Object.keys(remoteTaskReferences({} as GenerationTask))).toEqual([]);
   });
 });

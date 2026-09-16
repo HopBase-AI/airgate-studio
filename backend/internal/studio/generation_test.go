@@ -485,6 +485,76 @@ func TestHandleCreateGenerationTaskRejectsSeedream4K(t *testing.T) {
 	}
 }
 
+func TestValidateEditReferenceInputs(t *testing.T) {
+	source := generationInput{Type: "image", Role: "source", URL: "/assets-runtime/task-input/1/a.png"}
+	mask := generationInput{Type: "image", Role: "mask", URL: "data:image/png;base64,mask"}
+	cases := []struct {
+		name      string
+		kind      string
+		operation string
+		inputs    []generationInput
+		wantErr   bool
+	}{
+		{name: "edit without inputs", kind: "image", operation: "edit", wantErr: true},
+		{name: "inpaint without inputs", kind: "image", operation: "inpaint", wantErr: true},
+		{name: "edit with only a mask input", kind: "image", operation: "edit", inputs: []generationInput{mask}, wantErr: true},
+		{name: "edit with empty url", kind: "image", operation: "edit", inputs: []generationInput{{Type: "image", Role: "source"}}, wantErr: true},
+		{name: "edit with source", kind: "image", operation: "edit", inputs: []generationInput{source}},
+		{name: "inpaint with source and mask", kind: "image", operation: "inpaint", inputs: []generationInput{source, mask}},
+		{name: "generate without inputs", kind: "image", operation: "generate"},
+		{name: "video generate without inputs", kind: "video", operation: "generate"},
+		{name: "video edit without inputs is not this validator's concern", kind: "video", operation: "edit"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateEditReferenceInputs(createGenerationTaskRequest{Kind: tc.kind, Operation: tc.operation, Inputs: tc.inputs})
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "requires at least one reference image") {
+				t.Fatalf("error = %q, want reference-image-required message", err.Error())
+			}
+		})
+	}
+}
+
+// 编辑模式没带参考图必须在建任务之前就 400，并带分类码让前端按五语提示渲染；
+// 不能像 2026-09-16 那样 202 建成任务、再由执行插件以 bad_request 失败。
+func TestHandleCreateGenerationTaskRejectsEditWithoutReferenceImage(t *testing.T) {
+	for _, operation := range []string{"edit", "inpaint"} {
+		t.Run(operation, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/generation-tasks", strings.NewReader(`{
+				"kind":"image",
+				"operation":"`+operation+`",
+				"platform":"openai",
+				"model":"gpt-image-2",
+				"prompt":"replace the background",
+				"parameters":{"size":"1024x1024"}
+			}`))
+			recorder := httptest.NewRecorder()
+
+			(&StudioPlugin{}).handleCreateGenerationTask(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d (body %s)", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body["code"] != errCodeReferenceImageRequired || body["error_code"] != errCodeReferenceImageRequired {
+				t.Fatalf("body = %v, want code/error_code %q", body, errCodeReferenceImageRequired)
+			}
+			if !strings.Contains(body["error"], "requires at least one reference image") {
+				t.Fatalf("error = %q, want reference-image-required message", body["error"])
+			}
+		})
+	}
+}
+
 // gateway-seedance 把参考图地址原样交给上游拉取，而 core 会把 ≥16KB 的
 // data:image/* 换成 /assets-runtime/... 相对地址。没有对外基地址，生图编辑任务
 // 会以「参考图是相对地址但任务未携带 public_base」失败——这是图生图必须依赖的一环。

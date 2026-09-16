@@ -339,7 +339,9 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
     else if (task.model) setSelectedModelKey(task.routeKey ?? task.model, task.platform);
     if (task.size) setImageSize(task.size);
     setImageMode(mode);
-    if (generate(task.prompt, { mode, route: retryRoute, projectId: task.projectId })) {
+    // 图生图 / 局部重绘的参考图沿用任务记录的那份：作图框本地上传的图不在 context 的
+    // referenceImages 里，不带的话重试会以 edit 无图提交（2026-09-16 生产 #58490）。
+    if (generate(task.prompt, { mode, route: retryRoute, projectId: task.projectId, sourceImages: task.referenceImages })) {
       void deleteTask(task.id).catch(() => {});
     }
   };

@@ -496,6 +496,29 @@ func resolveTaskType(kind, operation string) string {
 	}
 }
 
+// errCodeReferenceImageRequired 是 edit / inpaint 缺参考图时回给前端的分类码；前端
+// web/src/studio/video/failureHints.ts 把它映射到五语的 fail_reference_required。
+const errCodeReferenceImageRequired = "reference_image_required"
+
+// validateEditReferenceInputs 建任务前拦住「编辑模式却没带参考图」的请求。2026-09-16 生产
+// 有过 operation=edit 而 input 里完全没有 images 的任务（前端失败卡「重试」丢了参考图），
+// 任务照样 202 建成，直到执行插件才以 bad_request 失败——校验类错误要在建任务之前给回，
+// 不该占一条任务再失败。只看图片任务：视频的参考素材规则在 validateReferenceInputs。
+func validateEditReferenceInputs(req createGenerationTaskRequest) error {
+	if req.Kind == "video" {
+		return nil
+	}
+	switch req.Operation {
+	case "edit", "inpaint":
+	default:
+		return nil
+	}
+	if len(extractImageInputs(req.Inputs)) > 0 {
+		return nil
+	}
+	return fmt.Errorf("image %s requires at least one reference image", req.Operation)
+}
+
 func buildTaskInput(req createGenerationTaskRequest) map[string]interface{} {
 	input := map[string]interface{}{
 		"prompt": req.Prompt,

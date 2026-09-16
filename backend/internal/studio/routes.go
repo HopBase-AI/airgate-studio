@@ -142,6 +142,14 @@ func (p *StudioPlugin) handleCreateGenerationTask(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := validateEditReferenceInputs(req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":      err.Error(),
+			"code":       errCodeReferenceImageRequired,
+			"error_code": errCodeReferenceImageRequired,
+		})
+		return
+	}
 	if isVideo {
 		if err := validateReferenceResolution(req.Model, req.Parameters, req.Inputs); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
