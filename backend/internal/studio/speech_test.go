@@ -6,11 +6,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
@@ -127,8 +131,13 @@ func TestBuildSpeechUpstreamBody(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["model"] != speechModelHD || payload["text"] != "早晨" || payload["stream"] != false || payload["output_format"] != "hex" {
+	if payload["model"] != speechModelHD || payload["text"] != "早晨" || payload["stream"] != true || payload["output_format"] != "hex" {
 		t.Fatalf("payload = %v", payload)
+	}
+	// 没有 exclude_aggregated_audio，末帧会重发整段聚合音频，流式就白走了。
+	options, _ := payload["stream_options"].(map[string]any)
+	if options["exclude_aggregated_audio"] != true {
+		t.Fatalf("stream_options = %v", payload["stream_options"])
 	}
 	if payload["language_boost"] != cantoneseLanguageBoost {
 		t.Fatalf("language_boost = %v", payload["language_boost"])
@@ -143,15 +152,30 @@ func TestBuildSpeechUpstreamBody(t *testing.T) {
 	}
 }
 
-func TestParseSpeechUpstreamBody(t *testing.T) {
+func TestParseSpeechEvent(t *testing.T) {
 	audio := []byte{0xFF, 0xFB, 0x90, 0x00, 0x01, 0x02}
 	ok := []byte(`{"data":{"audio":"` + hex.EncodeToString(audio) + `","status":2},"extra_info":{"audio_length":1234,"audio_size":6,"usage_characters":13,"audio_format":"mp3"},"base_resp":{"status_code":0,"status_msg":"success"}}`)
-	result, failure := parseSpeechUpstreamBody(ok)
+	event, failure := parseSpeechEvent(ok)
 	if failure != nil {
 		t.Fatalf("unexpected failure: %+v", failure)
 	}
-	if !bytes.Equal(result.Audio, audio) || result.UsageCharacters != 13 || result.AudioLengthMs != 1234 || result.AudioSizeBytes != 6 || result.AudioFormat != "mp3" {
-		t.Fatalf("result = %+v", result)
+	if !bytes.Equal(event.Audio, audio) || !event.Final || !event.HasExtra {
+		t.Fatalf("event = %+v", event)
+	}
+	if event.UsageCharacters != 13 || event.AudioLengthMs != 1234 || event.AudioSizeBytes != 6 || event.AudioFormat != "mp3" {
+		t.Fatalf("extra_info = %+v", event)
+	}
+
+	// 中间帧：有音频、无 extra_info、不是末帧。
+	mid, failure := parseSpeechEvent([]byte(`{"data":{"audio":"fffb","status":1},"base_resp":{"status_code":0}}`))
+	if failure != nil || mid.Final || mid.HasExtra || len(mid.Audio) != 2 {
+		t.Fatalf("mid event = %+v failure = %+v", mid, failure)
+	}
+
+	// exclude_aggregated_audio 生效后的末帧：没有音频不是错误。
+	last, failure := parseSpeechEvent([]byte(`{"data":{"audio":"","status":2},"extra_info":{"usage_characters":9},"base_resp":{"status_code":0}}`))
+	if failure != nil || !last.Final || len(last.Audio) != 0 || last.UsageCharacters != 9 {
+		t.Fatalf("final event = %+v failure = %+v", last, failure)
 	}
 
 	cases := []struct {
@@ -163,18 +187,197 @@ func TestParseSpeechUpstreamBody(t *testing.T) {
 		{name: "voice not found", body: `{"data":null,"base_resp":{"status_code":2054,"status_msg":"voice id not exist"}}`, wantCode: errCodeSpeechVoiceNotFound, wantStatus: http.StatusBadRequest},
 		{name: "rate limited", body: `{"base_resp":{"status_code":1002,"status_msg":"rate limit"}}`, wantCode: "rate_limited", wantStatus: http.StatusTooManyRequests},
 		{name: "invalid params", body: `{"base_resp":{"status_code":2013,"status_msg":"invalid params"}}`, wantCode: "bad_request", wantStatus: http.StatusBadRequest},
-		{name: "no audio", body: `{"data":{"audio":""},"base_resp":{"status_code":0}}`, wantCode: errCodeSpeechNoAudio, wantStatus: http.StatusBadGateway},
 		{name: "bad hex", body: `{"data":{"audio":"zz"},"base_resp":{"status_code":0}}`, wantCode: errCodeSpeechNoAudio, wantStatus: http.StatusBadGateway},
 		{name: "not json", body: `<html>`, wantCode: errCodeSpeechForwardFailed, wantStatus: http.StatusBadGateway},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, failure := parseSpeechUpstreamBody([]byte(tc.body))
+			_, failure := parseSpeechEvent([]byte(tc.body))
 			if failure == nil {
 				t.Fatal("expected failure")
 			}
 			if failure.code != tc.wantCode || failure.status != tc.wantStatus {
 				t.Fatalf("failure = %+v, want %s/%d", failure, tc.wantCode, tc.wantStatus)
+			}
+		})
+	}
+}
+
+// feedStream 把预置分片喂给 collector，模拟 core 的 chunk 帧（分片不按 SSE 行对齐）。
+func feedStream(t *testing.T, c *speechStreamCollector, statusCode int, parts ...string) {
+	t.Helper()
+	if statusCode > 0 {
+		if err := c.consume(hostForwardChunk{StatusCode: statusCode}); err != nil {
+			t.Fatalf("consume headers: %v", err)
+		}
+	}
+	for _, part := range parts {
+		if err := c.consume(hostForwardChunk{Data: []byte(part)}); err != nil {
+			t.Fatalf("consume chunk: %v", err)
+		}
+	}
+	if err := c.consume(hostForwardChunk{Done: true}); err != nil {
+		t.Fatalf("consume done: %v", err)
+	}
+}
+
+func sseEvent(payload string) string { return "data: " + payload + "\n\n" }
+
+func TestSpeechStreamCollectorAccumulatesChunks(t *testing.T) {
+	c := &speechStreamCollector{}
+	// 故意在事件中间切开分片：core 的 chunk 帧不保证按行对齐。
+	first := sseEvent(`{"data":{"audio":"fffb","status":1},"base_resp":{"status_code":0}}`)
+	second := sseEvent(`{"data":{"audio":"9064","status":1},"base_resp":{"status_code":0}}`)
+	final := sseEvent(`{"data":{"audio":"","status":2},"extra_info":{"audio_length":2100,"audio_size":4,"usage_characters":19616,"audio_format":"mp3"},"base_resp":{"status_code":0}}`)
+	joined := first + second + final
+	feedStream(t, c, http.StatusOK, joined[:10], joined[10:len(first)+5], joined[len(first)+5:])
+
+	result, failure := c.result()
+	if failure != nil {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	if !bytes.Equal(result.Audio, []byte{0xFF, 0xFB, 0x90, 0x64}) {
+		t.Fatalf("audio = %x", result.Audio)
+	}
+	if result.UsageCharacters != 19616 || result.AudioLengthMs != 2100 || result.AudioSizeBytes != 4 || result.AudioFormat != "mp3" {
+		t.Fatalf("usage = %+v", result)
+	}
+}
+
+func TestSpeechStreamCollectorDropsAggregatedFinalAudio(t *testing.T) {
+	// 上游忽略 exclude_aggregated_audio（或老版本）时末帧会重发整段：不能再累加一次。
+	c := &speechStreamCollector{}
+	feedStream(t, c, http.StatusOK,
+		sseEvent(`{"data":{"audio":"fffb","status":1},"base_resp":{"status_code":0}}`),
+		sseEvent(`{"data":{"audio":"9064","status":1},"base_resp":{"status_code":0}}`),
+		sseEvent(`{"data":{"audio":"fffb9064","status":2},"extra_info":{"usage_characters":9},"base_resp":{"status_code":0}}`),
+	)
+	result, failure := c.result()
+	if failure != nil {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	if !bytes.Equal(result.Audio, []byte{0xFF, 0xFB, 0x90, 0x64}) {
+		t.Fatalf("audio = %x, want the stream to be kept once", result.Audio)
+	}
+}
+
+func TestSpeechStreamCollectorAcceptsSingleAggregatedEvent(t *testing.T) {
+	// 上游没按事件流回时执行插件会把整个 JSON 包成一个 data 事件：此时末帧就是整包。
+	c := &speechStreamCollector{}
+	feedStream(t, c, http.StatusOK,
+		sseEvent(`{"data":{"audio":"fffb9064","status":2},"extra_info":{"usage_characters":9,"audio_length":700},"base_resp":{"status_code":0}}`),
+	)
+	result, failure := c.result()
+	if failure != nil {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	if !bytes.Equal(result.Audio, []byte{0xFF, 0xFB, 0x90, 0x64}) || result.AudioLengthMs != 700 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestSpeechStreamCollectorFailures(t *testing.T) {
+	cases := []struct {
+		name       string
+		statusCode int
+		parts      []string
+		wantCode   string
+		wantStatus int
+	}{
+		{
+			name:       "error event mid stream",
+			statusCode: http.StatusOK,
+			parts: []string{
+				sseEvent(`{"data":{"audio":"fffb","status":1},"base_resp":{"status_code":0}}`),
+				sseEvent(`{"data":null,"base_resp":{"status_code":1002,"status_msg":"rate limit"}}`),
+			},
+			wantCode:   "rate_limited",
+			wantStatus: http.StatusTooManyRequests,
+		},
+		{
+			name:       "missing final chunk",
+			statusCode: http.StatusOK,
+			parts: []string{
+				sseEvent(`{"data":{"audio":"fffb","status":1},"base_resp":{"status_code":0}}`),
+				sseEvent(`{"data":{"audio":"9064","status":1},"base_resp":{"status_code":0}}`),
+			},
+			wantCode:   errCodeSpeechNoAudio,
+			wantStatus: http.StatusBadGateway,
+		},
+		{
+			name:       "no audio at all",
+			statusCode: http.StatusOK,
+			parts:      []string{sseEvent(`{"data":{"audio":"","status":2},"extra_info":{"usage_characters":9},"base_resp":{"status_code":0}}`)},
+			wantCode:   errCodeSpeechNoAudio,
+			wantStatus: http.StatusBadGateway,
+		},
+		{
+			name:       "empty stream",
+			statusCode: http.StatusOK,
+			parts:      []string{": keep-alive\n\n"},
+			wantCode:   errCodeSpeechForwardFailed,
+			wantStatus: http.StatusBadGateway,
+		},
+		{
+			name:       "core rejected before streaming",
+			statusCode: http.StatusServiceUnavailable,
+			parts:      []string{`{"error":{"message":"all routes failed","code":"no_available_account"}}`},
+			wantCode:   "server_error",
+			wantStatus: http.StatusBadGateway,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &speechStreamCollector{}
+			feedStream(t, c, tc.statusCode, tc.parts...)
+			_, failure := c.result()
+			if failure == nil {
+				t.Fatal("expected failure")
+			}
+			if failure.code != tc.wantCode || failure.status != tc.wantStatus {
+				t.Fatalf("failure = %+v, want %s/%d", failure, tc.wantCode, tc.wantStatus)
+			}
+			if failure.message == "" || containsHan(failure.message) {
+				t.Fatalf("client-facing message must be English: %q", failure.message)
+			}
+		})
+	}
+}
+
+// TestSpeechStreamCollectorReadsUsageID 流式 done 帧今天不带 usage_id（core 只回 usage），
+// 真带上时要能取到——这条守住契约，core 补齐后不必再改插件。
+func TestSpeechStreamCollectorReadsUsageID(t *testing.T) {
+	c := &speechStreamCollector{}
+	if err := c.consume(hostForwardChunk{UsageID: 9001, Done: true}); err != nil {
+		t.Fatal(err)
+	}
+	if c.usageID != 9001 {
+		t.Fatalf("usageID = %d", c.usageID)
+	}
+}
+
+func TestMapSpeechStreamError(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantCode   string
+		wantStatus int
+	}{
+		{name: "client error", err: status.Error(codes.InvalidArgument, "invalid request"), wantCode: "bad_request", wantStatus: http.StatusBadRequest},
+		{name: "voice client error", err: status.Error(codes.InvalidArgument, "voice id not exist"), wantCode: errCodeSpeechVoiceNotFound, wantStatus: http.StatusBadRequest},
+		{name: "quota", err: status.Error(codes.ResourceExhausted, "insufficient quota"), wantCode: "insufficient_balance", wantStatus: http.StatusPaymentRequired},
+		{name: "denied", err: status.Error(codes.PermissionDenied, "capability missing"), wantCode: "auth_failed", wantStatus: http.StatusBadGateway},
+		{name: "all routes failed", err: status.Error(codes.Unavailable, "all routes failed"), wantCode: "server_error", wantStatus: http.StatusBadGateway},
+		{name: "plain error", err: errors.New("host is not enabled"), wantCode: errCodeSpeechForwardFailed, wantStatus: http.StatusBadGateway},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			failure := mapSpeechStreamError(tc.err)
+			if failure.code != tc.wantCode || failure.status != tc.wantStatus {
+				t.Fatalf("failure = %+v, want %s/%d", failure, tc.wantCode, tc.wantStatus)
+			}
+			if failure.message == "" || containsHan(failure.message) {
+				t.Fatalf("client-facing message must be English: %q", failure.message)
 			}
 		})
 	}
@@ -207,17 +410,68 @@ func TestMapSpeechForwardFailure(t *testing.T) {
 	}
 }
 
-// speechTestHost 模拟 core：groups.list 回一个可用分组，gateway.forward 回预置应答，
-// assets.store 记下收到的字节并回 public_url。
+// speechTestHost 模拟 core：groups.list 回一个可用分组，gateway.forward 的流式调用回
+// 预置帧，assets.store 记下收到的字节并回 public_url。
+//
+// 缺省帧序列按 core 的真实形状拼：headers(forwardStatus) → chunk → done；forwardStatus
+// 为 200 时 forwardBody 被包成一个 SSE data 事件，非 200 时原样当错误体。
+// streamFrames 非空则完全接管（多帧流、中途错误帧、末帧缺失等形状）。
 type speechTestHost struct {
 	forwardStatus int
 	forwardBody   string
 	forwardErr    error
+	streamFrames  []sdk.HostStreamFrame
 	storeErr      error
 
 	forwardPayload map[string]interface{}
 	storePayload   map[string]interface{}
 	groupCalls     int
+}
+
+// fakeHostStream 回放预置帧的 sdk.HostStream。
+type fakeHostStream struct {
+	frames []sdk.HostStreamFrame
+	idx    int
+}
+
+func (s *fakeHostStream) Send(sdk.HostStreamFrame) error { return nil }
+func (s *fakeHostStream) CloseSend() error               { return nil }
+
+func (s *fakeHostStream) Recv() (*sdk.HostStreamFrame, error) {
+	if s.idx >= len(s.frames) {
+		return nil, io.EOF
+	}
+	frame := s.frames[s.idx]
+	s.idx++
+	return &frame, nil
+}
+
+// speechHeaderFrame / speechChunkFrame / speechDoneFrame 与 core host_service.go 的
+// hostStreamWriter 一致：载荷是 JSON 解码后的 map，数字一律 float64。
+func speechHeaderFrame(statusCode int) sdk.HostStreamFrame {
+	return sdk.HostStreamFrame{Event: "headers", Status: "ok", Payload: map[string]interface{}{
+		"status_code": float64(statusCode),
+		"headers":     map[string]interface{}{},
+	}}
+}
+
+func speechChunkFrame(data string) sdk.HostStreamFrame {
+	return sdk.HostStreamFrame{Event: "chunk", Payload: map[string]interface{}{"data": data}}
+}
+
+// speechDoneFrame 末帧只有 usage：core 的流式路径不回 usage_id。
+func speechDoneFrame() sdk.HostStreamFrame {
+	return sdk.HostStreamFrame{Event: "done", Status: "ok", Done: true, Payload: map[string]interface{}{
+		"usage": map[string]interface{}{"model": ""},
+	}}
+}
+
+func speechDefaultFrames(statusCode int, body string) []sdk.HostStreamFrame {
+	data := body
+	if statusCode == http.StatusOK {
+		data = sseEvent(body)
+	}
+	return []sdk.HostStreamFrame{speechHeaderFrame(statusCode), speechChunkFrame(data), speechDoneFrame()}
 }
 
 func (h *speechTestHost) Invoke(_ context.Context, req sdk.HostInvokeRequest) (*sdk.HostInvokeResponse, error) {
@@ -231,15 +485,8 @@ func (h *speechTestHost) Invoke(_ context.Context, req sdk.HostInvokeRequest) (*
 			"groups": []interface{}{map[string]interface{}{"id": float64(56), "name": "MiniMax 语音 官方直连", "platform": speechPlatform, "rate_multiplier": 4.76, "effective_rate": 4.76}},
 		}}, nil
 	case hostMethodGatewayForward:
-		h.forwardPayload = req.Payload
-		if h.forwardErr != nil {
-			return nil, h.forwardErr
-		}
-		return &sdk.HostInvokeResponse{Status: "ok", Payload: map[string]interface{}{
-			"status_code": float64(h.forwardStatus),
-			"body":        h.forwardBody,
-			"usage_id":    float64(9001),
-		}}, nil
+		// 语音必须走流式：同步整包会撞 core 的 64MB gRPC 上限（1 万字符实测回包 63MB）。
+		return nil, errors.New("speech must not use unary gateway.forward")
 	case hostMethodAssetsStore:
 		h.storePayload = req.Payload
 		if h.storeErr != nil {
@@ -255,8 +502,19 @@ func (h *speechTestHost) Invoke(_ context.Context, req sdk.HostInvokeRequest) (*
 	}
 }
 
-func (h *speechTestHost) InvokeStream(context.Context, sdk.HostStreamRequest) (sdk.HostStream, error) {
-	return nil, errors.New("not implemented")
+func (h *speechTestHost) InvokeStream(_ context.Context, req sdk.HostStreamRequest) (sdk.HostStream, error) {
+	if req.Method != hostMethodGatewayForward {
+		return nil, errors.New("unexpected host stream method " + req.Method)
+	}
+	h.forwardPayload = req.Payload
+	if h.forwardErr != nil {
+		return nil, h.forwardErr
+	}
+	frames := h.streamFrames
+	if frames == nil {
+		frames = speechDefaultFrames(h.forwardStatus, h.forwardBody)
+	}
+	return &fakeHostStream{frames: frames}, nil
 }
 
 func newSpeechTestPlugin(host sdk.Host) *StudioPlugin {
@@ -283,11 +541,15 @@ func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder) map[string]interfa
 }
 
 func TestHandleSpeechSuccessStoresDecodedAudio(t *testing.T) {
+	// 三帧流：两片音频 + 带 extra_info 的末帧（exclude_aggregated_audio 生效，末帧无音频）。
 	audio := []byte{0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x01}
-	host := &speechTestHost{
-		forwardStatus: http.StatusOK,
-		forwardBody:   `{"data":{"audio":"` + hex.EncodeToString(audio) + `","status":2},"extra_info":{"audio_length":2100,"audio_size":7,"usage_characters":9,"audio_format":"mp3"},"base_resp":{"status_code":0,"status_msg":"success"},"trace_id":"x"}`,
-	}
+	host := &speechTestHost{streamFrames: []sdk.HostStreamFrame{
+		speechHeaderFrame(http.StatusOK),
+		speechChunkFrame(sseEvent(`{"data":{"audio":"` + hex.EncodeToString(audio[:4]) + `","status":1},"base_resp":{"status_code":0}}`)),
+		speechChunkFrame(sseEvent(`{"data":{"audio":"` + hex.EncodeToString(audio[4:]) + `","status":1},"base_resp":{"status_code":0}}`)),
+		speechChunkFrame(sseEvent(`{"data":{"audio":"","status":2},"extra_info":{"audio_length":2100,"audio_size":7,"usage_characters":9,"audio_format":"mp3"},"base_resp":{"status_code":0,"status_msg":"success"}}`)),
+		speechDoneFrame(),
+	}}
 	p := newSpeechTestPlugin(host)
 
 	rec := postSpeech(t, p, `{"text":"你好，世界","model":"speech-2.8-hd","group_id":56,"speed":1.2}`)
@@ -298,8 +560,12 @@ func TestHandleSpeechSuccessStoresDecodedAudio(t *testing.T) {
 	if out["url"] != "/assets-runtime/generated/7/abc.mp3" || out["content_type"] != "audio/mpeg" || out["format"] != "mp3" {
 		t.Fatalf("response = %v", out)
 	}
-	if out["usage_characters"] != float64(9) || out["audio_length_ms"] != float64(2100) || out["audio_size_bytes"] != float64(7) || out["usage_id"] != float64(9001) {
+	if out["usage_characters"] != float64(9) || out["audio_length_ms"] != float64(2100) || out["audio_size_bytes"] != float64(7) {
 		t.Fatalf("usage fields = %v", out)
+	}
+	// core 的流式 done 帧只回 usage、不回 usage_id：字段缺席是当前契约，不是回归。
+	if _, hasUsageID := out["usage_id"]; hasUsageID {
+		t.Fatalf("usage_id must be omitted until core streams it: %v", out["usage_id"])
 	}
 	if out["voice_id"] != speechDefaultVoiceIDHan || out["speed"] != 1.2 || out["route_key"] != "minimax:speech-2.8-hd" || out["group_id"] != float64(56) {
 		t.Fatalf("route fields = %v", out)
@@ -323,8 +589,15 @@ func TestHandleSpeechSuccessStoresDecodedAudio(t *testing.T) {
 	if err := json.Unmarshal([]byte(host.forwardPayload["body"].(string)), &upstream); err != nil {
 		t.Fatalf("forward body is not JSON: %v", err)
 	}
-	if upstream["output_format"] != "hex" || upstream["stream"] != false || upstream["text"] != "你好，世界" {
+	if upstream["output_format"] != "hex" || upstream["stream"] != true || upstream["text"] != "你好，世界" {
 		t.Fatalf("upstream body = %v", upstream)
+	}
+	options, _ := upstream["stream_options"].(map[string]interface{})
+	if options["exclude_aggregated_audio"] != true {
+		t.Fatalf("stream_options = %v", upstream["stream_options"])
+	}
+	if host.forwardPayload["stream"] != true {
+		t.Fatalf("gateway.forward must be called with stream=true: %v", host.forwardPayload["stream"])
 	}
 
 	// 资产落库：解码后的原始字节、generated 保留策略、正确的 MIME 与扩展名。
@@ -399,9 +672,22 @@ func TestHandleSpeechMapsUpstreamFailures(t *testing.T) {
 		},
 		{
 			name:       "store failure after billing",
-			host:       &speechTestHost{forwardStatus: http.StatusOK, forwardBody: `{"data":{"audio":"fffb"},"base_resp":{"status_code":0}}`, storeErr: errors.New("disk full")},
+			host:       &speechTestHost{forwardStatus: http.StatusOK, forwardBody: `{"data":{"audio":"fffb","status":2},"extra_info":{"usage_characters":2},"base_resp":{"status_code":0}}`, storeErr: errors.New("disk full")},
 			wantStatus: http.StatusInternalServerError,
 			wantCode:   errCodeSpeechStoreFailed,
+		},
+		{
+			// 流式下 4xx 不再以 status_code + body 回来，而是 gRPC InvalidArgument。
+			name:       "client error surfaces as grpc status",
+			host:       &speechTestHost{forwardErr: status.Error(codes.InvalidArgument, "voice id not exist")},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   errCodeSpeechVoiceNotFound,
+		},
+		{
+			name:       "truncated stream",
+			host:       &speechTestHost{streamFrames: []sdk.HostStreamFrame{speechHeaderFrame(http.StatusOK), speechChunkFrame(sseEvent(`{"data":{"audio":"fffb","status":1},"base_resp":{"status_code":0}}`)), speechDoneFrame()}},
+			wantStatus: http.StatusBadGateway,
+			wantCode:   errCodeSpeechNoAudio,
 		},
 	}
 	for _, tc := range cases {

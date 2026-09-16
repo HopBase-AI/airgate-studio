@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -468,17 +470,7 @@ type hostForwardResponse struct {
 
 // hostForward 通过 host gateway.forward 同步调用上游 LLM（非流式）。
 func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*hostForwardResponse, error) {
-	payload := map[string]interface{}{
-		"user_id":  req.UserID,
-		"group_id": req.GroupID,
-		"model":    req.Model,
-		"method":   req.Method,
-		"path":     req.Path,
-		"headers":  headerPayload(req.Headers),
-		"body":     string(req.Body),
-		"stream":   false,
-	}
-	resp, err := hostInvoke(ctx, host, hostMethodGatewayForward, payload)
+	resp, err := hostInvoke(ctx, host, hostMethodGatewayForward, hostForwardPayload(req, false))
 	if err != nil {
 		return nil, err
 	}
@@ -487,6 +479,75 @@ func hostForward(ctx context.Context, host sdk.Host, req hostForwardRequest) (*h
 		Body:       bytesFromPayload(firstValue(resp, "body")),
 		UsageID:    int64(intFromAny(firstValue(resp, "usage_id"))),
 	}, nil
+}
+
+func hostForwardPayload(req hostForwardRequest, stream bool) map[string]interface{} {
+	return map[string]interface{}{
+		"user_id":  req.UserID,
+		"group_id": req.GroupID,
+		"model":    req.Model,
+		"method":   req.Method,
+		"path":     req.Path,
+		"headers":  headerPayload(req.Headers),
+		"body":     string(req.Body),
+		"stream":   stream,
+	}
+}
+
+// hostForwardChunk gateway.forward 流式转发的单帧（core host_service.go forwardStream）。
+//
+// 帧协议：
+//   - headers 帧：上游响应头就绪时发一次，只有 status_code / headers；200 表示真流式已开始，
+//     ≥400 表示 core 侧判决失败，随后的 chunk 是错误体原文而不是业务流；
+//   - chunk 帧：payload.data 是 core 写出的原始字节分片，**不保证按行/事件对齐**；
+//   - done 帧：Done=true，payload 里只有 usage（流式不回 usage_id，见 speech.go 的说明）。
+type hostForwardChunk struct {
+	StatusCode int
+	Data       []byte
+	UsageID    int64
+	Done       bool
+}
+
+// hostForwardStream 经 host gateway.forward 做流式转发，逐帧交给 onChunk。
+//
+// 与 hostForward 的取舍：同步转发把整个上游应答装进一条 gRPC 消息，撞 core 的
+// 64MB 上限（pluginGRPCMaxMessageBytes）就必然 ResourceExhausted，而那时上游早已
+// 产出并计费——语音合成 1 万字符实测回包 63MB，同步路径必崩。流式下每片单独成帧，
+// 整包只在插件内存里累积。
+func hostForwardStream(ctx context.Context, host sdk.Host, req hostForwardRequest, onChunk func(hostForwardChunk) error) error {
+	if host == nil {
+		return fmt.Errorf("host is not enabled")
+	}
+	stream, err := host.InvokeStream(ctx, sdk.HostStreamRequest{
+		Method:  hostMethodGatewayForward,
+		Payload: hostForwardPayload(req, true),
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stream.CloseSend() }()
+
+	for {
+		frame, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if frame == nil {
+			continue
+		}
+		chunk := hostForwardChunk{
+			StatusCode: intFromAny(firstValue(frame.Payload, "status_code", "status")),
+			Data:       textFromPayload(firstValue(frame.Payload, "data")),
+			UsageID:    int64(intFromAny(firstValue(frame.Payload, "usage_id"))),
+			Done:       frame.Done,
+		}
+		if err := onChunk(chunk); err != nil {
+			return err
+		}
+	}
 }
 
 func headerPayload(headers http.Header) map[string]interface{} {
@@ -573,6 +634,23 @@ func binaryFromPayload(value interface{}) []byte {
 		if decoded, err := base64.StdEncoding.DecodeString(v); err == nil {
 			return decoded
 		}
+		return []byte(v)
+	default:
+		body, _ := json.Marshal(v)
+		return body
+	}
+}
+
+// textFromPayload 取按契约必为文本的载荷字段（gateway.forward 流式 chunk 的 data：
+// core 侧是 string(chunk)）。不能复用 bytesFromPayload：其 base64 兜底会把恰好是
+// 合法 base64 的文本解成乱码，而 SSE 分片可以是任意文本。
+func textFromPayload(value interface{}) []byte {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case []byte:
+		return v
+	case string:
 		return []byte(v)
 	default:
 		body, _ := json.Marshal(v)

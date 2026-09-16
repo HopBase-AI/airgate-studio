@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -15,16 +16,28 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 // 语音合成（MiniMax Speech 2.8，platform=minimax）。
 //
-// 与生图 / 生视频不同，语音是**同步转发**：经 host gateway.forward 打执行插件的原生
-// POST /v1/t2a_v2（JSON 应答、data.audio 为 hex 音频），网关按 extra_info.usage_characters
-// 计费并落 usage_logs；这里把 hex 解码成字节经 assets.store 落成持久资产（purpose=generated，
+// 与生图 / 生视频不同，语音没有 host task，而是一次**流式转发**：经 host gateway.forward
+// 的 InvokeStream 打执行插件的原生 POST /v1/t2a_v2（stream=true，SSE，每个 data 事件的
+// data.audio 是该分片的 hex 音频），逐帧 hex 解码累积，网关按末帧 extra_info.usage_characters
+// 计费并落 usage_logs；这里把累积出的字节经 assets.store 落成持久资产（purpose=generated，
 // 按后台 asset_retention_generated_days 保留，0=永久），再在 studio_assets 记一条 kind=audio。
-// 不走 OpenAI 兼容的 /v1/audio/speech：二进制应答经 Host.Invoke 的 JSON 载荷要再猜一次
+//
+// 为什么必须流式（2026-09-16 生产实测）：官方上限 1 万码点的中文（19,616 计费字符）
+// 整包回应 63.25MB / 161 秒，同步路径会连撞两道 64MB 硬闸——执行插件的
+// maxSpeechResponseBytes 与 core 的 pluginGRPCMaxMessageBytes——而那时上游已经合成完并
+// 计费，用户付了钱却拿不到音频；speech-2.8-hd 同样输入直接 502。官方文档也建议超过
+// 3000 字符走流式。上游请求体必须带 stream_options.exclude_aggregated_audio=true：
+// 否则末帧会把整段音频再发一遍，流式就白走了。
+//
+// 不走 OpenAI 兼容的 /v1/audio/speech：二进制应答经 Host 的 JSON 载荷要再猜一次
 // 编码，原生 JSON 最稳。
 //
 // 客户可见文案一律英文；本地化由前端按 error_code 完成（web/src/studio/video/failureHints.ts）。
@@ -46,6 +59,14 @@ const (
 
 	speechDefaultFormat = "mp3"
 	speechOutputFormat  = "hex"
+
+	// speechSSEDataPrefix 上游是标准 SSE：`data: {...}\n\n`，无 event 名、无 [DONE] 终止事件。
+	speechSSEDataPrefix = "data:"
+	// speechFinalChunkStatus 末帧标记：data.status==2 的那一帧带 extra_info（计费与时长）。
+	speechFinalChunkStatus = 2
+	// maxSpeechStreamEventBytes 单个 SSE 事件（以及 core 判决失败时的错误体）累积上限。
+	// 分片音频的 hex 远小于此；超过说明流不是我们认识的形状，早停好过无限累积。
+	maxSpeechStreamEventBytes = 32 << 20
 
 	// speechDefaultVoiceID / speechDefaultVoiceIDHan 未指定音色时按文本语言选：含汉字用
 	// 普通话音色，否则英文音色——英文音色念中文会整段读成拼音式乱音。ID 与网关插件
@@ -254,7 +275,10 @@ func planSpeech(req speechRequest) (speechPlan, error) {
 	return plan, nil
 }
 
-// buildSpeechUpstreamBody 拼原生 t2a_v2 请求体（stream=false、output_format=hex）。
+// buildSpeechUpstreamBody 拼原生 t2a_v2 请求体（stream=true、output_format=hex）。
+//
+// stream_options.exclude_aggregated_audio=true 是关键：MiniMax 默认在末帧重发**完整聚合
+// 音频**，不关掉的话最后一帧照样是整包（1 万字符 ≈ 31MB），流式等于没走。
 func buildSpeechUpstreamBody(plan speechPlan) ([]byte, error) {
 	voice := map[string]any{
 		"voice_id": plan.VoiceID,
@@ -264,12 +288,13 @@ func buildSpeechUpstreamBody(plan speechPlan) ([]byte, error) {
 		voice["emotion"] = plan.Emotion
 	}
 	payload := map[string]any{
-		"model":         plan.Model,
-		"text":          plan.Text,
-		"stream":        false,
-		"output_format": speechOutputFormat,
-		"voice_setting": voice,
-		"audio_setting": map[string]any{"format": plan.Format},
+		"model":          plan.Model,
+		"text":           plan.Text,
+		"stream":         true,
+		"stream_options": map[string]any{"exclude_aggregated_audio": true},
+		"output_format":  speechOutputFormat,
+		"voice_setting":  voice,
+		"audio_setting":  map[string]any{"format": plan.Format},
 	}
 	if plan.LanguageBoost != "" {
 		payload["language_boost"] = plan.LanguageBoost
@@ -298,18 +323,25 @@ func (f *speechFailure) payload() map[string]any {
 	return out
 }
 
-// speechUpstreamResult 上游成功应答解析结果。
-type speechUpstreamResult struct {
-	Audio           []byte
+// speechStreamEvent 单个 SSE data 事件的解析结果。
+type speechStreamEvent struct {
+	// Audio 该事件携带的音频分片（已 hex 解码）；中间帧可能为空，末帧在
+	// exclude_aggregated_audio 生效时必为空。
+	Audio []byte
+	// Final 末帧标记：data.status==2 或带 extra_info。
+	Final bool
+	// HasExtra 该事件带 extra_info（计费字符 / 时长 / 体积的权威来源）。
+	HasExtra        bool
 	UsageCharacters int64
 	AudioLengthMs   int64
 	AudioSizeBytes  int64
 	AudioFormat     string
 }
 
-// parseSpeechUpstreamBody 解析原生应答：base_resp.status_code≠0 是失败（网关插件通常已把它
-// 转成非 200，这里再兜一层），否则 hex 解码 data.audio。
-func parseSpeechUpstreamBody(body []byte) (*speechUpstreamResult, *speechFailure) {
+// parseSpeechEvent 解析一个 SSE data 事件（同步整包应答也是同一形状，故复用）：
+// base_resp.status_code≠0 是失败（网关插件通常已把首帧失败转成非 200，这里再兜一层），
+// 否则 hex 解码 data.audio。空 audio 不是错误——流中间帧和末帧都可以没有音频。
+func parseSpeechEvent(body []byte) (*speechStreamEvent, *speechFailure) {
 	var payload struct {
 		Data *struct {
 			Audio  string `json:"audio"`
@@ -336,31 +368,220 @@ func parseSpeechUpstreamBody(body []byte) (*speechUpstreamResult, *speechFailure
 	if payload.BaseResp != nil && payload.BaseResp.StatusCode != 0 {
 		return nil, speechFailureFromBaseResp(payload.BaseResp.StatusCode, payload.BaseResp.StatusMsg)
 	}
-	if payload.Data == nil || strings.TrimSpace(payload.Data.Audio) == "" {
+	out := &speechStreamEvent{}
+	if payload.Data != nil {
+		if hexAudio := strings.TrimSpace(payload.Data.Audio); hexAudio != "" {
+			audio, err := hex.DecodeString(hexAudio)
+			if err != nil || len(audio) == 0 {
+				return nil, &speechFailure{
+					status:  http.StatusBadGateway,
+					code:    errCodeSpeechNoAudio,
+					message: "speech service returned audio data that could not be decoded",
+				}
+			}
+			out.Audio = audio
+		}
+		out.Final = payload.Data.Status == speechFinalChunkStatus
+	}
+	if payload.ExtraInfo != nil {
+		out.Final = true
+		out.HasExtra = true
+		out.UsageCharacters = payload.ExtraInfo.UsageCharacters
+		out.AudioLengthMs = payload.ExtraInfo.AudioLength
+		out.AudioSizeBytes = payload.ExtraInfo.AudioSize
+		out.AudioFormat = payload.ExtraInfo.AudioFormat
+	}
+	return out, nil
+}
+
+// speechUpstreamResult 整条流累积出的合成结果。
+type speechUpstreamResult struct {
+	Audio           []byte
+	UsageCharacters int64
+	AudioLengthMs   int64
+	AudioSizeBytes  int64
+	AudioFormat     string
+}
+
+// speechStreamCollector 逐帧累积 gateway.forward 的流式应答（帧协议见 hostForwardChunk）。
+//
+// 两条互斥的路：headers 帧报 <400 就按 SSE 累积音频；报 ≥400 说明 core 侧已判决失败，
+// 后续分片是错误体原文，交给 mapSpeechForwardFailure 分类。
+// 分片不保证按行对齐，所以行缓冲要跨帧拼。
+type speechStreamCollector struct {
+	statusCode int
+	errBody    []byte
+
+	pending []byte
+	audio   []byte
+
+	sawEvent bool
+	sawFinal bool
+	extra    speechStreamEvent
+	failure  *speechFailure
+	usageID  int64
+}
+
+// consume 消费一帧。故意不在失败时提前返回 error 掐断流：让 core 把自己的判决和
+// 记账走完，插件侧只记住第一个失败。
+func (c *speechStreamCollector) consume(chunk hostForwardChunk) error {
+	if chunk.UsageID > 0 {
+		c.usageID = chunk.UsageID
+	}
+	if chunk.StatusCode > 0 {
+		c.statusCode = chunk.StatusCode
+	}
+	if len(chunk.Data) == 0 {
+		return nil
+	}
+	if c.statusCode >= http.StatusBadRequest {
+		if len(c.errBody) < maxSpeechStreamEventBytes {
+			c.errBody = append(c.errBody, chunk.Data...)
+		}
+		return nil
+	}
+	if c.failure != nil {
+		return nil
+	}
+	c.pending = append(c.pending, chunk.Data...)
+	for {
+		idx := bytes.IndexByte(c.pending, '\n')
+		if idx < 0 {
+			break
+		}
+		line := c.pending[:idx]
+		c.pending = c.pending[idx+1:]
+		c.consumeLine(line)
+		if c.failure != nil {
+			return nil
+		}
+	}
+	if len(c.pending) > maxSpeechStreamEventBytes {
+		c.pending = nil
+		c.failure = &speechFailure{
+			status:  http.StatusBadGateway,
+			code:    errCodeSpeechForwardFailed,
+			message: "speech service returned an oversized stream event",
+		}
+	}
+	return nil
+}
+
+// consumeLine 处理一整行。非 data 行（注释、event:、空行）直接忽略，不该中断累积。
+func (c *speechStreamCollector) consumeLine(line []byte) {
+	trimmed := bytes.TrimRight(line, "\r")
+	if !bytes.HasPrefix(trimmed, []byte(speechSSEDataPrefix)) {
+		return
+	}
+	body := bytes.TrimSpace(trimmed[len(speechSSEDataPrefix):])
+	if len(body) == 0 || body[0] != '{' {
+		return
+	}
+	event, failure := parseSpeechEvent(body)
+	if failure != nil {
+		c.failure = failure
+		return
+	}
+	c.sawEvent = true
+	// 末帧原本会重发整段聚合音频（已用 exclude_aggregated_audio 关掉）。真收到时只在
+	// 之前一片都没拿到的情况下当整包用（上游没按事件流回、插件把整个 JSON 包成一个
+	// data 事件时就是这条路），否则丢弃——否则音频翻倍。
+	if len(event.Audio) > 0 && (!event.Final || len(c.audio) == 0) {
+		c.audio = append(c.audio, event.Audio...)
+	}
+	if event.Final {
+		c.sawFinal = true
+	}
+	if event.HasExtra {
+		c.extra = *event
+	}
+}
+
+// result 收流：先把最后一个可能没带换行的事件处理掉，再给出结果或失败。
+func (c *speechStreamCollector) result() (*speechUpstreamResult, *speechFailure) {
+	if c.statusCode < http.StatusBadRequest && c.failure == nil && len(c.pending) > 0 {
+		line := c.pending
+		c.pending = nil
+		c.consumeLine(line)
+	}
+	if c.statusCode >= http.StatusBadRequest {
+		return nil, mapSpeechForwardFailure(c.statusCode, c.errBody)
+	}
+	if c.failure != nil {
+		return nil, c.failure
+	}
+	if !c.sawEvent {
+		return nil, &speechFailure{
+			status:  http.StatusBadGateway,
+			code:    errCodeSpeechForwardFailed,
+			message: "speech service returned an empty stream",
+		}
+	}
+	if len(c.audio) == 0 {
 		return nil, &speechFailure{
 			status:  http.StatusBadGateway,
 			code:    errCodeSpeechNoAudio,
 			message: "speech service returned no audio data",
 		}
 	}
-	audio, err := hex.DecodeString(strings.TrimSpace(payload.Data.Audio))
-	if err != nil || len(audio) == 0 {
+	if !c.sawFinal {
+		// 末帧缺失 = 流被截断：音频不完整，上游此时也不计费（执行插件同口径），
+		// 不能把半截音频当成品交给用户。
 		return nil, &speechFailure{
 			status:  http.StatusBadGateway,
 			code:    errCodeSpeechNoAudio,
-			message: "speech service returned audio data that could not be decoded",
+			message: "speech stream ended before the final audio chunk",
 		}
 	}
-	out := &speechUpstreamResult{Audio: audio, AudioSizeBytes: int64(len(audio))}
-	if payload.ExtraInfo != nil {
-		out.UsageCharacters = payload.ExtraInfo.UsageCharacters
-		out.AudioLengthMs = payload.ExtraInfo.AudioLength
-		if payload.ExtraInfo.AudioSize > 0 {
-			out.AudioSizeBytes = payload.ExtraInfo.AudioSize
-		}
-		out.AudioFormat = payload.ExtraInfo.AudioFormat
+	out := &speechUpstreamResult{
+		Audio:           c.audio,
+		AudioSizeBytes:  int64(len(c.audio)),
+		UsageCharacters: c.extra.UsageCharacters,
+		AudioLengthMs:   c.extra.AudioLengthMs,
+		AudioFormat:     c.extra.AudioFormat,
+	}
+	if c.extra.AudioSizeBytes > 0 {
+		out.AudioSizeBytes = c.extra.AudioSizeBytes
 	}
 	return out, nil
+}
+
+// mapSpeechStreamError 流式转发的传输级错误 → 失败卡可消费的分类码。
+//
+// 与同步转发的差异（core host_service.go）：流式路径下 4xx 不再以 status_code + body
+// 回到插件，而是 gRPC status——客户端错误 InvalidArgument、余额不足 ResourceExhausted、
+// 线路全失败 Unavailable、调用方断开 Canceled。
+func mapSpeechStreamError(err error) *speechFailure {
+	message := strings.TrimSpace(err.Error())
+	st, ok := status.FromError(err)
+	if ok {
+		if msg := strings.TrimSpace(st.Message()); msg != "" {
+			message = msg
+		}
+	}
+	if message == "" {
+		message = "speech service is unavailable"
+	}
+	failure := &speechFailure{status: http.StatusBadGateway, code: errCodeSpeechForwardFailed, message: message}
+	if !ok {
+		return failure
+	}
+	switch st.Code() {
+	case codes.InvalidArgument:
+		failure.status = http.StatusBadRequest
+		if strings.Contains(strings.ToLower(message), "voice") {
+			failure.code = errCodeSpeechVoiceNotFound
+		} else {
+			failure.code = "bad_request"
+		}
+	case codes.ResourceExhausted:
+		failure.status, failure.code = http.StatusPaymentRequired, "insufficient_balance"
+	case codes.PermissionDenied, codes.Unauthenticated:
+		failure.status, failure.code = http.StatusBadGateway, "auth_failed"
+	case codes.Unavailable, codes.Internal, codes.NotFound, codes.DeadlineExceeded:
+		failure.status, failure.code = http.StatusBadGateway, "server_error"
+	}
+	return failure
 }
 
 // speechFailureFromBaseResp 旧协议「HTTP 200 + base_resp 非 0」的错误码分类
@@ -555,7 +776,8 @@ func (p *StudioPlugin) handleSpeech(w http.ResponseWriter, r *http.Request) {
 	headers.Set("Content-Type", "application/json")
 	headers.Set("X-Airgate-Platform", speechPlatform)
 	headers.Set(headerSubmitterID, strconv.FormatInt(userID, 10))
-	resp, err := hostForward(r.Context(), p.host, hostForwardRequest{
+	collector := &speechStreamCollector{}
+	if err := hostForwardStream(r.Context(), p.host, hostForwardRequest{
 		UserID:  userID,
 		GroupID: req.GroupID,
 		Model:   plan.Model,
@@ -563,30 +785,25 @@ func (p *StudioPlugin) handleSpeech(w http.ResponseWriter, r *http.Request) {
 		Path:    speechNativePath,
 		Headers: headers,
 		Body:    body,
-	})
-	if err != nil {
-		p.logger.Error("speech_forward_failed", "user_id", userID, "model", plan.Model, "group_id", req.GroupID, "error", err)
-		failure := &speechFailure{status: http.StatusBadGateway, code: errCodeSpeechForwardFailed, message: err.Error()}
+	}, collector.consume); err != nil {
+		failure := mapSpeechStreamError(err)
+		p.logger.Error("speech_forward_failed", "user_id", userID, "model", plan.Model, "group_id", req.GroupID, "code", failure.code, "error", err)
 		writeJSON(w, failure.status, failure.payload())
 		return
 	}
-	if resp.StatusCode != http.StatusOK {
-		failure := mapSpeechForwardFailure(resp.StatusCode, resp.Body)
-		p.logger.Warn("speech_upstream_rejected", "user_id", userID, "model", plan.Model, "status", resp.StatusCode, "code", failure.code, "message", failure.message)
-		writeJSON(w, failure.status, failure.payload())
-		return
-	}
-	result, failure := parseSpeechUpstreamBody(resp.Body)
+	result, failure := collector.result()
 	if failure != nil {
-		p.logger.Warn("speech_upstream_invalid", "user_id", userID, "model", plan.Model, "code", failure.code, "message", failure.message)
+		p.logger.Warn("speech_upstream_rejected", "user_id", userID, "model", plan.Model, "status", collector.statusCode, "code", failure.code, "message", failure.message)
 		writeJSON(w, failure.status, failure.payload())
 		return
 	}
 
 	stored, err := hostStoreSpeechAsset(r.Context(), p.host, userID, plan.ContentType, plan.FileExt, result.Audio)
 	if err != nil {
-		// 上游已合成并计费（usage_id 可对账），只是本地没存下来：记 ERROR 便于人工补救。
-		p.logger.Error("speech_store_failed", "user_id", userID, "model", plan.Model, "usage_id", resp.UsageID, "usage_characters", result.UsageCharacters, "size_bytes", len(result.Audio), "error", err)
+		// 上游已合成并计费，只是本地没存下来：记 ERROR 便于人工补救。
+		// 流式的 done 帧只回 usage、不回 usage_id（core 侧缺口），对账要靠
+		// user_id + model + usage_characters + 时间窗去 usage_logs 里找。
+		p.logger.Error("speech_store_failed", "user_id", userID, "model", plan.Model, "group_id", req.GroupID, "usage_id", collector.usageID, "usage_characters", result.UsageCharacters, "size_bytes", len(result.Audio), "error", err)
 		failure := &speechFailure{status: http.StatusInternalServerError, code: errCodeSpeechStoreFailed, message: "failed to store the synthesized audio"}
 		writeJSON(w, failure.status, failure.payload())
 		return
@@ -611,7 +828,7 @@ func (p *StudioPlugin) handleSpeech(w http.ResponseWriter, r *http.Request) {
 		UsageCharacters: result.UsageCharacters,
 		AudioLengthMs:   result.AudioLengthMs,
 		AudioSizeBytes:  result.AudioSizeBytes,
-		UsageID:         resp.UsageID,
+		UsageID:         collector.usageID,
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if p.svc != nil {
