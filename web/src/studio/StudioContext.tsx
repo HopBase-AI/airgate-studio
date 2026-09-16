@@ -353,6 +353,21 @@ function resolveGenerationMode(currentMode: ImageMode, options?: GenerateOptions
   return currentMode;
 }
 
+// imageEditSources 图生图 / 局部重绘的参考图来源：调用方显式传的多图 > 单图 > 画廊累积的
+// 参考图；其它模式没有参考图。generate 提交前据此判空——edit / inpaint 没有参考图就不能
+// 提交。2026-09-16 生产：失败卡「重试」只带 mode 不带图，而参考图来自作图框本地上传、
+// 不在 referenceImages 里，结果 operation=edit 却没 images，任务建成后才被上游拒掉。
+export function imageEditSources(
+  mode: ImageMode,
+  referenceImages: string[],
+  options?: Pick<GenerateOptions, 'sourceImage' | 'sourceImages'>,
+): string[] {
+  if (mode !== 'img2img' && mode !== 'inpaint') return [];
+  if (options?.sourceImages?.length) return options.sourceImages;
+  if (options?.sourceImage) return [options.sourceImage];
+  return referenceImages;
+}
+
 function taskSize(task: GenerationTask): string | undefined {
   return task.size ?? undefined;
 }
@@ -518,6 +533,19 @@ function hasDeletedRemoteTaskId(records: Record<string, number>, taskId: number 
 
 function filterDeletedRemoteTasks(taskList: GenerationTask[], records: Record<string, number>): GenerationTask[] {
   return taskList.filter(t => !hasDeletedRemoteTaskId(records, t.id));
+}
+
+// remoteTaskReferences 把服务端记录的参考素材带回恢复出的任务卡，失败卡「重试」才有图可带
+// （刷新后本地 referenceImages 已丢，只剩服务端的 input_*）。只在有值时给键：恢复结果会
+// 整体 spread 到同源的本地任务上，显式 undefined 会把本地记的那份抹掉。
+export function remoteTaskReferences(
+  task: GenerationTask,
+): Pick<StudioGenerationTask, 'referenceImages' | 'referenceVideos' | 'referenceAudios'> {
+  const refs: Pick<StudioGenerationTask, 'referenceImages' | 'referenceVideos' | 'referenceAudios'> = {};
+  if (task.input_images?.length) refs.referenceImages = task.input_images;
+  if (task.input_videos?.length) refs.referenceVideos = task.input_videos;
+  if (task.input_audios?.length) refs.referenceAudios = task.input_audios;
+  return refs;
 }
 
 function mergeTaskPatch(
@@ -1483,6 +1511,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           size: t.size,
           durationSeconds: t.duration,
           remoteTaskIds: [t.id],
+          ...remoteTaskReferences(t),
         })),
         ...inFlight.map(t => ({
           id: `r-${t.id}`,
@@ -1498,6 +1527,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           size: t.size,
           durationSeconds: t.duration,
           remoteTaskIds: [t.id],
+          ...remoteTaskReferences(t),
         })),
       ];
       setTasks(prev => {
@@ -1877,8 +1907,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         imageSize,
       );
       const route = options?.route === undefined ? selectedRoute : options.route;
+      const editSources = imageEditSources(mode, referenceImages, options);
 
-      const failLocalTask = (message: string) => {
+      const failLocalTask = (message: string, errorCode?: string) => {
         setTasks(prev => [{
           id: uid(),
           projectId: targetProjectID,
@@ -1886,6 +1917,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           mode,
           status: 'failed',
           error: message,
+          errorCode,
           createdAt: new Date().toISOString(),
           platform: route?.platform ?? selectedPlatform,
           model: route?.model ?? selectedModelId,
@@ -1895,6 +1927,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           remoteTaskIds: [],
         }, ...prev]);
       };
+
+      // edit / inpaint 没有参考图就不提交：后端同样会以 reference_image_required 400，
+      // 这里先拦住，不占一条任务、不发请求。
+      if ((mode === 'img2img' || mode === 'inpaint') && editSources.length === 0) {
+        failLocalTask(vs('fail_reference_required'), 'reference_image_required');
+        return false;
+      }
 
       if (!route) {
         failLocalTask(t('playground.studio_error_no_image_group', { platform: selectedPlatform }));
@@ -1947,6 +1986,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         routeKey: route.routeKey,
         size: route.size,
         remoteTaskIds: [],
+        // 图生图 / 局部重绘的参考图记在任务上，失败卡「重试」沿用（作图框本地上传的
+        // 图不在 referenceImages 里，不记就丢）。
+        referenceImages: editSources.length > 0 ? editSources : undefined,
       };
 
       setTasks(prev => [task, ...prev]);
@@ -2084,28 +2126,18 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               parameters: { size: route.size },
             };
 
-            if (mode === 'img2img' || mode === 'inpaint') {
-              // Source priority: caller-passed sources > caller's single source
-              // > accumulated gallery references. The reference list can hold
-              // multiple URLs now, so img2img can fan out to them all.
-              const sources = options?.sourceImages?.length
-                ? options.sourceImages
-                : options?.sourceImage
-                ? [options.sourceImage]
-                : referenceImages;
-              if (sources.length === 0 && mode === 'inpaint') throw new Error(t('playground.studio_error_inpaint_source_required'));
-              if (sources.length > 0) {
-                // 直接透传 source URL（data:、/assets-runtime/、http(s) 都行）。
-                // core 的 normalizeTaskInputAssets 只对 data:image/* 大图落盘，已经是
-                // URL 形式的会原样保留，避免"画廊 URL → 前端 fetch → data URI → 后端再落盘"
-                // 的来回搬运。
-                taskData.inputs = sources.map(url => ({ type: 'image' as const, role: 'source' as const, url }));
-              }
+            if (editSources.length > 0) {
+              // 参考图来源见 imageEditSources（提交前已保证 edit / inpaint 非空）。
+              // 直接透传 source URL（data:、/assets-runtime/、http(s) 都行）。
+              // core 的 normalizeTaskInputAssets 只对 data:image/* 大图落盘，已经是
+              // URL 形式的会原样保留，避免"画廊 URL → 前端 fetch → data URI → 后端再落盘"
+              // 的来回搬运。
+              taskData.inputs = editSources.map(url => ({ type: 'image' as const, role: 'source' as const, url }));
             }
 
             if (mode === 'inpaint' && options?.maskRegion) {
               // Inpaint is single-source by API contract; use the first reference.
-              const sourceUrl = options?.sourceImage ?? referenceImages[0] ?? '';
+              const sourceUrl = editSources[0] ?? '';
               taskData.mask = {
                 type: 'image',
                 role: 'mask',
@@ -2154,9 +2186,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               // GalleryItem.sourceUrl is single-valued; record the first source
               // so "regenerate" can seed at least one reference. Multi-ref recall
               // would need a schema change to GalleryItem.
-              sourceUrl: (mode === 'img2img' || mode === 'inpaint')
-                ? (options?.sourceImage ?? options?.sourceImages?.[0] ?? referenceImages[0] ?? undefined)
-                : undefined,
+              sourceUrl: editSources[0],
             }));
 
             prependGalleryForTarget(targetProjectID, galleryItems, taskId);
@@ -2198,6 +2228,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       prependGalleryForTarget,
       stopCreatedTaskIfDeleted,
       t,
+      vs,
     ],
   );
 
