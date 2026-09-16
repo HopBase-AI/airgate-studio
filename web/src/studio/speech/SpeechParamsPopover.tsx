@@ -130,7 +130,7 @@ export function SpeechParamsPopover({ voiceId, setVoiceId, speed, setSpeed, text
         <div ref={panelRef} style={{ ...s.panel, bottom: pos.bottom, left: pos.left, width: pos.width }} role="dialog" aria-label={sp('voice')}>
           <div style={s.section}>
             <span style={s.rowLabel}>{sp('voice')}</span>
-            <div style={s.chipRow} role="group">
+            <div style={s.chipRow} role="group" aria-label={sp('voice_lang_filter')}>
               <button type="button" style={chip(language === 'all')} onClick={() => setLanguage('all')}>
                 {sp('voice_lang_all')}
               </button>
@@ -140,6 +140,10 @@ export function SpeechParamsPopover({ voiceId, setVoiceId, speed, setSpeed, text
                 </button>
               ))}
             </div>
+            {/* 语言 chip 筛的是配音员母语，不是输出语言。光秃秃一排「西班牙语」会被读成
+                「输出西班牙语」，所以紧挨着 chip 摆一行消歧说明，并顺带把「要外语语音就
+                改文本」的正确用法讲出来（2026-09-16 用户反馈）。 */}
+            <span style={s.hint}>{sp('voice_lang_hint')}</span>
             <div style={s.voiceList} role="listbox" aria-label={sp('voice')}>
               <button
                 type="button"

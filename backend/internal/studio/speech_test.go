@@ -104,6 +104,135 @@ func TestPlanSpeechDefaults(t *testing.T) {
 	}
 }
 
+// officialLanguageBoostEnum 官方 t2a_v2 文档 language_boost 的完整可选值（2026-09-16 抄自
+// platform.minimax.io/docs/api-reference/speech-t2a-http）。枚举外的字符串上游回 2013，
+// 所以自动推导表里的每个取值都必须能在这里找到。
+var officialLanguageBoostEnum = map[string]bool{
+	"Chinese": true, "Chinese,Yue": true, "English": true, "Arabic": true, "Russian": true,
+	"Spanish": true, "French": true, "Portuguese": true, "German": true, "Turkish": true,
+	"Dutch": true, "Ukrainian": true, "Vietnamese": true, "Indonesian": true, "Japanese": true,
+	"Italian": true, "Korean": true, "Thai": true, "Polish": true, "Romanian": true,
+	"Greek": true, "Czech": true, "Finnish": true, "Hindi": true, "Bulgarian": true,
+	"Danish": true, "Hebrew": true, "Malay": true, "Persian": true, "Slovak": true,
+	"Swedish": true, "Croatian": true, "Filipino": true, "Hungarian": true, "Norwegian": true,
+	"Slovenian": true, "Catalan": true, "Nynorsk": true, "Tamil": true, "Afrikaans": true,
+	"auto": true,
+}
+
+func TestSpeechVoiceLanguageBoostsStayWithinOfficialEnum(t *testing.T) {
+	for prefix, boost := range speechVoiceLanguageBoosts {
+		if !officialLanguageBoostEnum[boost] {
+			t.Errorf("voice prefix %q maps to %q, which is not an official language_boost value", prefix, boost)
+		}
+	}
+	// 音色 ID 前缀是「第一个下划线之前」那段，键里不能自带下划线，否则永远匹配不上。
+	for prefix := range speechVoiceLanguageBoosts {
+		if strings.Contains(prefix, "_") {
+			t.Errorf("voice prefix %q must not contain an underscore", prefix)
+		}
+	}
+}
+
+func TestSpeechLanguageBoostFor(t *testing.T) {
+	cases := map[string]string{
+		// 界面精选列表里的五种语言，各取一个真实官方 ID。
+		"English_expressive_narrator":            "English",
+		"Chinese (Mandarin)_News_Anchor":         "Chinese",
+		"Japanese_IntellectualSenior":            "Japanese",
+		"Spanish_CaptivatingStoryteller":         "Spanish",
+		"Cantonese_GentleLady":                   cantoneseLanguageBoost,
+		"Chinese (Mandarin)_HK_Flight_Attendant": "Chinese",
+		// 列表外但官方有的语言前缀，走「自定义音色 ID」时同样要补上。
+		"Korean_SweetGirl":          "Korean",
+		"French_Female_News Anchor": "French",
+		"Hindi_Narrator":            "Hindi",
+		// 官方列表里少数音色没有语言前缀，认不出就不补。
+		"Arrogant_Miss": "",
+		"Robot_Armor":   "",
+		// 前缀不认识 / 压根没有下划线 / 空串，一律不补。
+		"Klingon_WarriorPoet": "",
+		"NoUnderscoreAtAll":   "",
+		"":                    "",
+		// 大小写是 ID 契约的一部分，不做容错匹配。
+		"english_expressive_narrator": "",
+		"SPANISH_SereneWoman":         "",
+	}
+	for voice, want := range cases {
+		if got := speechLanguageBoostFor(voice); got != want {
+			t.Errorf("speechLanguageBoostFor(%q) = %q, want %q", voice, got, want)
+		}
+	}
+}
+
+func TestPlanSpeechDerivesLanguageBoostFromVoice(t *testing.T) {
+	// 本次修复的主场景：西语音色 + 西语文本，前端没传 language_boost，后端补 "Spanish"。
+	es, err := planSpeech(speechRequest{Text: "Hola, mundo.", Model: speechModelHD, VoiceID: " Spanish_CaptivatingStoryteller "})
+	if err != nil {
+		t.Fatalf("planSpeech(es): %v", err)
+	}
+	if es.LanguageBoost != "Spanish" {
+		t.Fatalf("language_boost = %q, want Spanish", es.LanguageBoost)
+	}
+	// 上游请求体也要真的带上，不能只停在 plan 里。
+	body, err := buildSpeechUpstreamBody(es)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["language_boost"] != "Spanish" {
+		t.Fatalf("payload language_boost = %v, want Spanish", payload["language_boost"])
+	}
+
+	ja, err := planSpeech(speechRequest{Text: "こんにちは", Model: speechModelHD, VoiceID: "Japanese_IntellectualSenior"})
+	if err != nil {
+		t.Fatalf("planSpeech(ja): %v", err)
+	}
+	if ja.LanguageBoost != "Japanese" {
+		t.Fatalf("language_boost = %q, want Japanese", ja.LanguageBoost)
+	}
+
+	en, err := planSpeech(speechRequest{Text: "Hello there", Model: speechModelHD, VoiceID: "English_Aussie_Bloke"})
+	if err != nil {
+		t.Fatalf("planSpeech(en): %v", err)
+	}
+	if en.LanguageBoost != "English" {
+		t.Fatalf("language_boost = %q, want English", en.LanguageBoost)
+	}
+
+	// 前端显式传了就以前端为准，不被推导覆盖。
+	explicit, err := planSpeech(speechRequest{Text: "Hola", Model: speechModelHD, VoiceID: "Spanish_SereneWoman", LanguageBoost: " auto "})
+	if err != nil {
+		t.Fatalf("planSpeech(explicit): %v", err)
+	}
+	if explicit.LanguageBoost != "auto" {
+		t.Fatalf("language_boost = %q, want the caller's auto", explicit.LanguageBoost)
+	}
+
+	// 无语言前缀的官方音色：认不出就不补，交给上游自己识别。
+	unknown, err := planSpeech(speechRequest{Text: "你好", Model: speechModelHD, VoiceID: "Arrogant_Miss"})
+	if err != nil {
+		t.Fatalf("planSpeech(unknown): %v", err)
+	}
+	if unknown.LanguageBoost != "" {
+		t.Fatalf("language_boost = %q, want empty for a prefix-less voice", unknown.LanguageBoost)
+	}
+
+	// 「自动（按文本语言）」不推导：默认音色只是含汉字→普通话的粗猜，假名文本会落到
+	// 英文音色，拿它钉死语种会压掉上游更准的自动识别。
+	for _, text := range []string{"Hello there", "你好，世界", "こんにちは"} {
+		auto, err := planSpeech(speechRequest{Text: text, Model: speechModelHD})
+		if err != nil {
+			t.Fatalf("planSpeech(auto, %q): %v", text, err)
+		}
+		if auto.LanguageBoost != "" {
+			t.Errorf("auto voice for %q got language_boost %q, want empty", text, auto.LanguageBoost)
+		}
+	}
+}
+
 func TestSpeechBillableCharacters(t *testing.T) {
 	cases := map[string]int64{
 		"Hello, world.": 13,

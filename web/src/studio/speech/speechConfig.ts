@@ -84,6 +84,9 @@ export interface SpeechVoice {
   id: string;
   // 官方标签（英文），五语同形，不进字典。
   name: string;
+  // language 是这位配音员的**母语 / 口音**，不是输出语言：TTS 只朗读给定文本，不做翻译。
+  // 换音色不会把中文文案变成西班牙语——界面用 voice_lang_hint 把这点讲明（2026-09-16
+  // 用户把筛选切到「西班牙语」却仍听到中文，以为功能坏了）。
   language: SpeechVoiceLanguage;
 }
 
@@ -127,7 +130,9 @@ export function speechVoiceById(id: string): SpeechVoice | undefined {
   return SPEECH_VOICES.find(voice => voice.id === id);
 }
 
-// 粤语音色必须带 language_boost: "Chinese,Yue"（后端也会自动补，这里只为请求体自描述）。
+// 粤语音色必须带 language_boost: "Chinese,Yue"（这里只为请求体自描述）。
+// 其余语言不在前端拼 boost：后端 planSpeech 会按音色 ID 前缀统一推导（官方枚举见
+// speech.go 的 speechVoiceLanguageBoosts），一处推导好过两处各写一份再走样。
 export const CANTONESE_LANGUAGE_BOOST = 'Chinese,Yue';
 
 export function speechLanguageBoostFor(voiceId: string): string | undefined {
@@ -173,16 +178,18 @@ export const SPEECH_STRINGS = {
     billable_estimate: '预计计费字符 {count}（汉字按 2 计）',
     too_long: '文本超过 10,000 字符上限，请分段后再合成',
     voice: '音色',
-    voice_auto: '自动（按文本语言）',
+    voice_auto: '自动选音色（按文本语言）',
     voice_custom: '自定义音色 ID',
     voice_custom_placeholder: '粘贴官方系统音色 ID',
     voice_custom_hint: '官方系统音色全部可用；大小写、空格、括号须与官方列表一致',
+    voice_lang_filter: '按音色母语筛选',
     voice_lang_all: '全部',
     voice_lang_en: '英语',
     voice_lang_zh: '普通话',
     voice_lang_ja: '日语',
     voice_lang_es: '西班牙语',
     voice_lang_yue: '粤语',
+    voice_lang_hint: '音色只决定口音，不做翻译——文本是什么语言就念什么语言。需要外语语音时，请把文本本身也改成那门语言。',
     speed: '语速',
     format: '格式',
     generating: '语音合成中…',
@@ -204,16 +211,18 @@ export const SPEECH_STRINGS = {
     billable_estimate: 'Estimated billed characters: {count} (Han characters count 2)',
     too_long: 'The text exceeds the 10,000-character limit. Split it before synthesizing.',
     voice: 'Voice',
-    voice_auto: 'Auto (by text language)',
+    voice_auto: 'Auto voice (by text language)',
     voice_custom: 'Custom voice ID',
     voice_custom_placeholder: 'Paste an official system voice ID',
     voice_custom_hint: 'Every official system voice works; case, spaces, and parentheses must match the official list',
+    voice_lang_filter: "Filter by the voice's native language",
     voice_lang_all: 'All',
     voice_lang_en: 'English',
     voice_lang_zh: 'Mandarin',
     voice_lang_ja: 'Japanese',
     voice_lang_es: 'Spanish',
     voice_lang_yue: 'Cantonese',
+    voice_lang_hint: 'A voice only sets the accent — it never translates. Your text is read aloud in the language you wrote it in. To get speech in another language, write the text in that language.',
     speed: 'Speed',
     format: 'Format',
     generating: 'Synthesizing speech…',
@@ -235,16 +244,18 @@ export const SPEECH_STRINGS = {
     billable_estimate: '課金文字数の目安 {count}（漢字は 2 文字換算）',
     too_long: 'テキストが 10,000 文字の上限を超えています。分割してから合成してください',
     voice: '音声',
-    voice_auto: '自動（テキストの言語に合わせる）',
+    voice_auto: '音声を自動選択（テキストの言語）',
     voice_custom: 'カスタム音声 ID',
     voice_custom_placeholder: '公式のシステム音声 ID を貼り付け',
     voice_custom_hint: '公式のシステム音声はすべて利用可能。大文字小文字・スペース・括弧は公式一覧と一致させてください',
+    voice_lang_filter: '話者の母語で絞り込み',
     voice_lang_all: 'すべて',
     voice_lang_en: '英語',
     voice_lang_zh: '中国語（普通話）',
     voice_lang_ja: '日本語',
     voice_lang_es: 'スペイン語',
     voice_lang_yue: '広東語',
+    voice_lang_hint: '音声は訛りを決めるだけで、翻訳はしません。テキストは書かれたままの言語で読み上げられます。外国語の音声がほしいときは、テキスト自体をその言語で入力してください。',
     speed: '話速',
     format: '形式',
     generating: '音声を合成中…',
@@ -266,16 +277,18 @@ export const SPEECH_STRINGS = {
     billable_estimate: '預計計費字元 {count}（漢字按 2 計）',
     too_long: '文字超過 10,000 字元上限，請分段後再合成',
     voice: '音色',
-    voice_auto: '自動（按文字語言）',
+    voice_auto: '自動選音色（按文字語言）',
     voice_custom: '自訂音色 ID',
     voice_custom_placeholder: '貼上官方系統音色 ID',
     voice_custom_hint: '官方系統音色全部可用；大小寫、空格、括號須與官方列表一致',
+    voice_lang_filter: '按音色母語篩選',
     voice_lang_all: '全部',
     voice_lang_en: '英語',
     voice_lang_zh: '普通話',
     voice_lang_ja: '日語',
     voice_lang_es: '西班牙語',
     voice_lang_yue: '粵語',
+    voice_lang_hint: '音色只決定口音，不做翻譯——文字是甚麼語言就讀甚麼語言。需要外語語音時，請把文字本身也改成那門語言。',
     speed: '語速',
     format: '格式',
     generating: '語音合成中…',
@@ -297,16 +310,18 @@ export const SPEECH_STRINGS = {
     billable_estimate: 'Caracteres facturables estimados: {count} (los caracteres Han cuentan 2)',
     too_long: 'El texto supera el límite de 10 000 caracteres. Divídelo antes de sintetizar.',
     voice: 'Voz',
-    voice_auto: 'Automática (según el idioma del texto)',
+    voice_auto: 'Voz automática (según el idioma del texto)',
     voice_custom: 'ID de voz personalizado',
     voice_custom_placeholder: 'Pega un ID de voz oficial del sistema',
     voice_custom_hint: 'Todas las voces oficiales del sistema funcionan; mayúsculas, espacios y paréntesis deben coincidir con la lista oficial',
+    voice_lang_filter: 'Filtrar por idioma nativo de la voz',
     voice_lang_all: 'Todas',
     voice_lang_en: 'Inglés',
     voice_lang_zh: 'Mandarín',
     voice_lang_ja: 'Japonés',
     voice_lang_es: 'Español',
     voice_lang_yue: 'Cantonés',
+    voice_lang_hint: 'La voz solo define el acento; no traduce. Tu texto se lee en el idioma en que lo escribiste. Para obtener audio en otro idioma, escribe el texto en ese idioma.',
     speed: 'Velocidad',
     format: 'Formato',
     generating: 'Sintetizando voz…',
