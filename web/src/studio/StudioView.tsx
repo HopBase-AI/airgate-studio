@@ -10,6 +10,7 @@ import { ModelRouteSelect } from './ModelRouteSelect';
 import { IMG2IMG_MODEL_REGISTRY, INPAINT_MODEL_REGISTRY, MODEL_REGISTRY } from './modelConfig';
 import { buildModelRouteOptions, imageGroupChannel, localizeRouteLabel, modelRouteOptionValue, parseModelRouteOptionValue, sanitizeVendorTokens } from './modelRoutes';
 import { commitComposerSend, isComposerSubmitKey } from './composerSend';
+import { referenceSlotCountText, referenceSlotState, referenceSlotUploadingText } from './referenceSlot';
 import {
   videoModelById,
   useVideoStrings,
@@ -1232,7 +1233,6 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     ? videoModelConfig.resolutions.filter(resolution => imageResolutionCap.includes(resolution.toLowerCase()))
     : videoModelConfig.resolutions;
   const videoRatioOptions = videoRatioOptionsFor(videoModelConfig, allSources.length + visibleReferenceMedia.length > 0);
-  const referencesUploading = visibleReferenceMedia.some(item => item.status === 'uploading');
   const referencesNotReady = visibleReferenceMedia.some(item => item.status !== 'ready');
   const referenceAccept = isVideo
     ? ['image/*', referenceCapability.video ? REFERENCE_VIDEO_ACCEPT : '', referenceCapability.audio ? REFERENCE_AUDIO_ACCEPT : '']
@@ -1461,16 +1461,6 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       .forEach(item => removeReferenceMedia(item.id));
   };
 
-  // 视频模式参考素材的提示条（超限 / 拒收为警示，上传中为说明），缩略条下方单独一行。
-  const referenceHint = !isVideo
-    ? null
-    : referenceIssues.length > 0
-      ? { text: videoReferenceIssueMessage(referenceIssues[0], vs), warn: true }
-      : referencesUploading
-        ? { text: vs('ref_pending_upload'), warn: false }
-        : referenceNotice
-          ? { text: referenceNotice, warn: true }
-          : null;
   const flaggedReferenceKinds = new Set(referenceIssues.map(issue => referenceIssueKind(issue.code)));
   const hasUnsupportedReferences = referenceIssues.some(issue => issue.code.endsWith('_unsupported'));
   // 图像模式的模式提示（图生图 / 局部重绘）仍在缩略条右侧。
@@ -1478,6 +1468,24 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     ? (isSingleSource && selection ? t('playground.studio_mode_inpaint') : t('playground.studio_mode_img2img'))
     : null;
   const referenceCount = allSources.length + visibleReferenceMedia.length;
+  // 缩略条行尾的状态槽：阻塞问题 > 上传中 > 「N 个素材 · 清除」，三者互斥（见 referenceSlot.ts）。
+  // 原来「上传中 / 拒收」另起一行，状态一变输入框就上下跳；现在收进同一行的行尾。
+  const referenceWarnText = !isVideo
+    ? null
+    : referenceIssues.length > 0
+      ? videoReferenceIssueMessage(referenceIssues[0], vs)
+      : referenceNotice;
+  const referenceSlot = referenceSlotState({
+    warnText: referenceWarnText,
+    removable: hasUnsupportedReferences,
+    uploadingCount: visibleReferenceMedia.filter(item => item.status === 'uploading').length,
+    referenceCount,
+  });
+  const slotText = referenceSlot?.kind === 'uploading'
+    ? referenceSlotUploadingText(referenceSlot.count, vs)
+    : referenceSlot?.kind === 'count'
+      ? referenceSlotCountText(referenceSlot.count, vs)
+      : '';
   const addReferenceLabel = isVideo ? vs('add_reference') : t('playground.studio_add_reference');
 
   return (
@@ -1490,200 +1498,221 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     >
       {/* Source image thumbnails（语音模式没有参考素材，缩略条整体不显示） */}
       {referenceCount > 0 && !isSpeech && (
-        <div style={c.sourceStrip}>
-          {allSources.map((src, i) => (
-            <div
-              key={i}
-              style={isVideo && flaggedReferenceKinds.has('image') ? { ...c.thumbWrap, ...c.referenceWarnBorder } : c.thumbWrap}
-              className="studio-source-thumb"
-            >
-              <button
-                type="button"
-                style={c.thumbOpenBtn}
-                onClick={() => setEditorIndex(i)}
-                onKeyDown={e => handleSourceThumbKeyDown(e, i)}
-                aria-label={t('playground.studio_source_image_keyboard_hint')}
-                title={t('playground.studio_source_image_keyboard_hint')}
+        <div style={c.sourceRow}>
+          <div style={c.sourceStrip} className="studio-source-strip">
+            {allSources.map((src, i) => (
+              <div
+                key={i}
+                style={isVideo && flaggedReferenceKinds.has('image') ? { ...c.thumbWrap, ...c.referenceWarnBorder } : c.thumbWrap}
+                className="studio-source-thumb"
               >
-                <img
-                  src={src}
-                  alt="source"
-                  style={c.thumbImg}
-                />
-                {isSingleSource && selection && (
-                  <div
-                    style={{
-                      ...c.thumbMaskOverlay,
-                      left: `${selection.x * 100}%`,
-                      top: `${selection.y * 100}%`,
-                      width: `max(${selection.width * 100}%, 10px)`,
-                      height: `max(${selection.height * 100}%, 10px)`,
-                    }}
-                    title={t('playground.studio_source_image_selected')}
+                <button
+                  type="button"
+                  style={c.thumbOpenBtn}
+                  onClick={() => setEditorIndex(i)}
+                  onKeyDown={e => handleSourceThumbKeyDown(e, i)}
+                  aria-label={t('playground.studio_source_image_keyboard_hint')}
+                  title={t('playground.studio_source_image_keyboard_hint')}
+                >
+                  <img
+                    src={src}
+                    alt="source"
+                    style={c.thumbImg}
                   />
-                )}
-              </button>
-              <button
-                type="button"
-                style={c.thumbRemoveBtn}
-                className="studio-source-thumb-remove"
-                onClick={e => {
-                  e.stopPropagation();
-                  removeSource(i);
-                }}
-                onKeyDown={e => {
-                  if (e.key === 'Delete' || e.key === 'Backspace') {
-                    e.preventDefault();
+                  {isSingleSource && selection && (
+                    <div
+                      style={{
+                        ...c.thumbMaskOverlay,
+                        left: `${selection.x * 100}%`,
+                        top: `${selection.y * 100}%`,
+                        width: `max(${selection.width * 100}%, 10px)`,
+                        height: `max(${selection.height * 100}%, 10px)`,
+                      }}
+                      title={t('playground.studio_source_image_selected')}
+                    />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  style={c.thumbRemoveBtn}
+                  className="studio-source-thumb-remove"
+                  onClick={e => {
                     e.stopPropagation();
                     removeSource(i);
-                    return;
-                  }
-                  e.stopPropagation();
-                }}
-                aria-label={t('playground.studio_remove_source_image')}
-                title={t('playground.studio_remove_source_image')}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M18 6 6 18" />
-                  <path d="m6 6 12 12" />
-                </svg>
-              </button>
-            </div>
-          ))}
-          {visibleReferenceMedia.map(item => {
-            const failed = item.status === 'error';
-            const statusText = item.status === 'uploading'
-              ? `${Math.round(item.progress * 100)}%`
-              : failed ? vs('reference_upload_failed') : null;
-            const label = `${vs(item.kind === 'video' ? 'reference_video' : 'reference_audio')} · ${item.name}`;
-            const tooltip = failed && item.error ? `${label}\n${item.error}` : label;
-            const removeButton = (
-              <button
-                type="button"
-                style={item.kind === 'video' ? c.thumbRemoveBtn : c.audioChipRemove}
-                className={item.kind === 'video' ? 'studio-source-thumb-remove' : 'studio-gallery-action'}
-                onClick={e => {
-                  e.stopPropagation();
-                  removeReferenceMedia(item.id);
-                }}
-                aria-label={vs('reference_remove')}
-                title={vs('reference_remove')}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M18 6 6 18" />
-                  <path d="m6 6 12 12" />
-                </svg>
-              </button>
-            );
-            if (item.kind === 'video') {
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Delete' || e.key === 'Backspace') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      removeSource(i);
+                      return;
+                    }
+                    e.stopPropagation();
+                  }}
+                  aria-label={t('playground.studio_remove_source_image')}
+                  title={t('playground.studio_remove_source_image')}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+            {visibleReferenceMedia.map(item => {
+              const failed = item.status === 'error';
+              const statusText = item.status === 'uploading'
+                ? `${Math.round(item.progress * 100)}%`
+                : failed ? vs('reference_upload_failed') : null;
+              const label = `${vs(item.kind === 'video' ? 'reference_video' : 'reference_audio')} · ${item.name}`;
+              const tooltip = failed && item.error ? `${label}\n${item.error}` : label;
+              const removeButton = (
+                <button
+                  type="button"
+                  style={item.kind === 'video' ? c.thumbRemoveBtn : c.audioChipRemove}
+                  className={item.kind === 'video' ? 'studio-source-thumb-remove' : 'studio-gallery-action'}
+                  onClick={e => {
+                    e.stopPropagation();
+                    removeReferenceMedia(item.id);
+                  }}
+                  aria-label={vs('reference_remove')}
+                  title={vs('reference_remove')}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              );
+              if (item.kind === 'video') {
+                return (
+                  <div
+                    key={item.id}
+                    style={failed
+                      ? { ...c.thumbWrap, ...c.referenceErrorBorder }
+                      : flaggedReferenceKinds.has('video') ? { ...c.thumbWrap, ...c.referenceWarnBorder } : c.thumbWrap}
+                    className="studio-source-thumb"
+                    title={tooltip}
+                  >
+                    <button
+                      type="button"
+                      style={c.thumbOpenBtn}
+                      onClick={() => { if (failed) uploadReferenceMedia(item); }}
+                      aria-label={failed ? vs('reference_upload_failed') : label}
+                    >
+                      <video src={item.previewUrl} muted playsInline preload="metadata" style={c.thumbImg} />
+                      <span style={c.thumbDurationBadge}>{formatMediaDuration(item.durationSeconds)}</span>
+                      {statusText && <span style={c.thumbStatusOverlay}>{statusText}</span>}
+                    </button>
+                    {removeButton}
+                  </div>
+                );
+              }
+              const playing = playingAudioId === item.id;
               return (
                 <div
                   key={item.id}
                   style={failed
-                    ? { ...c.thumbWrap, ...c.referenceErrorBorder }
-                    : flaggedReferenceKinds.has('video') ? { ...c.thumbWrap, ...c.referenceWarnBorder } : c.thumbWrap}
-                  className="studio-source-thumb"
+                    ? { ...c.audioChip, ...c.referenceErrorBorder }
+                    : flaggedReferenceKinds.has('audio') ? { ...c.audioChip, ...c.referenceWarnBorder } : c.audioChip}
                   title={tooltip}
                 >
                   <button
                     type="button"
-                    style={c.thumbOpenBtn}
-                    onClick={() => { if (failed) uploadReferenceMedia(item); }}
-                    aria-label={failed ? vs('reference_upload_failed') : label}
+                    style={c.audioChipPlay}
+                    className="studio-gallery-action"
+                    onClick={() => (failed ? uploadReferenceMedia(item) : toggleAudioPreview(item))}
+                    aria-label={failed ? vs('reference_upload_failed') : vs(playing ? 'reference_pause' : 'reference_play')}
                   >
-                    <video src={item.previewUrl} muted playsInline preload="metadata" style={c.thumbImg} />
-                    <span style={c.thumbDurationBadge}>{formatMediaDuration(item.durationSeconds)}</span>
-                    {statusText && <span style={c.thumbStatusOverlay}>{statusText}</span>}
+                    {failed ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 3v6h-6" />
+                      </svg>
+                    ) : playing ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" />
+                      </svg>
+                    ) : (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M8 5.5v13l11-6.5z" />
+                      </svg>
+                    )}
                   </button>
+                  <span style={c.audioChipText}>
+                    <span style={c.audioChipName}>{item.name}</span>
+                    <span style={failed ? { ...c.audioChipMeta, color: cssVar('danger') } : c.audioChipMeta}>
+                      {statusText ?? formatMediaDuration(item.durationSeconds)}
+                    </span>
+                  </span>
                   {removeButton}
                 </div>
               );
-            }
-            const playing = playingAudioId === item.id;
-            return (
-              <div
-                key={item.id}
-                style={failed
-                  ? { ...c.audioChip, ...c.referenceErrorBorder }
-                  : flaggedReferenceKinds.has('audio') ? { ...c.audioChip, ...c.referenceWarnBorder } : c.audioChip}
-                title={tooltip}
-              >
-                <button
-                  type="button"
-                  style={c.audioChipPlay}
-                  className="studio-gallery-action"
-                  onClick={() => (failed ? uploadReferenceMedia(item) : toggleAudioPreview(item))}
-                  aria-label={failed ? vs('reference_upload_failed') : vs(playing ? 'reference_pause' : 'reference_play')}
-                >
-                  {failed ? (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 3v6h-6" />
-                    </svg>
-                  ) : playing ? (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" />
-                    </svg>
-                  ) : (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <path d="M8 5.5v13l11-6.5z" />
-                    </svg>
+            })}
+            <button
+              type="button"
+              style={c.thumbAddTile}
+              className="studio-gallery-action"
+              onClick={() => fileInputRef.current?.click()}
+              title={addReferenceLabel}
+              aria-label={addReferenceLabel}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M5 12h14" /><path d="M12 5v14" />
+              </svg>
+            </button>
+            {!isVideo && isSingleSource && selection && (
+              <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={() => setSelection(null)}>
+                {t('playground.studio_clear_selection')}
+              </button>
+            )}
+          </div>
+          {referenceSlot && (
+            <div
+              role={referenceSlot.kind === 'warn' ? 'alert' : 'status'}
+              style={referenceSlot.kind === 'warn' ? { ...c.referenceSlot, ...c.referenceSlotWarn } : c.referenceSlot}
+            >
+              {referenceSlot.kind === 'warn' ? (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={c.referenceSlotIcon}>
+                    <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" />
+                  </svg>
+                  <span style={c.referenceSlotWarnText} title={referenceSlot.text}>{referenceSlot.text}</span>
+                  {referenceSlot.removable && (
+                    <button
+                      type="button"
+                      style={c.referenceSlotAction}
+                      className="studio-gallery-action"
+                      onClick={removeUnsupportedReferences}
+                      title={vs('ref_remove_unsupported')}
+                      aria-label={vs('ref_remove_unsupported')}
+                    >
+                      {vs('ref_slot_remove')}
+                    </button>
                   )}
-                </button>
-                <span style={c.audioChipText}>
-                  <span style={c.audioChipName}>{item.name}</span>
-                  <span style={failed ? { ...c.audioChipMeta, color: cssVar('danger') } : c.audioChipMeta}>
-                    {statusText ?? formatMediaDuration(item.durationSeconds)}
-                  </span>
-                </span>
-                {removeButton}
-              </div>
-            );
-          })}
-          <button
-            type="button"
-            style={c.thumbAddTile}
-            className="studio-gallery-action"
-            onClick={() => fileInputRef.current?.click()}
-            title={addReferenceLabel}
-            aria-label={addReferenceLabel}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M5 12h14" /><path d="M12 5v14" />
-            </svg>
-          </button>
-          {referenceCount > 1 && (
-            <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={clearAllSources}>
-              {t('playground.studio_clear_all')}
-            </button>
-          )}
-          {!isVideo && isSingleSource && selection && (
-            <button type="button" style={c.sourceActionBtn} className="studio-gallery-action" onClick={() => setSelection(null)}>
-              {t('playground.studio_clear_selection')}
-            </button>
+                </>
+              ) : (
+                <>
+                  <span style={c.referenceSlotLabel} title={slotText}>{slotText}</span>
+                  {referenceSlot.kind === 'count' && (
+                    <>
+                      <span aria-hidden="true" style={c.referenceSlotDot}>·</span>
+                      <button
+                        type="button"
+                        style={c.referenceSlotClear}
+                        className="studio-slot-clear"
+                        onClick={clearAllSources}
+                        title={t('playground.studio_clear_all')}
+                        aria-label={t('playground.studio_clear_all')}
+                      >
+                        {vs('ref_slot_clear')}
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           )}
           {modeHint && <span style={c.modeHint}>{modeHint}</span>}
-        </div>
-      )}
-      {referenceHint && (
-        <div
-          role={referenceHint.warn ? 'alert' : 'status'}
-          style={referenceHint.warn ? c.referenceNotice : { ...c.referenceNotice, ...c.referenceNoticeInfo }}
-        >
-          {referenceHint.warn ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={c.referenceNoticeIcon}>
-              <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" />
-            </svg>
-          ) : (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ ...c.referenceNoticeIcon, color: cssVar('textTertiary') }}>
-              <path d="M12 19V5" /><path d="m5 12 7-7 7 7" />
-            </svg>
-          )}
-          <span style={c.referenceNoticeText}>{referenceHint.text}</span>
-          {hasUnsupportedReferences && (
-            <button type="button" style={c.referenceNoticeAction} className="studio-gallery-action" onClick={removeUnsupportedReferences}>
-              {vs('ref_remove_unsupported')}
-            </button>
-          )}
         </div>
       )}
       {editorIndex !== null && allSources[editorIndex] && (
@@ -1980,11 +2009,28 @@ const c: Record<string, CSSProperties> = {
     padding: '0 4px 6px',
     lineHeight: 1.4,
   },
+  // 参考素材行 = 可横向滚动的缩略条 + 钉在行尾的状态槽。
+  // 槽必须留在滚动容器之外，否则素材一多就被一起滚走。
+  sourceRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '2px 12px 0',
+  },
+  // 缩略条先于状态槽让位：flex-basis 0（不是 auto）+ min-width 0 + 横向滚动。
+  // basis 必须是 0——basis auto 时收缩按两者内容宽按比例分摊，素材一多槽就被挤成几十像素，
+  // 计数文案先被省略号吃掉；basis 0 后槽先按自身内容取宽（上限 46%），余量全归缩略条。
+  // 纵向留 4px 余量给缩略卡 hover 上浮与 2px 焦点环（outline-offset 2px）——
+  // overflow-x:auto 会把纵向一起裁掉。
   sourceStrip: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '6px 12px 2px',
+    flex: '1 1 0%',
+    minWidth: 0,
+    overflowX: 'auto',
+    padding: '4px 0',
+    scrollbarWidth: 'none',
   },
   thumbWrap: {
     position: 'relative',
@@ -2160,37 +2206,71 @@ const c: Record<string, CSSProperties> = {
     border: `1px solid ${cssVar('warning')}`,
     boxShadow: `0 0 0 1px ${cssVar('warningSubtle')}`,
   },
-  // 视频模式参考素材提示条：设计规范的「左侧 2px 色条纸面卡」，超限 / 拒收用警示色
-  referenceNotice: {
+  // 缩略条行尾的状态槽：flex 0 1 auto + min-width 0 + max-width 46%——
+  // 行不够宽时先让缩略条滚动，槽既不被挤没也不把行撑破；文案最长的是
+  // 「参考音频需至少搭配 1 张参考图或 1 段参考视频」（西语更长），最多折两行再省略。
+  referenceSlot: {
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    margin: '6px 12px 0',
-    padding: '7px 10px',
-    border: `1px solid ${cssVar('borderSubtle')}`,
+    gap: 4,
+    flex: '0 1 auto',
+    minWidth: 0,
+    maxWidth: '46%',
+    fontSize: 11,
+    lineHeight: 1.35,
+    color: cssVar('textTertiary'),
+  },
+  // 阻塞问题：设计规范的「左侧 2px 色条纸面卡」（docs/console-design-standard.md 第 63 行）
+  referenceSlotWarn: {
+    alignItems: 'flex-start',
+    gap: 6,
+    padding: '5px 8px',
     borderLeft: `2px solid ${cssVar('warning')}`,
-    borderRadius: 6,
+    borderRadius: '0 5px 5px 0',
     background: cssVar('bgDeep'),
     color: cssVar('text'),
-    fontSize: 12,
-    lineHeight: 1.4,
   },
-  // 上传中等说明性提示：中性色条
-  referenceNoticeInfo: {
-    borderLeft: `2px solid ${cssVar('textTertiary')}`,
-    color: cssVar('textSecondary'),
-  },
-  referenceNoticeIcon: {
+  referenceSlotIcon: {
     flexShrink: 0,
+    marginTop: 1,
     color: cssVar('warning'),
   },
-  referenceNoticeText: {
-    flex: 1,
+  // 两行封顶 + 省略号；完整文案挂在 title 上，窄屏与长语言都不溢出。
+  referenceSlotWarnText: {
     minWidth: 0,
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    overflow: 'hidden',
   },
-  referenceNoticeAction: {
+  // 计数 / 上传中：单行，先于「清除」被省略——「清除」永远可点。
+  referenceSlotLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  referenceSlotDot: {
     flexShrink: 0,
-    padding: '3px 8px',
+    opacity: 0.6,
+  },
+  // 「清除」降级为下划线文字：它是命令不是对象，不该有边框底色去冒充第四个素材格。
+  referenceSlotClear: {
+    flexShrink: 0,
+    padding: 0,
+    border: 'none',
+    borderBottom: `1px solid ${cssVar('borderSubtle')}`,
+    background: 'transparent',
+    color: cssVar('textTertiary'),
+    cursor: 'pointer',
+    font: 'inherit',
+    fontSize: 11,
+    lineHeight: 1.2,
+    transition: 'color 0.15s, border-color 0.15s',
+  },
+  referenceSlotAction: {
+    flexShrink: 0,
+    padding: '2px 7px',
     border: `1px solid ${cssVar('borderSubtle')}`,
     borderRadius: 5,
     background: 'transparent',
