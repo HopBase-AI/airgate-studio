@@ -24,7 +24,7 @@ function option(overrides: Partial<ModelRouteOption> & Pick<ModelRouteOption, 'm
     modelKey: `openai:${overrides.modelId}`,
     groupId,
     channel,
-    pricing: { kind: 'rate', rate: 5.1 },
+    pricing: { kind: 'rate', rate: 0.75 },
     ...overrides,
   };
 }
@@ -32,10 +32,10 @@ function option(overrides: Partial<ModelRouteOption> & Pick<ModelRouteOption, 'm
 // 与规范 §3 效果稿同一份候选（顺序即热度/注册表顺序，筛选不得改变）。
 const OPTIONS: ModelRouteOption[] = [
   option({ modelName: 'GPT Image 2', modelId: 'gpt-image-2', family: 'gpt-image', groupId: 15 }),
-  option({ modelName: 'Seedream 5.0 Pro', modelId: 'seedream-5-0-pro', family: 'seedream', groupId: 24, pricing: { kind: 'rate', rate: 4.62 } }),
-  option({ modelName: 'Banana Pro', modelId: 'gemini-3-pro-image', family: 'banana', groupId: 18, pricing: { kind: 'fixed', price: 0.4, currency: 'CNY' } }),
-  option({ modelName: 'Banana Pro', modelId: 'gemini-3-pro-image', family: 'banana', groupId: 34, channel: 'official', pricing: { kind: 'rate', rate: 4.76 } }),
-  option({ modelName: 'Nano Banana', modelId: 'gemini-2.5-flash-image', family: 'banana', groupId: 18, pricing: { kind: 'fixed', price: 0.4, currency: 'CNY' } }),
+  option({ modelName: 'Seedream 5.0 Pro', modelId: 'seedream-5-0-pro', family: 'seedream', groupId: 24, pricing: { kind: 'rate', rate: 0.68 } }),
+  option({ modelName: 'Banana Pro', modelId: 'gemini-3-pro-image', family: 'banana', groupId: 18, pricing: { kind: 'fixed', price: 0.06, currency: 'USD' } }),
+  option({ modelName: 'Banana Pro', modelId: 'gemini-3-pro-image', family: 'banana', groupId: 34, channel: 'official', pricing: { kind: 'rate', rate: 0.7 } }),
+  option({ modelName: 'Nano Banana', modelId: 'gemini-2.5-flash-image', family: 'banana', groupId: 18, pricing: { kind: 'fixed', price: 0.06, currency: 'USD' } }),
   option({ modelName: 'gpt-image-2.5-flare', modelId: 'gpt-image-2.5-flare', family: 'gpt-image', groupId: 15 }),
   option({ modelName: 'gpt-image-2.5-sunburst', modelId: 'gpt-image-2.5-sunburst', family: 'gpt-image', groupId: 15 }),
 ];
@@ -98,34 +98,36 @@ describe('model route filtering (R6)', () => {
 });
 
 describe('model route price column (R4)', () => {
+  // USD 账本：倍率即折数比例（0.75 = 7.5 折），固定价缺省 $，API 明示 CNY 才是 ¥。
   it('renders fixed prices as per-image and usage billing as the discount off the official price', () => {
     const zh = modelSelectorStringsFor('zh-CN');
+    expect(formatModelRoutePricing({ kind: 'fixed', price: 0.045, currency: 'USD' }, zh)).toBe('$0.045/张');
     expect(formatModelRoutePricing({ kind: 'fixed', price: 0.4, currency: 'CNY' }, zh)).toBe('¥0.4/张');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, zh)).toBe('约 7.5 折');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 4.76 }, zh)).toBe('约 7.0 折');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.75 }, zh)).toBe('约 7.5 折');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.7 }, zh)).toBe('约 7.0 折');
 
     const en = modelSelectorStringsFor('en-US');
     expect(formatModelRoutePricing({ kind: 'fixed', price: 0.4, currency: 'CNY' }, en)).toBe('¥0.4/image');
     expect(formatModelRoutePricing({ kind: 'fixed', price: 0.045, currency: 'USD' }, en)).toBe('$0.045/image');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, en)).toBe('≈25% off');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.75 }, en)).toBe('≈25% off');
 
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, modelSelectorStringsFor('zh-HK'))).toBe('約 7.5 折');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, modelSelectorStringsFor('ja'))).toBe('約25%オフ');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 5.1 }, modelSelectorStringsFor('es'))).toBe('≈25% de descuento');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.75 }, modelSelectorStringsFor('zh-HK'))).toBe('約 7.5 折');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.75 }, modelSelectorStringsFor('ja'))).toBe('約25%オフ');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.75 }, modelSelectorStringsFor('es'))).toBe('≈25% de descuento');
   });
 
   it('never shows the raw multiplier: official price at or above 10 折, nothing for an invalid rate', () => {
     const zh = modelSelectorStringsFor('zh');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 6.8 }, zh)).toBe('官方价');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 6.79 }, zh)).toBe('官方价');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 8.16 }, zh)).toBe('官方价 ×1.2');
-    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.34 }, zh)).toBe('约 0.50 折');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 1 }, zh)).toBe('官方价');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.999 }, zh)).toBe('官方价');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 1.2 }, zh)).toBe('官方价 ×1.2');
+    expect(formatModelRoutePricing({ kind: 'rate', rate: 0.05 }, zh)).toBe('约 0.50 折');
     expect(formatModelRoutePricing({ kind: 'rate', rate: 0 }, zh)).toBe('');
   });
 
   it('styles only discounted usage billing as a discount badge', () => {
-    expect(isDiscountedModelRoutePricing({ kind: 'rate', rate: 5.1 })).toBe(true);
-    expect(isDiscountedModelRoutePricing({ kind: 'rate', rate: 6.8 })).toBe(false);
+    expect(isDiscountedModelRoutePricing({ kind: 'rate', rate: 0.75 })).toBe(true);
+    expect(isDiscountedModelRoutePricing({ kind: 'rate', rate: 1 })).toBe(false);
     expect(isDiscountedModelRoutePricing({ kind: 'rate', rate: 0 })).toBe(false);
     expect(isDiscountedModelRoutePricing({ kind: 'fixed', price: 0.4, currency: 'CNY' })).toBe(false);
   });
@@ -165,7 +167,7 @@ describe('ModelRouteSelect rendering', () => {
 
     expect(html).toContain('Banana Pro · Official');
     expect(html).toContain('约 7.0 折');
-    expect(html).not.toContain('4.76');
-    expect(html).not.toContain('¥0.4');
+    expect(html).not.toContain('×0.7');
+    expect(html).not.toContain('$0.06');
   });
 });

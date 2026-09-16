@@ -15,6 +15,7 @@ export function formatImagePrice(price: number): string {
   return price.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+// 站点账本是 USD：缺省与 USD 都显示 $；只有分组固定价明示 currency=CNY 才显示 ¥。
 function imagePriceSymbol(currency?: string): string {
   return currency?.toUpperCase() === 'CNY' ? '¥' : '$';
 }

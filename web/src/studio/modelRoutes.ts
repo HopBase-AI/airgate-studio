@@ -106,6 +106,10 @@ export function formatModelRouteLabel(model: ModelConfig, group: ImageGroup): st
   return qualifier ? `${model.name} · ${qualifier}` : model.name;
 }
 
+// 固定张价的币种兜底：站点账本是 USD，core 未带 currency 时按 USD 记；只有 API
+// 明示 CNY 的历史数据才走 ¥ 分支。
+const DEFAULT_FIXED_PRICE_CURRENCY = 'USD';
+
 // imageGroupPricing 取供给的计费口径：固定张价优先取 1K 档（缺 1K 时退到更高档，
 // 保证「有固定价就显示固定价」），否则按实际消耗显示有效倍率。
 export function imageGroupPricing(group: ImageGroup): ModelRoutePricing {
@@ -114,7 +118,7 @@ export function imageGroupPricing(group: ImageGroup): ModelRoutePricing {
     for (const tier of ['1k', '2k', '4k'] as const) {
       const price = prices[tier];
       if (typeof price === 'number' && Number.isFinite(price) && price >= 0) {
-        return { kind: 'fixed', price, currency: prices.currency?.trim() || 'CNY' };
+        return { kind: 'fixed', price, currency: prices.currency?.trim() || DEFAULT_FIXED_PRICE_CURRENCY };
       }
     }
   }
@@ -132,7 +136,7 @@ export function compareModelRoutePricing(a: ModelRoutePricing, b: ModelRoutePric
 export function withImageGroupPrices(model: ModelConfig, group: ImageGroup | undefined): ModelConfig {
   const prices = group?.fixed_image_prices;
   if (!prices) return model;
-  const currency = prices.currency?.trim() || 'CNY';
+  const currency = prices.currency?.trim() || DEFAULT_FIXED_PRICE_CURRENCY;
   let changed = false;
   const sizes = model.sizes.map(size => {
     const key = size.tier.toLowerCase() as '1k' | '2k' | '4k';

@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 // i18n 资源文件（后续可迁回 core i18n 的 studio.* 键）。「官方直连」限定词沿用 core
 // 既有键 playground.studio_route_official（见 modelRoutes.localizeRouteLabel）。
 //
-// {price} 已含货币符号（¥ / $）。折数标签与 core 密钥页分组下拉同一文案
+// {price} 已含货币符号（$；API 明示 CNY 时为 ¥）。折数标签与 core 密钥页分组下拉同一文案
 //（user_keys.group_quote_discount）：{zhe} 是折数（7.5），{off} 是优惠百分比（25）；
 // {multiple} 是高于官方价时相对官方价的倍数。
 
