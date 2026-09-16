@@ -63,6 +63,7 @@ export function writeFamilyFilter(
   }
 }
 
+// 站点账本是 USD，固定张价默认按 $ 展示；只有 API 明示 currency=CNY 才显示 ¥。
 function priceSymbol(currency: string): string {
   return currency.toUpperCase() === 'CNY' ? '¥' : '$';
 }
@@ -71,15 +72,12 @@ function formatFixedPrice(price: number): string {
   return price.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
-// 倍率 → 折数的汇率，与 core 的 DEFAULT_QUOTE_FX（web/src/shared/quoteMath.ts）同值：
-// 倍率 = 每消耗官方 $1 扣多少 ¥，折 = 倍率 ÷ 汇率。6.8 是结算常数，插件拿不到站点设置，
-// 这里不另起口径。
-export const OFFICIAL_PRICE_FX = 6.8;
-
 // 按实际消耗计费的供给相对官方价的比例（0.75 = 7.5 折）；倍率无效返回 null。
+// USD 账本下倍率 = 每消耗官方 $1 扣多少 $，即倍率本身就是折数比例（7.5 折 ⇒ 0.75），
+// 不再除汇率。
 export function modelRoutePriceRatio(pricing: ModelRoutePricing): number | null {
   if (pricing.kind !== 'rate' || !(pricing.rate > 0)) return null;
-  return pricing.rate / OFFICIAL_PRICE_FX;
+  return pricing.rate;
 }
 
 // 折数展示与密钥页分组下拉一致：不足 1 折保留两位，其余一位（0.75 → 7.5）。
@@ -88,7 +86,7 @@ function formatZhe(ratio: number): string {
   return value < 1 ? value.toFixed(2) : value.toFixed(1);
 }
 
-// 与官方价差在半个百分点内按官方价展示，避免 6.79 这类倍率显示成「约 10.0 折」。
+// 与官方价差在半个百分点内按官方价展示，避免 0.999 这类倍率显示成「约 10.0 折」。
 const OFFICIAL_PRICE_TOLERANCE = 0.005;
 
 export function isDiscountedModelRoutePricing(pricing: ModelRoutePricing): boolean {
@@ -96,8 +94,8 @@ export function isDiscountedModelRoutePricing(pricing: ModelRoutePricing): boole
   return ratio != null && ratio < 1 - OFFICIAL_PRICE_TOLERANCE;
 }
 
-// 价格列文案（R4）：固定张价 → 「¥x/张」；按实际消耗 → 折数标签「约 7.5 折」，
-// 与密钥页分组下拉同一口径——倍率本身（×5.1）用户读不懂，不再露出。
+// 价格列文案（R4）：固定张价 → 「$x/张」；按实际消耗 → 折数标签「约 7.5 折」，
+// 与密钥页分组下拉同一口径——倍率本身（×0.75）用户读不懂，不再露出。
 // 不低于官方价时显示「官方价」或「官方价 ×1.2」。
 export function formatModelRoutePricing(pricing: ModelRoutePricing, s: ModelSelectorStrings): string {
   if (pricing.kind === 'fixed') {

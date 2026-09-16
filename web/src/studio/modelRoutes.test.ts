@@ -204,7 +204,9 @@ describe('image group pricing (R4)', () => {
   it('reports the 1K fixed price when the group has fixed image prices', () => {
     expect(imageGroupPricing(GROUP_18)).toEqual({ kind: 'fixed', price: 0.4, currency: 'CNY' });
     expect(imageGroupPricing(imageGroup({ fixed_image_prices: { '2k': 0.12 } })))
-      .toEqual({ kind: 'fixed', price: 0.12, currency: 'CNY' });
+      .toEqual({ kind: 'fixed', price: 0.12, currency: 'USD' });
+    expect(imageGroupPricing(imageGroup({ fixed_image_prices: { '1k': 0.045, currency: 'USD' } })))
+      .toEqual({ kind: 'fixed', price: 0.045, currency: 'USD' });
   });
 
   it('reports the effective rate for usage-billed groups', () => {
@@ -412,7 +414,7 @@ describe('fixed image route pricing', () => {
     expect(priced.sizes.find(size => size.tier === '1K')?.price).toBe(0);
   });
 
-  it('defaults legacy fixed prices without a currency to CNY balance units', () => {
+  it('defaults fixed prices without a currency to USD balance units', () => {
     const base = mustModel('openai:gpt-image-2');
 
     const priced = withImageGroupPrices(base, imageGroup({
@@ -420,6 +422,19 @@ describe('fixed image route pricing', () => {
     }));
     expect(priced.sizes.find(size => size.tier === '1K')).toMatchObject({
       price: 0.08,
+      currency: 'USD',
+      showPrice: true,
+    });
+  });
+
+  it('keeps an explicit CNY currency from the API on the priced sizes', () => {
+    const base = mustModel('openai:gpt-image-2');
+
+    const priced = withImageGroupPrices(base, imageGroup({
+      fixed_image_prices: { '1k': 0.4, currency: 'CNY' },
+    }));
+    expect(priced.sizes.find(size => size.tier === '1K')).toMatchObject({
+      price: 0.4,
       currency: 'CNY',
       showPrice: true,
     });

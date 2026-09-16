@@ -150,6 +150,8 @@ export interface ImageGroup {
   rate_multiplier: number;
   effective_rate: number;
   note?: string;
+  // 固定张价（余额币种，站点账本为 USD）：core 报 currency="USD"；缺省按 USD，
+  // 只有明示 "CNY" 的历史数据才按 ¥ 展示。
   fixed_image_prices?: {
     '1k'?: number;
     '2k'?: number;
