@@ -26,6 +26,8 @@ import {
   type VideoReferenceMediaKind,
 } from './video/videoConfig';
 import { VideoParamsPopover } from './video/VideoParamsPopover';
+import { SPEECH_MAX_CHARS, countCodePoints, speechBillableCharacters, useSpeechStrings } from './speech/speechConfig';
+import { SpeechParamsPopover } from './speech/SpeechParamsPopover';
 import { ProjectSidebar } from './ProjectSidebar';
 import { api, type InspirationCatalog, type InspirationItem } from '../api';
 
@@ -996,6 +998,7 @@ const COMPOSER_TEXTAREA_HEIGHT = 112;
 function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.MutableRefObject<{ set: (v: string) => void } | null>; onOpenInspiration?: () => void }) {
   const { t, i18n } = useTranslation();
   const vs = useVideoStrings();
+  const sp = useSpeechStrings();
   const {
     mediaType, setMediaType,
     setImageMode,
@@ -1018,11 +1021,20 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     selectedVideoGroupId, setSelectedVideoGroupId,
     videoBudget,
     setVideoReferenceSummary,
+    speechAvailable,
+    availableSpeechModels,
+    speechModelId, setSpeechModelId,
+    speechVoiceId, setSpeechVoiceId,
+    speechSpeed, setSpeechSpeed,
+    speechGroups, speechRouteReady,
+    selectedSpeechGroupId, setSelectedSpeechGroupId,
+    generateSpeech,
     referenceImages, setReferenceImages,
     editRequest, clearEditRequest,
   } = useStudio();
 
   const isVideo = mediaType === 'video';
+  const isSpeech = mediaType === 'audio';
 
   const [prompt, setPrompt] = useState('');
   const [count, setCount] = useState(1);
@@ -1202,9 +1214,15 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     ? modelRouteOptionValue(selectedModelKey, selectedGroupId)
     : '';
   const hasSelectableModel = modelRouteOptions.length > 0;
-  const canSend = prompt.trim().length > 0 && (isVideo
-    ? videoRouteReady && referenceIssues.length === 0 && !referencesNotReady
-    : (hasSelectableModel && imageRouteReady));
+  // 语音模式的文本计数：官方上限按码点（10,000），计费按「码点 + 汉字数」预估。
+  const speechChars = isSpeech ? countCodePoints(prompt.trim()) : 0;
+  const speechBillable = isSpeech ? speechBillableCharacters(prompt.trim()) : 0;
+  const speechTooLong = speechChars > SPEECH_MAX_CHARS;
+  const canSend = prompt.trim().length > 0 && (isSpeech
+    ? speechRouteReady && !speechTooLong
+    : isVideo
+      ? videoRouteReady && referenceIssues.length === 0 && !referencesNotReady
+      : (hasSelectableModel && imageRouteReady));
 
   useEffect(() => {
     if (!modelOptions.some(m => m.routeKey === selectedModelKey) && modelOptions.length > 0) {
@@ -1233,6 +1251,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     if (!trimmed) return false;
 
     return commitComposerSend(canSend, () => {
+      if (isSpeech) {
+        return generateSpeech(trimmed);
+      }
       if (isVideo) {
         return generateVideo(trimmed, {
           sourceImages: hasSource ? allSources : undefined,
@@ -1272,6 +1293,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   };
 
   const handleFile = useCallback(async (file: File) => {
+    // 语音模式没有参考素材：拖入 / 粘贴的文件一律忽略。
+    if (isSpeech) return;
     if (!file.type.startsWith('image/')) {
       if (!isVideo) return;
       const kind = referenceMediaKindForFile(file);
@@ -1284,7 +1307,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       setSourceImages(prev => [...prev, dataUrl]);
       setSelection(null);
     } catch { /* ignore */ }
-  }, [addReferenceMedia, isVideo, vs]);
+  }, [addReferenceMedia, isSpeech, isVideo, vs]);
 
   const handleFileInput = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1399,8 +1422,8 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Source image thumbnails */}
-      {referenceCount > 0 && (
+      {/* Source image thumbnails（语音模式没有参考素材，缩略条整体不显示） */}
+      {referenceCount > 0 && !isSpeech && (
         <div style={c.sourceStrip}>
           {allSources.map((src, i) => (
             <div
@@ -1624,7 +1647,9 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isVideo
+          placeholder={isSpeech
+            ? sp('placeholder')
+            : isVideo
             ? vs('video_placeholder')
             : hasSource
             ? (isSingleSource && selection ? t('playground.studio_inpaint_placeholder') : t('playground.studio_img2img_placeholder'))
@@ -1632,6 +1657,13 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           rows={5}
         />
       </div>
+      {/* 语音模式：码点计数 + 计费字符预估（汉字按 2 计），超限变警示色 */}
+      {isSpeech && (
+        <div style={speechTooLong ? c.speechCounterWarn : c.speechCounter} aria-live="polite">
+          <span>{sp('chars_count', { count: speechChars.toLocaleString('en-US'), max: SPEECH_MAX_CHARS.toLocaleString('en-US') })}</span>
+          <span>{speechTooLong ? sp('too_long') : sp('billable_estimate', { count: speechBillable.toLocaleString('en-US') })}</span>
+        </div>
+      )}
 
       {/* Toolbar row */}
       <div style={c.toolbar}>
@@ -1640,15 +1672,16 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
           style={c.toolbarLeft}
           className="studio-composer-toolbar-left"
         >
-          {/* 媒体切换：图像 / 视频（图标分段控件，省空间；文案进 title/aria-label） */}
+          {/* 媒体切换：图像 / 视频 / 语音（图标分段控件，省空间；文案进 title/aria-label）。
+              语音入口只在用户可达 speech-2.8-* 时出现。 */}
           <div data-onboarding-target="studio-media" style={c.mediaToggle} role="tablist">
             <button
               type="button"
               data-onboarding-target="studio-image"
-              style={!isVideo ? c.mediaBtnActive : c.mediaBtn}
+              style={!isVideo && !isSpeech ? c.mediaBtnActive : c.mediaBtn}
               className="studio-media-btn"
               onClick={() => setMediaType('image')}
-              aria-selected={!isVideo}
+              aria-selected={!isVideo && !isSpeech}
               title={vs('media_image')}
               aria-label={vs('media_image')}
             >
@@ -1670,22 +1703,70 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
                 <rect x="2" y="5" width="14" height="14" rx="2" /><path d="M22 8.5l-6 3.5 6 3.5z" />
               </svg>
             </button>
+            {speechAvailable && (
+              <button
+                type="button"
+                data-onboarding-target="studio-speech"
+                style={isSpeech ? c.mediaBtnActive : c.mediaBtn}
+                className="studio-media-btn"
+                onClick={() => setMediaType('audio')}
+                aria-selected={isSpeech}
+                title={sp('media_audio')}
+                aria-label={sp('media_audio')}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 3v18" /><path d="M8 7v10" /><path d="M16 7v10" /><path d="M4 10v4" /><path d="M20 10v4" />
+                </svg>
+              </button>
+            )}
           </div>
-          {/* 参考素材入口图像、视频两种模式都要：视频模式按所选模型额外收参考视频 / 音频 */}
-          <button
-            type="button"
-            style={referenceCount > 0 ? c.refBtnActive : c.refBtn}
-            className="studio-gallery-action"
-            onClick={() => fileInputRef.current?.click()}
-            title={addReferenceLabel}
-            aria-label={addReferenceLabel}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
-            </svg>
-            {referenceCount > 0 ? <span style={{ fontSize: 11, fontWeight: 600 }}>{referenceCount}</span> : null}
-          </button>
-          {isVideo ? (
+          {/* 参考素材入口图像、视频两种模式都要：视频模式按所选模型额外收参考视频 / 音频；语音没有参考素材 */}
+          {!isSpeech && (
+            <button
+              type="button"
+              style={referenceCount > 0 ? c.refBtnActive : c.refBtn}
+              className="studio-gallery-action"
+              onClick={() => fileInputRef.current?.click()}
+              title={addReferenceLabel}
+              aria-label={addReferenceLabel}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+              </svg>
+              {referenceCount > 0 ? <span style={{ fontSize: 11, fontWeight: 600 }}>{referenceCount}</span> : null}
+            </button>
+          )}
+          {isSpeech ? (
+            <>
+              <div style={c.modelSelect}>
+                <CustomSelect
+                  value={speechModelId}
+                  options={availableSpeechModels.map(m => ({ value: m.id, label: sp(m.nameKey), description: sp(m.hintKey) }))}
+                  onChange={setSpeechModelId}
+                  compact
+                  minDropdownWidth={260}
+                />
+              </div>
+              <SpeechParamsPopover
+                voiceId={speechVoiceId}
+                setVoiceId={setSpeechVoiceId}
+                speed={speechSpeed}
+                setSpeed={setSpeechSpeed}
+                text={prompt}
+                sp={sp}
+              />
+              {speechGroups.length > 1 && (
+                <div style={c.videoOption}>
+                  <CustomSelect
+                    value={selectedSpeechGroupId != null ? String(selectedSpeechGroupId) : ''}
+                    options={speechGroups.map(g => ({ value: String(g.id), label: localizeRouteLabel(sanitizeVendorTokens(g.name) || `Group ${g.id}`, t, i18n.language) }))}
+                    onChange={v => setSelectedSpeechGroupId(Number(v))}
+                    compact
+                  />
+                </div>
+              )}
+            </>
+          ) : isVideo ? (
             <>
               <div style={c.modelSelect}>
                 <CustomSelect
@@ -2110,6 +2191,31 @@ const c: Record<string, CSSProperties> = {
   promptArea: {
     position: 'relative',
     minHeight: COMPOSER_TEXTAREA_HEIGHT,
+  },
+  // 语音模式文本框下的计数行：左「n / 10,000 字符」、右「预计计费字符」；超限整行转警示色。
+  speechCounter: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+    padding: '0 14px 4px',
+    fontSize: 10,
+    color: cssVar('textTertiary'),
+    fontFamily: cssVar('fontMono'),
+    fontVariantNumeric: 'tabular-nums',
+  },
+  speechCounterWarn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+    padding: '0 14px 4px',
+    fontSize: 10,
+    color: cssVar('danger'),
+    fontFamily: cssVar('fontMono'),
+    fontVariantNumeric: 'tabular-nums',
   },
   textarea: {
     width: '100%',

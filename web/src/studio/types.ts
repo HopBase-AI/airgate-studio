@@ -1,9 +1,10 @@
-export type MediaType = 'image' | 'video' | 'music';
+// MediaType 作品介质：图像 / 视频 / 音频（语音合成）。
+export type MediaType = 'image' | 'video' | 'audio';
 
 export type ImageMode = 'text2img' | 'img2img' | 'inpaint' | 'batch';
 
-// StudioMode 生成任务的工作模式：图像四态 + 视频。
-export type StudioMode = ImageMode | 'video';
+// StudioMode 生成任务的工作模式：图像四态 + 视频 + 语音合成。
+export type StudioMode = ImageMode | 'video' | 'speech';
 
 export interface GenerationRouteSnapshot {
   routeKey: string;
@@ -38,6 +39,13 @@ export interface GalleryItem {
   referenceImages?: string[];
   referenceVideos?: string[];
   referenceAudios?: string[];
+  // 所属项目（语音资产没有 host task，「全部作品」视图里删除要按项目定位记录）。
+  projectId?: number;
+  // 语音资产专属：音色 / 语速（「重新生成」回放）、计费字符数与时长（卡片展示）。
+  voiceId?: string;
+  speed?: number;
+  usageCharacters?: number;
+  audioLengthMs?: number;
 }
 
 // BatchSubtask —— 批量生成里的单个子任务状态。批量任务把 N 张图聚成一个
@@ -81,4 +89,7 @@ export interface StudioGenerationTask {
   referenceImages?: string[];
   referenceVideos?: string[];
   referenceAudios?: string[];
+  // 语音任务的音色 / 语速，失败卡片「重试」沿用。
+  voiceId?: string;
+  speed?: number;
 }

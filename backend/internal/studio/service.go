@@ -160,14 +160,15 @@ func (s *Service) assetByTaskURL(ctx context.Context, userID int, projectID, tas
 	var out AssetRecord
 	var deletedAt sql.NullTime
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url, created_at, deleted_at
+		`SELECT id, user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url, kind, voice_id, usage_characters, audio_length_ms, created_at, deleted_at
 		 FROM studio_assets
 		 WHERE user_id = $1 AND project_id = $2 AND task_id = $3 AND url = $4`,
 		userID, projectID, taskID, url,
 	).Scan(
 		&out.ID, &out.UserID, &out.ProjectID, &out.TaskID, &out.URL, &out.Prompt,
 		&out.Platform, &out.Model, &out.GroupID, &out.RouteKey, &out.Mode, &out.Size,
-		&out.SourceVideoURL, &out.CreatedAt, &deletedAt,
+		&out.SourceVideoURL, &out.Kind, &out.VoiceID, &out.UsageCharacters, &out.AudioLengthMs,
+		&out.CreatedAt, &deletedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -204,12 +205,13 @@ func (s *Service) AddAsset(ctx context.Context, userID int, projectID int64, rec
 	out.UserID = userID
 	out.ProjectID = projectID
 	if err := s.db.QueryRowContext(ctx,
-		`INSERT INTO studio_assets (user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		`INSERT INTO studio_assets (user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url, kind, voice_id, usage_characters, audio_length_ms)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		 ON CONFLICT (project_id, task_id, url) WHERE task_id > 0
 		 DO NOTHING
 		 RETURNING id, created_at`,
 		userID, projectID, rec.TaskID, rec.URL, rec.Prompt, rec.Platform, rec.Model, rec.GroupID, rec.RouteKey, rec.Mode, rec.Size, rec.SourceVideoURL,
+		rec.Kind, rec.VoiceID, rec.UsageCharacters, rec.AudioLengthMs,
 	).Scan(&out.ID, &out.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) && rec.TaskID > 0 {
 			return s.assetByTaskURL(ctx, userID, projectID, rec.TaskID, rec.URL)
@@ -232,7 +234,7 @@ func (s *Service) ListAssets(ctx context.Context, userID int, projectID int64, l
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url, created_at
+		`SELECT `+assetSelectColumns+`
 		 FROM studio_assets
 		 WHERE project_id = $1 AND user_id = $2 AND deleted_at IS NULL
 		 ORDER BY created_at DESC, id DESC
@@ -244,15 +246,57 @@ func (s *Service) ListAssets(ctx context.Context, userID int, projectID int64, l
 	}
 	defer func() { _ = rows.Close() }()
 
-	assets := make([]AssetRecord, 0, limit)
+	assets, err := scanAssetRows(rows, limit)
+	return assets, total, err
+}
+
+// ListAssetsByKind 跨项目按介质分页读取用户资产（如语音 kind=audio）。语音资产没有 host
+// task，「全部作品」视图靠这条把它们并进历史；项目视图仍走 ListAssets。
+func (s *Service) ListAssetsByKind(ctx context.Context, userID int, kind string, limit, offset int) ([]AssetRecord, int, error) {
+	var total int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM studio_assets WHERE user_id = $1 AND kind = $2 AND deleted_at IS NULL`,
+		userID, kind,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+assetSelectColumns+`
+		 FROM studio_assets
+		 WHERE user_id = $1 AND kind = $2 AND deleted_at IS NULL
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $3 OFFSET $4`,
+		userID, kind, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	assets, err := scanAssetRows(rows, limit)
+	return assets, total, err
+}
+
+// assetSelectColumns 列表查询的列序，与 scanAssetRows 一一对应。
+const assetSelectColumns = `id, user_id, project_id, task_id, url, prompt, platform, model, group_id, route_key, mode, size, source_video_url, kind, voice_id, usage_characters, audio_length_ms, created_at`
+
+func scanAssetRows(rows *sql.Rows, capacity int) ([]AssetRecord, error) {
+	if capacity < 0 {
+		capacity = 0
+	}
+	assets := make([]AssetRecord, 0, capacity)
 	for rows.Next() {
 		var a AssetRecord
-		if err := rows.Scan(&a.ID, &a.UserID, &a.ProjectID, &a.TaskID, &a.URL, &a.Prompt, &a.Platform, &a.Model, &a.GroupID, &a.RouteKey, &a.Mode, &a.Size, &a.SourceVideoURL, &a.CreatedAt); err != nil {
-			return nil, 0, err
+		if err := rows.Scan(
+			&a.ID, &a.UserID, &a.ProjectID, &a.TaskID, &a.URL, &a.Prompt, &a.Platform, &a.Model, &a.GroupID, &a.RouteKey, &a.Mode, &a.Size,
+			&a.SourceVideoURL, &a.Kind, &a.VoiceID, &a.UsageCharacters, &a.AudioLengthMs, &a.CreatedAt,
+		); err != nil {
+			return nil, err
 		}
 		assets = append(assets, a)
 	}
-	return assets, total, rows.Err()
+	return assets, rows.Err()
 }
 
 func (s *Service) DeleteAsset(ctx context.Context, userID int, assetID int64) error {

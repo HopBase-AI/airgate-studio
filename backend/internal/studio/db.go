@@ -36,8 +36,16 @@ type AssetRecord struct {
 	Size      string `json:"size"`
 	// SourceVideoURL 视频官方上游直链（火山 TOS 签名，与视频同为 24h 过期）。
 	// 仅视频资产写入；前端用它在有效期内展示「官方源链接」溯源按钮。
-	SourceVideoURL string    `json:"source_video_url,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	SourceVideoURL string `json:"source_video_url,omitempty"`
+	// Kind 资产介质：语音合成写 audio；存量图片 / 视频记录留空，前端按 mode 推断
+	// （image 四态 / video），与上线前的行为一致。
+	Kind string `json:"kind,omitempty"`
+	// VoiceID / UsageCharacters / AudioLengthMs 语音资产专属：音色 ID、上游回报的计费
+	// 字符数（extra_info.usage_characters，计费权威）与音频时长（毫秒）。
+	VoiceID         string    `json:"voice_id,omitempty"`
+	UsageCharacters int64     `json:"usage_characters,omitempty"`
+	AudioLengthMs   int64     `json:"audio_length_ms,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func migrate(db *sql.DB) error {
@@ -73,6 +81,12 @@ func migrate(db *sql.DB) error {
 		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS group_id BIGINT NOT NULL DEFAULT 0;
 		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS route_key TEXT NOT NULL DEFAULT '';
 		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+		-- 语音合成资产（kind=audio）：没有 host task（同步转发直接出音频），按 kind 单独列表。
+		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT '';
+		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS voice_id TEXT NOT NULL DEFAULT '';
+		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS usage_characters BIGINT NOT NULL DEFAULT 0;
+		ALTER TABLE studio_assets ADD COLUMN IF NOT EXISTS audio_length_ms BIGINT NOT NULL DEFAULT 0;
+		CREATE INDEX IF NOT EXISTS idx_studio_assets_user_kind ON studio_assets(user_id, kind, created_at DESC);
 
 		-- Run the legacy cleanup only during the upgrade that creates the unique
 		-- index. Normal process restarts must not scan the full asset table.

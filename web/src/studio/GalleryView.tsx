@@ -9,6 +9,8 @@ import { getExpiryNotice, isVideoExpired, VIDEO_URL_TTL_MS } from './expiry';
 import { estimateEtaSeconds, etaDisplayState, formatElapsedCompact, formatEtaLabel } from './etaStats';
 import { useVideoStrings } from './video/videoConfig';
 import { failureHintKey, failureShowsRawMessage } from './video/failureHints';
+import { formatAudioDuration, formatSpeechSpeed, speechVoiceById, useSpeechStrings } from './speech/speechConfig';
+import { compareGalleryItemsNewestFirst } from './StudioContext';
 
 type NearViewportListener = (near: boolean) => void;
 
@@ -270,7 +272,7 @@ const batchCardStyles: Record<string, CSSProperties> = {
 
 function TaskCard({ task }: { task: StudioGenerationTask }) {
   const { t } = useTranslation();
-  const { deleteTask, generate, generateVideo, selectModelRoute, setSelectedModelKey, setImageSize, setImageMode, setMediaType, setVideoModelId, retryBatchFailures, tasks } = useStudio();
+  const { deleteTask, generate, generateVideo, generateSpeech, selectModelRoute, setSelectedModelKey, setImageSize, setImageMode, setMediaType, setVideoModelId, setSpeechModelId, retryBatchFailures, tasks } = useStudio();
   const { copied, copy } = useCopyOnClick(task.prompt);
 
   // 生成反馈：已用时计时（每秒）、队列位置、按尺寸档的 ETA 估算。
@@ -287,6 +289,7 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
     ? tasks.filter(x => x.status === 'queued').findIndex(x => x.id === task.id) + 1
     : 0;
   // ETA 来自同桶历史耗时的中位数(localStorage 滚动统计),无历史时回落静态种子。
+  // 语音是同步转发、几秒内完成，没有单独的 ETA 桶，按图片桶显示已用时即可。
   const etaSeconds = estimateEtaSeconds({
     mediaType: task.mode === 'video' ? 'video' : 'image',
     model: task.model,
@@ -319,6 +322,19 @@ function TaskCard({ task }: { task: StudioGenerationTask }) {
           size: task.size,
         }
       : null;
+    if (task.mode === 'speech') {
+      setMediaType('audio');
+      if (retryRoute) setSpeechModelId(retryRoute.model);
+      if (generateSpeech(task.prompt, {
+        route: retryRoute,
+        projectId: task.projectId,
+        voiceId: task.voiceId,
+        speed: task.speed,
+      })) {
+        void deleteTask(task.id).catch(() => {});
+      }
+      return;
+    }
     if (task.mode === 'video') {
       setMediaType('video');
       if (retryRoute) setVideoModelId(retryRoute.model);
@@ -565,6 +581,65 @@ function MediaPlaceholderIcon() {
   );
 }
 
+// 语音卡的媒体区：没有画面可缩略，用波形占位 + 内嵌播放器；元信息（音色 / 语速 / 时长）
+// 走下方的 meta 行。preload=none：画廊里几十张卡同时挂 <audio>，别一进来就把音频全拉下来。
+const audioCardStyles: Record<string, CSSProperties> = {
+  wrap: {
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: '18px 12px 12px',
+    boxSizing: 'border-box',
+    background: `linear-gradient(160deg, ${cssVar('bgDeep')} 0%, ${cssVar('bgHover')} 100%)`,
+    color: cssVar('textSecondary'),
+    cursor: 'default',
+  },
+  wave: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 3,
+    height: 36,
+  },
+  bar: {
+    width: 3,
+    borderRadius: 2,
+    background: cssVar('primary'),
+    opacity: 0.7,
+  },
+  player: {
+    width: '100%',
+    height: 32,
+    display: 'block',
+  },
+  failed: {
+    fontSize: 11,
+    color: cssVar('danger'),
+  },
+};
+
+// 静态波形（高度序列固定，只是识别用的图形，不解析真实音频）。
+const AUDIO_WAVE_HEIGHTS = [8, 16, 26, 14, 34, 20, 30, 12, 24, 36, 18, 28, 10, 22, 16, 30, 12, 26, 8];
+
+function AudioCardMedia({ url, onError, failed, failedLabel }: { url: string; onError: () => void; failed: boolean; failedLabel: string }) {
+  return (
+    <div style={audioCardStyles.wrap} onClick={e => e.stopPropagation()}>
+      <div style={audioCardStyles.wave} aria-hidden="true">
+        {AUDIO_WAVE_HEIGHTS.map((height, index) => (
+          <span key={index} style={{ ...audioCardStyles.bar, height }} />
+        ))}
+      </div>
+      {failed ? (
+        <div style={audioCardStyles.failed}>{failedLabel}</div>
+      ) : (
+        <audio src={url} controls preload="none" style={audioCardStyles.player} onError={onError} />
+      )}
+    </div>
+  );
+}
+
 interface GalleryCardProps {
   item: GalleryItem;
   index: number;
@@ -573,7 +648,11 @@ interface GalleryCardProps {
 function GalleryCard({ item, index }: GalleryCardProps) {
   const { t } = useTranslation();
   const vs = useVideoStrings();
+  const sp = useSpeechStrings();
   const { setPreviewItem, deleteGalleryItem, applyAsReference, regenerate, requestEdit, generatedAssetRetentionDays } = useStudio();
+  const isAudio = item.mediaType === 'audio';
+  // 参考 / 编辑只对图片有意义；视频与音频都不进图像参考。
+  const isImage = !isAudio && item.mediaType !== 'video';
   const { copied, copy } = useCopyOnClick(item.prompt);
   const { copied: sourceCopied, copy: copySourceLink } = useCopyOnClick(item.sourceVideoUrl);
   const createdAtLabel = formatCreatedAt(item.createdAt);
@@ -650,7 +729,9 @@ function GalleryCard({ item, index }: GalleryCardProps) {
       }}
       className="studio-gallery-card"
     >
-      {item.mediaType === 'video' && (expired || mediaError) ? (
+      {isAudio ? (
+        <AudioCardMedia url={item.url} onError={() => setMediaError(true)} failed={mediaError} failedLabel={sp('load_failed')} />
+      ) : item.mediaType === 'video' && (expired || mediaError) ? (
         <div style={{ ...mediaPlaceholderStyles.wrap, aspectRatio: '4/3' }}>
           <MediaPlaceholderIcon />
           <div style={mediaPlaceholderStyles.title}>{vs(expired ? 'expired_title' : 'load_failed')}</div>
@@ -722,6 +803,20 @@ function GalleryCard({ item, index }: GalleryCardProps) {
           {item.size && (
             <span style={ss.galleryCardMetaItem}>{item.size}</span>
           )}
+          {isAudio && item.voiceId && (
+            <span style={ss.galleryCardMetaItem} title={item.voiceId}>
+              {speechVoiceById(item.voiceId)?.name ?? item.voiceId}
+            </span>
+          )}
+          {isAudio && typeof item.speed === 'number' && (
+            <span style={ss.galleryCardMetaItem}>{formatSpeechSpeed(item.speed)}</span>
+          )}
+          {isAudio && item.audioLengthMs ? (
+            <span style={ss.galleryCardMetaItem}>{sp('result_duration', { duration: formatAudioDuration(item.audioLengthMs) })}</span>
+          ) : null}
+          {isAudio && item.usageCharacters ? (
+            <span style={ss.galleryCardMetaItem}>{sp('result_chars', { count: item.usageCharacters.toLocaleString('en-US') })}</span>
+          ) : null}
               <span style={ss.galleryCardMetaItem}>
                 {t('playground.studio_created_at')}
                 {' '}
@@ -769,7 +864,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
             style={ss.galleryCardActionBtn}
             className="studio-gallery-action"
             onClick={handleDownload}
-            title={t('playground.studio_download')}
+            title={isAudio ? sp('download') : t('playground.studio_download')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -810,7 +905,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
               <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
             </svg>
           </button>
-          {item.mediaType !== 'video' && (
+          {isImage && (
             <button
               type="button"
               style={ss.galleryCardActionBtn}
@@ -826,7 +921,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
               </svg>
             </button>
           )}
-          {item.mediaType !== 'video' && (
+          {isImage && (
             <button
               type="button"
               style={ss.galleryCardActionBtn}
@@ -1164,7 +1259,7 @@ function EmptyState() {
 
 // ── GalleryView ─────────────────────────────────────────────────────────────
 
-type GalleryMediaFilter = 'all' | 'image' | 'video';
+type GalleryMediaFilter = 'all' | 'image' | 'video' | 'audio';
 
 const galleryToolbarStyles: Record<string, CSSProperties> = {
   // 整行吸顶的工具条:抵消画廊的内边距铺满整行,底部发丝线与项目栏表头对齐;
@@ -1248,6 +1343,13 @@ const galleryToolbarStyles: Record<string, CSSProperties> = {
 };
 
 function GalleryFilterIcon({ filter }: { filter: GalleryMediaFilter }) {
+  if (filter === 'audio') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 3v18" /><path d="M8 7v10" /><path d="M16 7v10" /><path d="M4 10v4" /><path d="M20 10v4" />
+      </svg>
+    );
+  }
   if (filter === 'video') {
     return (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1271,17 +1373,30 @@ function GalleryFilterIcon({ filter }: { filter: GalleryMediaFilter }) {
 
 function FilteredEmptyState({ filter }: { filter: Exclude<GalleryMediaFilter, 'all'> }) {
   const vs = useVideoStrings();
+  const sp = useSpeechStrings();
   return (
     <div style={galleryToolbarStyles.filteredEmpty}>
       <GalleryFilterIcon filter={filter} />
-      <span>{vs(filter === 'video' ? 'gallery_empty_video' : 'gallery_empty_image')}</span>
+      <span>{filter === 'audio' ? sp('gallery_empty_audio') : vs(filter === 'video' ? 'gallery_empty_video' : 'gallery_empty_image')}</span>
     </div>
   );
 }
 
+// galleryMediaOf 条目 / 任务的介质归类（筛选用）：缺省按图片。
+function galleryMediaOf(mediaType: GalleryItem['mediaType']): Exclude<GalleryMediaFilter, 'all'> {
+  return mediaType === 'video' ? 'video' : mediaType === 'audio' ? 'audio' : 'image';
+}
+
+function taskMediaOf(mode: StudioGenerationTask['mode']): Exclude<GalleryMediaFilter, 'all'> {
+  return mode === 'video' ? 'video' : mode === 'speech' ? 'audio' : 'image';
+}
+
+const GALLERY_MEDIA_FILTERS: GalleryMediaFilter[] = ['all', 'image', 'video', 'audio'];
+
 export function GalleryView() {
   const { t } = useTranslation();
   const vs = useVideoStrings();
+  const sp = useSpeechStrings();
   const { gallery, tasks, previewItem, hasMore, loadingMore, loadMoreError, loadMore, activeProjectId } = useStudio();
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
@@ -1313,16 +1428,22 @@ export function GalleryView() {
     (activeProjectId === 0 || task.projectId === activeProjectId)
   ));
   const visibleTasks = activeTasks.filter(task =>
-    (mediaFilter === 'all' || (task.mode === 'video' ? 'video' : 'image') === mediaFilter),
+    (mediaFilter === 'all' || taskMediaOf(task.mode) === mediaFilter),
   );
-  const visibleGallery = gallery.filter(item =>
-    mediaFilter === 'all' || (item.mediaType === 'video' ? 'video' : 'image') === mediaFilter,
-  );
+  // 图片 / 视频（host tasks）与语音（studio_assets）是两条分页流，合并后按创建时间统一排序
+  // （稳定排序：同一时刻的保持原相对顺序）。
+  const visibleGallery = gallery
+    .filter(item => mediaFilter === 'all' || galleryMediaOf(item.mediaType) === mediaFilter)
+    .sort(compareGalleryItemsNewestFirst);
   const isEmpty = visibleGallery.length === 0 && visibleTasks.length === 0 && !hasMore && !loadingMore;
+  // 语音筛选项只在画廊里确实有语音作品（或语音任务）时出现，免得没开语音的用户看到空标签。
+  const hasAudio = gallery.some(item => item.mediaType === 'audio') || activeTasks.some(task => task.mode === 'speech');
+  const filters = hasAudio ? GALLERY_MEDIA_FILTERS : GALLERY_MEDIA_FILTERS.filter(filter => filter !== 'audio');
   const filterLabels: Record<GalleryMediaFilter, string> = {
     all: t('playground.studio_all_works'),
     image: vs('media_image'),
     video: vs('media_video'),
+    audio: sp('media_audio'),
   };
 
   return (
@@ -1331,7 +1452,7 @@ export function GalleryView() {
 
       <div style={galleryToolbarStyles.bar}>
         <div style={galleryToolbarStyles.segmented} role="tablist" aria-label={t('playground.studio_all_works')}>
-          {(['all', 'image', 'video'] as GalleryMediaFilter[]).map(filter => (
+          {filters.map(filter => (
             <button
               key={filter}
               type="button"
