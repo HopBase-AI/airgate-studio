@@ -880,6 +880,25 @@ export const studioCSS = `
     color: #fff !important;
   }
 
+  /* 缩略条横向滚动：滚动条不占这一行的高度（行高由缩略卡决定） */
+  .studio-source-strip {
+    scrollbar-width: none;
+  }
+  .studio-source-strip::-webkit-scrollbar {
+    height: 0;
+    width: 0;
+  }
+  /* 行尾状态槽里的「清除」：文字命令，不是按钮格 */
+  .studio-slot-clear:hover {
+    color: ${cssVar('text')} !important;
+    border-bottom-color: ${cssVar('textTertiary')} !important;
+  }
+  .studio-slot-clear:focus-visible {
+    outline: 2px solid ${cssVar('primary')};
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
   .studio-gen-btn:hover:not(:disabled) {
     opacity: 0.92;
     box-shadow: 0 0 24px ${cssVar('primaryGlow')};
