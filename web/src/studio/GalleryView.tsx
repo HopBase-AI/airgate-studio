@@ -649,7 +649,7 @@ function GalleryCard({ item, index }: GalleryCardProps) {
   const { t } = useTranslation();
   const vs = useVideoStrings();
   const sp = useSpeechStrings();
-  const { setPreviewItem, deleteGalleryItem, applyAsReference, regenerate, requestEdit, generatedAssetRetentionDays } = useStudio();
+  const { setPreviewItem, deleteGalleryItem, applyAsReference, applyAudioAsReference, regenerate, requestEdit, generatedAssetRetentionDays } = useStudio();
   const isAudio = item.mediaType === 'audio';
   // 参考 / 编辑只对图片有意义；视频与音频都不进图像参考。
   const isImage = !isAudio && item.mediaType !== 'video';
@@ -693,6 +693,14 @@ function GalleryCard({ item, index }: GalleryCardProps) {
   const handleUseAsReference = (e: React.MouseEvent) => {
     e.stopPropagation();
     applyAsReference(item);
+  };
+
+  // 语音作品「引用」：切到视频模式并把这条音频加进参考素材缩略条（复用持久资产，不重新上传）。
+  // 当前视频模型不收参考音频、或要求音频配图/配视频时，创作框的参考素材提示条会即时给出警示
+  // 与「移除不支持的素材」，不必等提交才报错。
+  const handleUseAsVideoReference = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    applyAudioAsReference(item);
   };
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -905,6 +913,23 @@ function GalleryCard({ item, index }: GalleryCardProps) {
               <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
             </svg>
           </button>
+          {isAudio && (
+            <button
+              type="button"
+              style={ss.galleryCardActionBtn}
+              className="studio-gallery-action"
+              onClick={handleUseAsVideoReference}
+              title={vs('use_as_video_reference')}
+              aria-label={vs('use_as_video_reference')}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M16 3h5v5" />
+                <path d="M21 3l-7 7" />
+                <path d="M8 21H3v-5" />
+                <path d="M3 21l7-7" />
+              </svg>
+            </button>
+          )}
           {isImage && (
             <button
               type="button"

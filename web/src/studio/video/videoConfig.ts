@@ -739,6 +739,9 @@ export const VIDEO_STRINGS = {
     ref_pending_upload: '参考素材还在上传，完成后再发送',
     ref_remove_unsupported: '移除不支持的素材',
     ref_image_resolution: '带参考图时分辨率最高 {max}',
+    // 画廊里的语音作品「引用」进视频参考素材：复用已落库的持久资产，不必下载再上传。
+    use_as_video_reference: '用作视频参考音频',
+    ref_audio_already_added: '该音频已在参考素材中',
     fail_speech_text_too_long: '文本超过 10,000 字符上限，请分段后重试',
     fail_speech_voice_not_found: '音色 ID 不存在，请从列表选择或核对官方音色 ID 后重试',
     fail_speech_no_audio: '合成完成但没有返回可用音频，请重试',
@@ -844,6 +847,9 @@ export const VIDEO_STRINGS = {
     ref_pending_upload: 'Reference files are still uploading — send when they finish',
     ref_remove_unsupported: 'Remove unsupported files',
     ref_image_resolution: 'With reference images the resolution is limited to {max}',
+    // 画廊里的语音作品「引用」进视频参考素材：复用已落库的持久资产，不必下载再上传。
+    use_as_video_reference: 'Use as reference audio for video',
+    ref_audio_already_added: 'That audio is already in your reference files',
     fail_speech_text_too_long: 'The text exceeds the 10,000-character limit. Split it and retry.',
     fail_speech_voice_not_found: 'The voice ID does not exist. Pick one from the list or check the official voice ID and retry.',
     fail_speech_no_audio: 'Synthesis finished but returned no usable audio. Please retry.',
@@ -949,6 +955,9 @@ export const VIDEO_STRINGS = {
     ref_pending_upload: '参考ファイルをアップロード中です。完了後に送信してください',
     ref_remove_unsupported: '非対応のファイルを削除',
     ref_image_resolution: '参考画像を使う場合、解像度は {max} までです',
+    // 画廊里的语音作品「引用」进视频参考素材：复用已落库的持久资产，不必下载再上传。
+    use_as_video_reference: '動画の参考音声として使う',
+    ref_audio_already_added: 'この音声はすでに参考素材に追加されています',
     fail_speech_text_too_long: 'テキストが 10,000 文字の上限を超えています。分割して再試行してください',
     fail_speech_voice_not_found: '音声 ID が存在しません。一覧から選ぶか、公式の音声 ID を確認して再試行してください',
     fail_speech_no_audio: '合成は完了しましたが利用できる音声が返りませんでした。再試行してください',
@@ -1054,6 +1063,9 @@ export const VIDEO_STRINGS = {
     ref_pending_upload: '參考素材仍在上載，完成後再發送',
     ref_remove_unsupported: '移除不支援的素材',
     ref_image_resolution: '附參考圖時解像度最高 {max}',
+    // 画廊里的语音作品「引用」进视频参考素材：复用已落库的持久资产，不必下载再上传。
+    use_as_video_reference: '用作影片參考音訊',
+    ref_audio_already_added: '該音訊已在參考素材中',
     fail_speech_text_too_long: '文字超過 10,000 字元上限，請分段後重試',
     fail_speech_voice_not_found: '音色 ID 不存在，請從列表選擇或核對官方音色 ID 後重試',
     fail_speech_no_audio: '合成完成但沒有回傳可用音訊，請重試',
@@ -1159,6 +1171,9 @@ export const VIDEO_STRINGS = {
     ref_pending_upload: 'Los archivos de referencia aún se están subiendo; envía cuando terminen',
     ref_remove_unsupported: 'Quitar archivos no compatibles',
     ref_image_resolution: 'Con imágenes de referencia, la resolución máxima es {max}',
+    // 画廊里的语音作品「引用」进视频参考素材：复用已落库的持久资产，不必下载再上传。
+    use_as_video_reference: 'Usar como audio de referencia para video',
+    ref_audio_already_added: 'Ese audio ya está en tus archivos de referencia',
     fail_speech_text_too_long: 'El texto supera el límite de 10 000 caracteres. Divídelo y reintenta.',
     fail_speech_voice_not_found: 'El ID de voz no existe. Elige uno de la lista o verifica el ID de voz oficial y reintenta.',
     fail_speech_no_audio: 'La síntesis terminó pero no devolvió audio utilizable. Reintenta.',

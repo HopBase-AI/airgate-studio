@@ -76,6 +76,54 @@ func TestValidateReferenceInputsPerModelLimits(t *testing.T) {
 	}
 }
 
+// 创作中心的语音作品点「引用」后直接把自己的资产地址当参考音频提交，不再下载 + 重传。
+// 语音资产是 assets.store 里 purpose=generated 的持久资产（speech.go），参考上传落的是
+// purpose=task-input（references.go）——这里钉住「校验只看地址形态、不看 purpose」这条契约，
+// 免得日后加 purpose 白名单把「引用」链路悄悄打死。保留期也同源：core 的
+// asset_retention_generated_days 一个设置同时喂给 generated 与 task-input 两个 purpose。
+func TestValidateReferenceInputsAcceptsGeneratedSpeechAssets(t *testing.T) {
+	// assets.store 对本地存储回 /assets-runtime/<purpose>/<user>/<yyyymm>/<key>，对象存储回绝对地址。
+	for _, url := range []string{
+		"/assets-runtime/generated/7035/202609/6f1c2ab4.mp3",
+		"https://cdn.example.com/generated/7035/202609/6f1c2ab4.wav",
+	} {
+		if !isUploadedReferenceURL(url) {
+			t.Fatalf("generated speech asset %q must pass the reference address check", url)
+		}
+		audioOnly := []generationInput{{Type: "audio", Role: "reference_audio", URL: url}}
+		// SD2.5 收音频单飞。
+		if err := validateReferenceInputs("video", videoModelSeedance25, audioOnly); err != nil {
+			t.Fatalf("seedance 2.5 rejected generated speech asset %q: %v", url, err)
+		}
+		// SD2.0 / H3 要求音频配图或配视频——「引用」链路同样受这条约束。
+		if err := validateReferenceInputs("video", videoModelSeedanceStandardOverseas, audioOnly); err == nil ||
+			!strings.Contains(err.Error(), "requires at least one reference image or video") {
+			t.Fatalf("seedance 2.0 audio-only error = %v", err)
+		}
+		withImage := append([]generationInput{{Type: "image", Role: "reference_image", URL: "https://cdn.example.com/i.png"}}, audioOnly...)
+		if err := validateReferenceInputs("video", "MiniMax-H3", withImage); err != nil {
+			t.Fatalf("h3 rejected generated speech asset with an image: %v", err)
+		}
+		// 不收音频的模型照样拦住，「引用」不是绕过能力矩阵的后门。
+		if err := validateReferenceInputs("video", "kling-v3", audioOnly); err == nil ||
+			!strings.Contains(err.Error(), "does not accept reference audio clips") {
+			t.Fatalf("kling audio error = %v", err)
+		}
+	}
+
+	// 引用的地址原样进任务输入的 audios 数组，执行插件据此组装上游请求。
+	input := buildTaskInput(createGenerationTaskRequest{
+		Kind:  "video",
+		Model: videoModelSeedance25,
+		Inputs: []generationInput{
+			{Type: "audio", Role: "reference_audio", URL: "/assets-runtime/generated/7035/202609/6f1c2ab4.mp3"},
+		},
+	})
+	if got, _ := input["audios"].([]string); len(got) != 1 || got[0] != "/assets-runtime/generated/7035/202609/6f1c2ab4.mp3" {
+		t.Fatalf("audios = %#v", input["audios"])
+	}
+}
+
 func TestValidateReferenceInputsRejectsInlineMediaAndImageTasks(t *testing.T) {
 	inline := []generationInput{{Type: "video", Role: "reference_video", URL: "data:video/mp4;base64,AAAA"}}
 	if err := validateReferenceInputs("video", videoModelSeedance25, inline); err == nil || !strings.Contains(err.Error(), "must be uploaded") {

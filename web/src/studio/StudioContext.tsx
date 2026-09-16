@@ -384,6 +384,24 @@ export function speechResultToGallery(result: SpeechResult, text: string): Galle
   };
 }
 
+// AudioReferenceRequest 画廊「引用」发往 ComposerBar 的一次请求。seq 让同一条音频连点也各自
+// 触发（去重按 url 在 ComposerBar 做），url 是语音资产的持久地址，直接当参考音频提交。
+export interface AudioReferenceRequest {
+  seq: number;
+  url: string;
+  name: string;
+  durationSeconds?: number;
+}
+
+// speechReferenceName 语音作品在参考素材缩略条上的名字：取正文首行前 24 个字符，
+// 正文为空时退回音色 ID，再退回通用标签。不走 i18n——它是素材名，不是界面文案。
+export function speechReferenceName(item: Pick<GalleryItem, 'prompt' | 'alt' | 'voiceId'>): string {
+  const text = (item.prompt || item.alt || '').replace(/\s+/g, ' ').trim();
+  if (text) return Array.from(text).length > 24 ? `${Array.from(text).slice(0, 24).join('')}…` : text;
+  const voice = (item.voiceId || '').trim();
+  return voice || 'audio';
+}
+
 // compareGalleryItemsNewestFirst 画廊展示序：按创建时间倒序。图片 / 视频（host task）与语音
 // （studio_assets）来自两条分页流，各自有序、合并后需要统一排；解析不了的时间沉底。
 export function compareGalleryItemsNewestFirst(a: Pick<GalleryItem, 'createdAt'>, b: Pick<GalleryItem, 'createdAt'>): number {
@@ -973,6 +991,10 @@ export interface StudioContextValue {
   applyAsReference: (item: GalleryItem) => void;
   regenerate: (item: GalleryItem) => void;
   variations: (item: GalleryItem) => void;
+  // 「引用」：把某条语音作品当视频参考音频载入创作框（ComposerBar 监听 audioReferenceRequest）。
+  applyAudioAsReference: (item: GalleryItem) => void;
+  audioReferenceRequest: AudioReferenceRequest | null;
+  clearAudioReferenceRequest: () => void;
   // 「编辑这张」：把某张结果图载入主创作框并打开蒙版编辑器（ComposerBar 监听 editRequest）。
   editRequest: string | null;
   requestEdit: (url: string) => void;
@@ -2951,6 +2973,27 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setImageMode('img2img');
   }, []);
 
+  const [audioReferenceRequest, setAudioReferenceRequest] = useState<AudioReferenceRequest | null>(null);
+  const audioReferenceSeqRef = useRef(0);
+  // 「引用」语音作品当视频参考音频：不下载再上传，直接复用已落库的持久资产地址。
+  // 可行性依据：core 的 assets.store 资产清理按 purpose 计龄，而 asset_retention_generated_days
+  // 一个设置同时喂给 generated 与 task-input 两个 purpose（core asset_cleanup.go
+  // loadAssetRetentionPolicy），保留期完全相同；插件侧 validateReferenceInputs 只校验地址形态
+  // （/assets-runtime 或 http(s)），不要求资产是经 /reference-uploads 登记的 task-input。
+  const applyAudioAsReference = useCallback((item: GalleryItem) => {
+    if (item.mediaType !== 'audio' || !item.url.trim()) return;
+    audioReferenceSeqRef.current += 1;
+    setAudioReferenceRequest({
+      seq: audioReferenceSeqRef.current,
+      url: item.url,
+      name: speechReferenceName(item),
+      // 语音资产自带时长，省掉一次元数据探测；缺省时由 ComposerBar 读媒体元素兜底。
+      durationSeconds: item.audioLengthMs && item.audioLengthMs > 0 ? item.audioLengthMs / 1000 : undefined,
+    });
+    setMediaType('video');
+  }, []);
+  const clearAudioReferenceRequest = useCallback(() => setAudioReferenceRequest(null), []);
+
   const regenerate = useCallback((item: GalleryItem) => {
     const route = galleryItemRoute(item);
     if (item.mediaType === 'audio' || item.mode === 'speech') {
@@ -3233,6 +3276,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     applyAsReference,
     regenerate,
     variations,
+    applyAudioAsReference,
+    audioReferenceRequest,
+    clearAudioReferenceRequest,
     editRequest,
     requestEdit,
     clearEditRequest,
