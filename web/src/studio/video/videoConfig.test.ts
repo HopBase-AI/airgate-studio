@@ -293,6 +293,18 @@ describe('videoConfig', () => {
     expect(formatVideoCostEstimate(3, 'CNY')).toBe('CNY 3.00');
   });
 
+  // 画廊语音卡的「引用」按钮与重复引用提示：任一语言缺一条，那一语的用户就看到 undefined。
+  it('语音「引用」入口文案五语齐备且互不相同', () => {
+    const langs = ['zh', 'en', 'ja', 'zh-HK', 'es'] as const;
+    for (const lang of langs) {
+      expect(VIDEO_STRINGS[lang].use_as_video_reference).toBeTruthy();
+      expect(VIDEO_STRINGS[lang].ref_audio_already_added).toBeTruthy();
+    }
+    // zh 与 zh-HK 用词不同（音频 / 音訊），别把繁体漏成简体复制。
+    expect(VIDEO_STRINGS['zh-HK'].use_as_video_reference).not.toBe(VIDEO_STRINGS.zh.use_as_video_reference);
+    expect(VIDEO_STRINGS['zh-HK'].ref_audio_already_added).not.toBe(VIDEO_STRINGS.zh.ref_audio_already_added);
+  });
+
   it('过期文案与上游 24h 签名口径一致(防回归 30 天)', () => {
     for (const lang of ['zh', 'en', 'ja', 'zh-HK', 'es'] as const) {
       expect(VIDEO_STRINGS[lang].expire_hint).toContain('24');

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type DragEvent, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cssVar } from '@doudou-start/airgate-theme';
-import { useStudio } from './StudioContext';
+import { useStudio, type AudioReferenceRequest } from './StudioContext';
 import { GalleryView } from './GalleryView';
 import { studioStyles as ss, studioCSS } from './studioStyles';
 import { SizeSelector } from './SizeSelector';
@@ -38,7 +38,10 @@ interface ComposerReferenceMedia {
   id: string;
   kind: VideoReferenceMediaKind;
   name: string;
-  file: File;
+  // 'upload' 选文件上传；'asset' 从画廊「引用」已生成的作品，复用其持久资产地址、不重传。
+  source: 'upload' | 'asset';
+  // 只有 source='upload' 有原文件（失败重试要用）。
+  file?: File;
   // 本地预览地址（objectURL）：/assets-runtime 不支持 Range，Safari 播不了远端视频。
   previewUrl: string;
   durationSeconds?: number;
@@ -113,6 +116,19 @@ let referenceMediaSeq = 0;
 function nextReferenceMediaId(): string {
   referenceMediaSeq += 1;
   return `ref-${Date.now().toString(36)}-${referenceMediaSeq}`;
+}
+
+// fetchAsObjectUrl 把已上传资产取成本地 objectURL 供试听：/assets-runtime 不支持 Range，
+// Safari 播不了直连的远端媒体。取不到（跨域对象存储、离线）回 null，调用方退回远端地址。
+async function fetchAsObjectUrl(url: string): Promise<string | null> {
+  if (typeof fetch !== 'function') return null;
+  try {
+    const response = await fetch(url, { credentials: 'same-origin' });
+    if (!response.ok) return null;
+    return URL.createObjectURL(await response.blob());
+  } catch {
+    return null;
+  }
 }
 
 function readFileAsDataURL(file: File): Promise<string> {
@@ -1031,6 +1047,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     generateSpeech,
     referenceImages, setReferenceImages,
     editRequest, clearEditRequest,
+    audioReferenceRequest, clearAudioReferenceRequest,
   } = useStudio();
 
   const isVideo = mediaType === 'video';
@@ -1066,11 +1083,14 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
   }, []);
 
   const uploadReferenceMedia = useCallback((item: Pick<ComposerReferenceMedia, 'id' | 'file' | 'kind'>) => {
+    // 「引用」进来的素材没有原文件，本来就已是资产，不该走上传。
+    const file = item.file;
+    if (!file) return;
     uploadControllersRef.current.get(item.id)?.abort();
     const controller = new AbortController();
     uploadControllersRef.current.set(item.id, controller);
     patchReferenceMedia(item.id, { status: 'uploading', progress: 0, error: undefined });
-    api.uploadReference(item.file, item.kind, {
+    api.uploadReference(file, item.kind, {
       signal: controller.signal,
       onProgress: progress => patchReferenceMedia(item.id, { progress }),
     })
@@ -1096,6 +1116,7 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
       id: nextReferenceMediaId(),
       kind,
       name: file.name,
+      source: 'upload',
       file,
       previewUrl: URL.createObjectURL(file),
       status: 'uploading',
@@ -1105,6 +1126,44 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     void readReferenceMediaMetadata(item.previewUrl, kind).then(meta => patchReferenceMedia(item.id, meta));
     uploadReferenceMedia(item);
   }, [patchReferenceMedia, uploadReferenceMedia, vs]);
+
+  // addReferenceAudioAsset 「引用」画廊里的语音作品当参考音频：资产已在 assets.store 里，
+  // 直接拿它的持久地址当任务输入，不再下载 + 重传（后端 validateReferenceInputs 只校验地址
+  // 形态，不要求资产是 /reference-uploads 登记的 task-input；两种 purpose 的保留期同源）。
+  const addReferenceAudioAsset = useCallback((asset: AudioReferenceRequest) => {
+    const url = asset.url.trim();
+    if (!url) return;
+    if (referenceMediaRef.current.some(item => item.kind === 'audio' && item.url === url)) {
+      setReferenceNotice(vs('ref_audio_already_added'));
+      return;
+    }
+    setReferenceNotice(null);
+    const item: ComposerReferenceMedia = {
+      id: nextReferenceMediaId(),
+      kind: 'audio',
+      name: asset.name,
+      source: 'asset',
+      // 先用远端地址占位，取到本地副本后再换成 objectURL。
+      previewUrl: url,
+      url,
+      durationSeconds: asset.durationSeconds,
+      status: 'ready',
+      progress: 1,
+    };
+    setReferenceMedia(prev => [...prev, item]);
+    void fetchAsObjectUrl(url).then(objectUrl => {
+      if (!objectUrl) return;
+      // 取回来之前用户可能已经移除了这条，别把 objectURL 漏掉。
+      if (!referenceMediaRef.current.some(current => current.id === item.id)) {
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      patchReferenceMedia(item.id, { previewUrl: objectUrl });
+    });
+    if (asset.durationSeconds === undefined) {
+      void readReferenceMediaMetadata(url, 'audio').then(meta => patchReferenceMedia(item.id, meta));
+    }
+  }, [patchReferenceMedia, vs]);
 
   const removeReferenceMedia = useCallback((id: string) => {
     uploadControllersRef.current.get(id)?.abort();
@@ -1145,6 +1204,13 @@ function ComposerBar({ promptRef, onOpenInspiration }: { promptRef?: React.Mutab
     clearEditRequest();
     textareaRef.current?.focus();
   }, [editRequest, clearEditRequest]);
+
+  // 「引用」：画廊里的语音作品进参考素材缩略条（StudioContext 已同时切到视频模式）。
+  useEffect(() => {
+    if (!audioReferenceRequest) return;
+    addReferenceAudioAsset(audioReferenceRequest);
+    clearAudioReferenceRequest();
+  }, [audioReferenceRequest, addReferenceAudioAsset, clearAudioReferenceRequest]);
 
   // Union: composer uploads come first, then gallery "use as reference" picks.
   // Both can coexist now (previously gallery picks only showed when composer

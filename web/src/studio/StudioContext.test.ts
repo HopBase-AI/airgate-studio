@@ -10,6 +10,7 @@ import {
   mergeGalleryItems,
   remoteTaskProjectID,
   remoteTaskReferences,
+  speechReferenceName,
 } from './StudioContext';
 import { LEGACY_SEEDANCE25_MODEL_ID, VIDEO_MODEL_IDS } from './video/videoConfig';
 
@@ -162,5 +163,29 @@ describe('remoteTaskReferences', () => {
   it('omits every key the server did not record instead of spreading undefined', () => {
     expect(remoteTaskReferences({ input_images: [] as string[] } as GenerationTask)).toEqual({});
     expect(Object.keys(remoteTaskReferences({} as GenerationTask))).toEqual([]);
+  });
+});
+
+
+// 「引用」语音作品当视频参考音频：缩略条上的素材名由正文生成，太长要截断，正文为空也要有名字。
+describe('speechReferenceName', () => {
+  it('collapses whitespace and truncates long text by code point', () => {
+    expect(speechReferenceName({ prompt: '  今天 \n 天气不错  ', alt: '', voiceId: '' })).toBe('今天 天气不错');
+    const long = '声'.repeat(40);
+    const name = speechReferenceName({ prompt: long, alt: '', voiceId: '' });
+    expect(Array.from(name)).toHaveLength(25);
+    expect(name.endsWith('…')).toBe(true);
+    // 按码点截断：emoji 不能被劈成半个代理对。
+    expect(speechReferenceName({ prompt: '🎧'.repeat(30), alt: '', voiceId: '' }))
+      .toBe(`${'🎧'.repeat(24)}…`);
+  });
+
+  it('falls back to the voice id and then a generic label', () => {
+    expect(speechReferenceName({ prompt: '', alt: '  ', voiceId: 'male-qn-qingse' })).toBe('male-qn-qingse');
+    expect(speechReferenceName({ prompt: '', alt: '', voiceId: '' })).toBe('audio');
+  });
+
+  it('uses alt when the prompt is missing', () => {
+    expect(speechReferenceName({ prompt: '', alt: 'hello there', voiceId: 'v1' })).toBe('hello there');
   });
 });
