@@ -11,6 +11,7 @@ import {
   defaultSpeechVoiceFor,
   formatSpeechSpeed,
   speechVoiceById,
+  speechVoiceChipKey,
   speechVoiceLanguageKey,
   type SpeechStrings,
   type SpeechVoiceLanguage,
@@ -98,9 +99,13 @@ export function SpeechParamsPopover({ voiceId, setVoiceId, speed, setSpeed, text
   const autoLabel = autoVoice ? `${sp('voice_auto')} · ${autoVoice.name}` : sp('voice_auto');
   const summary = `${speechVoiceLabel(voiceId, sp)} · ${formatSpeechSpeed(speed)}`;
 
+  // 芯片文案自带「音色」后明显变长：padding 11 + minWidth 80 是实测出的折行配方——五语
+  // 在 320px 面板里分别折成 3+3（中/繁/日）与 2+2+2（英/西），不会出现末行只剩一个芯片
+  // 的散架排布，也不横向溢出。改这两个数前先按 PR 里的量法复测五语。
   const chip = (active: boolean): CSSProperties => ({
     height: 26,
-    padding: '0 10px',
+    minWidth: 80,
+    padding: '0 11px',
     borderRadius: 8,
     border: `1px solid ${active ? 'transparent' : cssVar('borderSubtle')}`,
     background: active ? cssVar('primarySubtle') : 'transparent',
@@ -132,17 +137,17 @@ export function SpeechParamsPopover({ voiceId, setVoiceId, speed, setSpeed, text
             <span style={s.rowLabel}>{sp('voice')}</span>
             <div style={s.chipRow} role="group" aria-label={sp('voice_lang_filter')}>
               <button type="button" style={chip(language === 'all')} onClick={() => setLanguage('all')}>
-                {sp('voice_lang_all')}
+                {sp('voice_lang_chip_all')}
               </button>
               {SPEECH_VOICE_LANGUAGES.map(lang => (
                 <button key={lang} type="button" style={chip(language === lang)} onClick={() => setLanguage(lang)}>
-                  {sp(speechVoiceLanguageKey(lang))}
+                  {sp(speechVoiceChipKey(lang))}
                 </button>
               ))}
             </div>
-            {/* 语言 chip 筛的是配音员母语，不是输出语言。光秃秃一排「西班牙语」会被读成
-                「输出西班牙语」，所以紧挨着 chip 摆一行消歧说明，并顺带把「要外语语音就
-                改文本」的正确用法讲出来（2026-09-16 用户反馈）。 */}
+            {/* 语言 chip 筛的是配音员母语，不是输出语言。光秃秃一排「西班牙语」挂在「音色」
+                标题下会被读成「输出西班牙语」，所以 chip 文案自带「音色」二字先消歧；下面这
+                行说明退居兜底，只讲「不翻译 / 要外语语音就改文本」（2026-09-16 用户反馈）。 */}
             <span style={s.hint}>{sp('voice_lang_hint')}</span>
             <div style={s.voiceList} role="listbox" aria-label={sp('voice')}>
               <button

@@ -12,6 +12,8 @@ import {
   speechBillableCharacters,
   speechLanguageBoostFor,
   speechStringsFor,
+  speechVoiceChipKey,
+  speechVoiceLanguageKey,
 } from './speechConfig';
 
 describe('speech registry', () => {
@@ -103,10 +105,27 @@ describe('speech strings', () => {
   // 语言 chip 只是按配音员母语筛选；缺了这行说明，用户会以为切语言=翻译文本
   // （2026-09-16：选了 Spanish_CaptivatingStoryteller 念中文文案，以为功能坏了）。
   it('ships a non-empty disambiguation hint for the voice language filter in all five languages', () => {
+    // 说明退居兜底后仍有长度上限：弹层只有 320px 宽，超了就从一行涨成两行。
+    const maxChars = { zh: 30, en: 64, ja: 30, 'zh-HK': 30, es: 64 } as const;
     for (const lang of ['zh', 'en', 'ja', 'zh-HK', 'es'] as const) {
       expect(SPEECH_STRINGS[lang].voice_lang_filter.trim().length).toBeGreaterThan(0);
       // 说明要真的解释清楚，一两个词糊弄不过去。
       expect(SPEECH_STRINGS[lang].voice_lang_hint.trim().length).toBeGreaterThan(20);
+      expect([...SPEECH_STRINGS[lang].voice_lang_hint.trim()].length).toBeLessThanOrEqual(maxChars[lang]);
+    }
+  });
+
+  // 芯片挂在「音色」标题正下方，写裸语言名会被读成「输出这门语言」——芯片文案必须自带
+  // 「音色」二字；列表每行右侧的短标签紧挨音色名，反过来必须保持裸语言名（2026-09-16）。
+  it('spells out "voice" in every filter chip and keeps the row labels bare', () => {
+    const voiceWord = { zh: '音色', en: 'voices', ja: '音声', 'zh-HK': '音色', es: 'voces' } as const;
+    for (const lang of ['zh', 'en', 'ja', 'zh-HK', 'es'] as const) {
+      const dict = SPEECH_STRINGS[lang];
+      const chips = [dict.voice_lang_chip_all, ...SPEECH_VOICE_LANGUAGES.map(l => dict[speechVoiceChipKey(l)])];
+      for (const chip of chips) expect(chip.toLowerCase()).toContain(voiceWord[lang]);
+      for (const l of SPEECH_VOICE_LANGUAGES) {
+        expect(dict[speechVoiceLanguageKey(l)].toLowerCase()).not.toContain(voiceWord[lang]);
+      }
     }
   });
 
