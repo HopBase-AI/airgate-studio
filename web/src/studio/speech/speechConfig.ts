@@ -85,8 +85,8 @@ export interface SpeechVoice {
   // 官方标签（英文），五语同形，不进字典。
   name: string;
   // language 是这位配音员的**母语 / 口音**，不是输出语言：TTS 只朗读给定文本，不做翻译。
-  // 换音色不会把中文文案变成西班牙语——界面用 voice_lang_hint 把这点讲明（2026-09-16
-  // 用户把筛选切到「西班牙语」却仍听到中文，以为功能坏了）。
+  // 换音色不会把中文文案变成西班牙语——筛选芯片自带「音色」二字先消歧，voice_lang_hint
+  // 再补一句兜底（2026-09-16 用户把筛选切到「西班牙语」却仍听到中文，以为功能坏了）。
   language: SpeechVoiceLanguage;
 }
 
@@ -183,13 +183,22 @@ export const SPEECH_STRINGS = {
     voice_custom_placeholder: '粘贴官方系统音色 ID',
     voice_custom_hint: '官方系统音色全部可用；大小写、空格、括号须与官方列表一致',
     voice_lang_filter: '按音色母语筛选',
-    voice_lang_all: '全部',
+    // voice_lang_chip_* 是筛选芯片：芯片挂在「音色」标题下，只写裸语言名会被读成
+    // 「输出这门语言」（2026-09-16 用户选了西班牙语音色配中文文案，以为会翻译），
+    // 所以每个芯片自带「音色」二字。voice_lang_* 仍是列表每行右侧的短标签——紧挨着
+    // 音色名，不会有歧义，保持裸语言名。
+    voice_lang_chip_all: '全部音色',
+    voice_lang_chip_en: '英语音色',
+    voice_lang_chip_zh: '普通话音色',
+    voice_lang_chip_ja: '日语音色',
+    voice_lang_chip_es: '西班牙语音色',
+    voice_lang_chip_yue: '粤语音色',
     voice_lang_en: '英语',
     voice_lang_zh: '普通话',
     voice_lang_ja: '日语',
     voice_lang_es: '西班牙语',
     voice_lang_yue: '粤语',
-    voice_lang_hint: '音色只决定口音，不做翻译——文本是什么语言就念什么语言。需要外语语音时，请把文本本身也改成那门语言。',
+    voice_lang_hint: '音色只决定口音，不翻译；要外语语音请把文本改成那门语言。',
     speed: '语速',
     format: '格式',
     generating: '语音合成中…',
@@ -216,13 +225,18 @@ export const SPEECH_STRINGS = {
     voice_custom_placeholder: 'Paste an official system voice ID',
     voice_custom_hint: 'Every official system voice works; case, spaces, and parentheses must match the official list',
     voice_lang_filter: "Filter by the voice's native language",
-    voice_lang_all: 'All',
+    voice_lang_chip_all: 'All voices',
+    voice_lang_chip_en: 'English voices',
+    voice_lang_chip_zh: 'Mandarin voices',
+    voice_lang_chip_ja: 'Japanese voices',
+    voice_lang_chip_es: 'Spanish voices',
+    voice_lang_chip_yue: 'Cantonese voices',
     voice_lang_en: 'English',
     voice_lang_zh: 'Mandarin',
     voice_lang_ja: 'Japanese',
     voice_lang_es: 'Spanish',
     voice_lang_yue: 'Cantonese',
-    voice_lang_hint: 'A voice only sets the accent — it never translates. Your text is read aloud in the language you wrote it in. To get speech in another language, write the text in that language.',
+    voice_lang_hint: 'Accent only, never translated — write text in that language.',
     speed: 'Speed',
     format: 'Format',
     generating: 'Synthesizing speech…',
@@ -249,13 +263,18 @@ export const SPEECH_STRINGS = {
     voice_custom_placeholder: '公式のシステム音声 ID を貼り付け',
     voice_custom_hint: '公式のシステム音声はすべて利用可能。大文字小文字・スペース・括弧は公式一覧と一致させてください',
     voice_lang_filter: '話者の母語で絞り込み',
-    voice_lang_all: 'すべて',
+    voice_lang_chip_all: 'すべての音声',
+    voice_lang_chip_en: '英語音声',
+    voice_lang_chip_zh: '普通話音声',
+    voice_lang_chip_ja: '日本語音声',
+    voice_lang_chip_es: 'スペイン語音声',
+    voice_lang_chip_yue: '広東語音声',
     voice_lang_en: '英語',
     voice_lang_zh: '中国語（普通話）',
     voice_lang_ja: '日本語',
     voice_lang_es: 'スペイン語',
     voice_lang_yue: '広東語',
-    voice_lang_hint: '音声は訛りを決めるだけで、翻訳はしません。テキストは書かれたままの言語で読み上げられます。外国語の音声がほしいときは、テキスト自体をその言語で入力してください。',
+    voice_lang_hint: '翻訳はしません。外国語の音声は、テキストもその言語で。',
     speed: '話速',
     format: '形式',
     generating: '音声を合成中…',
@@ -282,13 +301,18 @@ export const SPEECH_STRINGS = {
     voice_custom_placeholder: '貼上官方系統音色 ID',
     voice_custom_hint: '官方系統音色全部可用；大小寫、空格、括號須與官方列表一致',
     voice_lang_filter: '按音色母語篩選',
-    voice_lang_all: '全部',
+    voice_lang_chip_all: '全部音色',
+    voice_lang_chip_en: '英語音色',
+    voice_lang_chip_zh: '普通話音色',
+    voice_lang_chip_ja: '日語音色',
+    voice_lang_chip_es: '西班牙語音色',
+    voice_lang_chip_yue: '粵語音色',
     voice_lang_en: '英語',
     voice_lang_zh: '普通話',
     voice_lang_ja: '日語',
     voice_lang_es: '西班牙語',
     voice_lang_yue: '粵語',
-    voice_lang_hint: '音色只決定口音，不做翻譯——文字是甚麼語言就讀甚麼語言。需要外語語音時，請把文字本身也改成那門語言。',
+    voice_lang_hint: '音色只決定口音，不翻譯；要外語語音請把文字改成那門語言。',
     speed: '語速',
     format: '格式',
     generating: '語音合成中…',
@@ -315,13 +339,18 @@ export const SPEECH_STRINGS = {
     voice_custom_placeholder: 'Pega un ID de voz oficial del sistema',
     voice_custom_hint: 'Todas las voces oficiales del sistema funcionan; mayúsculas, espacios y paréntesis deben coincidir con la lista oficial',
     voice_lang_filter: 'Filtrar por idioma nativo de la voz',
-    voice_lang_all: 'Todas',
+    voice_lang_chip_all: 'Todas las voces',
+    voice_lang_chip_en: 'Voces en inglés',
+    voice_lang_chip_zh: 'Voces en mandarín',
+    voice_lang_chip_ja: 'Voces en japonés',
+    voice_lang_chip_es: 'Voces en español',
+    voice_lang_chip_yue: 'Voces en cantonés',
     voice_lang_en: 'Inglés',
     voice_lang_zh: 'Mandarín',
     voice_lang_ja: 'Japonés',
     voice_lang_es: 'Español',
     voice_lang_yue: 'Cantonés',
-    voice_lang_hint: 'La voz solo define el acento; no traduce. Tu texto se lee en el idioma en que lo escribiste. Para obtener audio en otro idioma, escribe el texto en ese idioma.',
+    voice_lang_hint: 'No traduce, solo cambia el acento: escribe en ese idioma.',
     speed: 'Velocidad',
     format: 'Formato',
     generating: 'Sintetizando voz…',
@@ -368,6 +397,18 @@ export function speechVoiceLanguageKey(language: SpeechVoiceLanguage): SpeechStr
     case 'ja': return 'voice_lang_ja';
     case 'es': return 'voice_lang_es';
     default: return 'voice_lang_yue';
+  }
+}
+
+// 筛选芯片的标签键：比 speechVoiceLanguageKey 多带「音色」语义，别把两者混用——
+// 列表行的短标签用前者，芯片用后者。
+export function speechVoiceChipKey(language: SpeechVoiceLanguage): SpeechStringKey {
+  switch (language) {
+    case 'en': return 'voice_lang_chip_en';
+    case 'zh': return 'voice_lang_chip_zh';
+    case 'ja': return 'voice_lang_chip_ja';
+    case 'es': return 'voice_lang_chip_es';
+    default: return 'voice_lang_chip_yue';
   }
 }
 
