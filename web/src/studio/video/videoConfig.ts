@@ -152,7 +152,7 @@ export const VIDEO_MODEL_REGISTRY: VideoModelConfig[] = [
     nameKey: 'model_sd25_ep',
     platform: 'seedance',
     region: 'overseas',
-    resolutions: ['480p', '720p'],
+    resolutions: ['480p', '720p', '1080p'],
     durationOptions: SEEDANCE25_DURATIONS,
     ratioOptions: SEEDANCE25_RATIOS,
   },
