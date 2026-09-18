@@ -114,15 +114,17 @@ func executorSupportsOperation(executorID, operation string) bool {
 }
 
 // videoModelResolutions Seedance 各版本允许的分辨率（与 gateway-seedance
-// registry 对齐）。国内标准版 / 国内 2.5 到 1080p、不支持 4K；
+// registry 对齐）。标准版国内 / 2.5 国内与海外都到 1080p、不支持 4K；
 // fast / mini（海外与国内）只有 480p/720p。
+//
+// 海外 2.5 的 1080p 是官方能力（BytePlus ModelArk 牌价页四档齐全），此前这里
+// 只给到 720p 是跟着插件当时「只有 DF 通道开 1080p」的限制走的；DF 账号 8-31
+// 停用后主力换成 MAX，而 MAX 的 /v1/models 明确自报 1080p 两个桶，所以这条
+// 限制对现在的号池不成立，工作坊白白少了一档。
 func videoModelResolutions(model string) map[string]struct{} {
 	m := strings.ToLower(canonicalSeedanceVideoModel(model))
-	if m == videoModelSeedanceStandardDomestic || m == videoModelSeedance25Domestic {
+	if m == videoModelSeedanceStandardDomestic || m == videoModelSeedance25Domestic || m == videoModelSeedance25 {
 		return map[string]struct{}{"480p": {}, "720p": {}, "1080p": {}}
-	}
-	if m == videoModelSeedance25 {
-		return map[string]struct{}{"480p": {}, "720p": {}}
 	}
 	if strings.Contains(m, "-fast-") || strings.Contains(m, "-mini-") {
 		return map[string]struct{}{"480p": {}, "720p": {}}

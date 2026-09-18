@@ -85,6 +85,8 @@ func TestValidateVideoModelParamsKeepsDomesticAndOverseasResolutionBoundaries(t 
 		{name: "overseas fast rejects 1080p", model: videoModelSeedanceFastOverseas, resolution: "1080p", wantErr: true},
 		{name: "overseas mini rejects 4k", model: videoModelSeedanceMiniOverseas, resolution: "4k", wantErr: true},
 		{name: "domestic 2.5 supports 1080p", model: videoModelSeedance25Domestic, resolution: "1080p"},
+		{name: "overseas 2.5 supports 1080p", model: videoModelSeedance25, resolution: "1080p"},
+		{name: "overseas 2.5 rejects 4k", model: videoModelSeedance25, resolution: "4k", wantErr: true},
 		{name: "domestic 2.5 rejects 4k", model: videoModelSeedance25Domestic, resolution: "4k", wantErr: true},
 		{name: "domestic fast supports 720p", model: videoModelSeedanceFastDomestic, resolution: "720p"},
 		{name: "domestic fast rejects 1080p", model: videoModelSeedanceFastDomestic, resolution: "1080p", wantErr: true},
@@ -106,7 +108,7 @@ func TestValidateVideoModelParamsEnforcesSD25Specs(t *testing.T) {
 		t.Fatal("legacy SD2.5 model must canonicalize to native ID")
 	}
 	for _, duration := range []int{4, 30, -1} {
-		for _, resolution := range []string{"480p", "720p"} {
+		for _, resolution := range []string{"480p", "720p", "1080p"} {
 			for _, ratio := range []string{"16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"} {
 				params := map[string]interface{}{"duration": duration, "resolution": resolution, "ratio": ratio}
 				if err := validateVideoModelParams(videoModelSeedance25, params); err != nil {
@@ -118,7 +120,6 @@ func TestValidateVideoModelParamsEnforcesSD25Specs(t *testing.T) {
 	for name, params := range map[string]map[string]interface{}{
 		"duration_below_min": {"duration": 3, "resolution": "480p", "ratio": "16:9"},
 		"duration_above_max": {"duration": 31, "resolution": "480p", "ratio": "16:9"},
-		"resolution_1080p":   {"duration": 4, "resolution": "1080p", "ratio": "16:9"},
 		"resolution_4k":      {"duration": 4, "resolution": "4k", "ratio": "16:9"},
 		"ratio":              {"duration": 4, "resolution": "480p", "ratio": "2:1"},
 	} {

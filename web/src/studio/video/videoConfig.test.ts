@@ -38,7 +38,7 @@ describe('videoConfig', () => {
 	    expect(VIDEO_MODEL_REGISTRY.map(model => model.id)).not.toContain(LEGACY_SEEDANCE25_MODEL_ID);
 	    const sd25 = videoModelById(VIDEO_MODEL_IDS.seedance25);
     expect(sd25.region).toBe('overseas');
-    expect(sd25.resolutions).toEqual(['480p', '720p']);
+    expect(sd25.resolutions).toEqual(['480p', '720p', '1080p']);
     expect(sd25.durationOptions).toEqual(SEEDANCE25_DURATIONS);
     expect(sd25.ratioOptions).toEqual(SEEDANCE25_RATIOS);
     const overseas = videoModelById(VIDEO_MODEL_IDS.standardOverseas);
